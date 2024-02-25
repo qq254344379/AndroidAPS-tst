@@ -2,6 +2,7 @@ package app.aaps.core.validators
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.text.InputType
 import android.util.AttributeSet
 import androidx.annotation.StringRes
 import androidx.preference.EditTextPreference
@@ -17,7 +18,9 @@ class AdaptiveStringPreference(
     attrs: AttributeSet? = null,
     stringKey: StringKey? = null,
     @StringRes dialogMessage: Int? = null,
+    @StringRes summary: Int? = null,
     @StringRes title: Int?,
+    validatorParams: DefaultEditTextValidator.Parameters? = null,
 ) : EditTextPreference(ctx, attrs) {
 
     private val validatorParameters: DefaultEditTextValidator.Parameters
@@ -36,6 +39,7 @@ class AdaptiveStringPreference(
 
         stringKey?.let { key = context.getString(it.key) }
         dialogMessage?.let { setDialogMessage(it) }
+        summary?.let { setSummary(it) }
         title?.let { dialogTitle = context.getString(it) }
         title?.let { this.title = context.getString(it) }
 
@@ -52,21 +56,25 @@ class AdaptiveStringPreference(
         if (preferences.pumpControlMode && !preferenceKey.showInPumpControlMode) {
             isVisible = false; isEnabled = false
         }
-        if (preferenceKey.dependency != 0) {
-            if (!sharedPrefs.getBoolean(context.getString(preferenceKey.dependency), false))
+        preferenceKey.dependency?.let {
+            if (!sharedPrefs.getBoolean(context.getString(it.key), false))
                 isVisible = false
         }
-        if (preferenceKey.negativeDependency != 0) {
-            if (sharedPrefs.getBoolean(context.getString(preferenceKey.dependency), false))
+        preferenceKey.negativeDependency?.let {
+            if (sharedPrefs.getBoolean(context.getString(it.key), false))
                 isVisible = false
         }
-        validatorParameters = obtainValidatorParameters(attrs)
+        validatorParameters = validatorParams ?: obtainValidatorParameters(attrs)
         setOnBindEditTextListener { editText ->
             validator = DefaultEditTextValidator(editText, validatorParameters, context)
             editText.setSelectAllOnFocus(true)
             editText.setSingleLine()
+            when (validatorParameters.testType) {
+                EditTextValidator.TEST_EMAIL -> editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            }
         }
         setOnPreferenceChangeListener { _, _ -> validator?.testValidity(false) ?: true }
+        setDefaultValue(preferenceKey.defaultValue)
     }
 
     override fun onAttached() {
@@ -96,9 +104,5 @@ class AdaptiveStringPreference(
         ).also {
             typedArray.recycle()
         }
-    }
-
-    override fun onSetInitialValue(defaultValue: Any?) {
-        text = getPersistedString(defaultValue as String?)
     }
 }
