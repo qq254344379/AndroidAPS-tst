@@ -1,5 +1,5 @@
 plugins {
-    id("com.android.library")
+    alias(libs.plugins.android.library)
     id("kotlin-android")
     id("kotlin-kapt")
     id("android-module-dependencies")
@@ -31,15 +31,17 @@ dependencies {
     implementation(project(":core:validators"))
     implementation(project(":core:keys"))
 
-    api(Libs.AndroidX.fragment)
-    api(Libs.AndroidX.navigationFragment)
+    testImplementation(project(":shared:tests"))
 
-    api(Libs.AndroidX.Room.room)
-    api(Libs.AndroidX.Room.runtime)
-    api(Libs.AndroidX.Room.rxJava3)
-    kapt(Libs.AndroidX.Room.compiler)
-    kapt(Libs.Dagger.compiler)
-    kapt(Libs.Dagger.androidProcessor)
+    api(libs.androidx.fragment)
+    api(libs.androidx.navigation.fragment)
+
+    api(libs.androidx.room)
+    api(libs.androidx.room.runtime)
+    api(libs.androidx.room.rxjava3)
+    kapt(libs.androidx.room.compiler)
+    kapt(libs.com.google.dagger.compiler)
+    kapt(libs.com.google.dagger.android.processor)
 
     implementation("com.github.bumptech.glide:glide:4.16.0")
 }

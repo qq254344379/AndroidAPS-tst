@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--Autotune-->
     <string name="dynisf_adjust_sensitivity">Bazal ve glikoz hedefi değişikliği için TGD bazlı duyarlılık oranını etkinleştirin</string>
     <string name="dynisf_adjust_sensitivity_summary">Bazal oranı artırmak veya azaltmak için kullanılan duyarlılık oranını hesaplamak için son 24 saatlik TGD/7Gün TGD\'yi kullanır ve aynı zamanda bu seçenek etkinse Otoduyarlılığın yaptığı gibi glikoz hedefini ayarlar. Bu seçenek kapalıyken başlamanız önerilir</string>
     <string name="dyn_isf_adjust_title" formatted="false">DinamikİDF Ayarlama Faktörü %</string>
@@ -26,6 +27,7 @@
     <string name="description_ama">2017\'da algoritmanın durumu</string>
     <string name="description_smb">İleri düzey kullanıcılar için en yeni algoritma</string>
     <string name="description_smb_dynamic_isf">Dinamik/otomatik İDF ile ileri düzey kullanıcılar için en yeni algoritma</string>
+    <string name="description_auto_isf">İleri düzey kullanıcılar için OtoİDF eklentili en son algoritma</string>
     <string name="openapsama_bolus_snooze_dia_divisor">Bolus erteleme ies bölen</string>
     <string name="openapsma_run">Şimdi Çalıştır</string>
     <string name="openapsma_last_run_label">Son Çalıştırma</string>
@@ -163,4 +165,5 @@ Aktif Karbonhidratın ne kadar hızlı sindirildiğine ve KŞ\'nin beklenenden d
     <string name="autotune_profile_invalid">Profil geçersiz</string>
     <string name="not_available_full">Mevcut değil</string>
     <string name="pump_disconnected">Pompa bağlantısı kesildi</string>
+    <!--    autoISF -->
 </resources>

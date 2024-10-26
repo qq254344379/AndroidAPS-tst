@@ -28,7 +28,6 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
 import androidx.core.view.MenuCompat
 import androidx.core.view.MenuProvider
-import androidx.viewpager2.widget.ViewPager2
 import app.aaps.activities.HistoryBrowseActivity
 import app.aaps.activities.PreferencesActivity
 import app.aaps.core.data.ue.Action
@@ -133,7 +132,7 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
         }
 
         // initialize screen wake lock
-        processPreferenceChange(EventPreferenceChange(BooleanKey.OverviewKeepScreenOn.key, rh))
+        processPreferenceChange(EventPreferenceChange(BooleanKey.OverviewKeepScreenOn.key))
 
         disposable += rxBus
             .toObservable(EventRebuildTabs::class.java)
@@ -299,8 +298,8 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
             androidPermission.notifyForBtConnectPermission(this)
         }
         passwordResetCheck(this)
-        if (sp.getString(app.aaps.core.utils.R.string.key_master_password, "") == "")
-            rxBus.send(EventNewNotification(Notification(Notification.MASTER_PASSWORD_NOT_SET, rh.gs(R.string.master_password_not_set), Notification.NORMAL)))
+        if (preferences.get(StringKey.ProtectionMasterPassword) == "")
+            rxBus.send(EventNewNotification(Notification(Notification.MASTER_PASSWORD_NOT_SET, rh.gs(app.aaps.core.ui.R.string.master_password_not_set), Notification.NORMAL)))
     }
 
     private fun startWizard(): Boolean =
@@ -334,8 +333,8 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
     }
 
     private fun processPreferenceChange(ev: EventPreferenceChange) {
-        if (ev.isChanged(BooleanKey.OverviewKeepScreenOn.key, rh)) setWakeLock()
-        if (ev.isChanged(rh.gs(StringKey.GeneralSkin.key))) recreate()
+        if (ev.isChanged(BooleanKey.OverviewKeepScreenOn.key)) setWakeLock()
+        if (ev.isChanged(StringKey.GeneralSkin.key)) recreate()
     }
 
     private fun setupViews() {
@@ -405,8 +404,8 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
                 v.getGlobalVisibleRect(outRect)
                 if (!outRect.contains(event.rawX.toInt(), event.rawY.toInt())) {
                     v.clearFocus()
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    imm.hideSoftInputFromWindow(v.getWindowToken(), 0)
+                    val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+                    imm.hideSoftInputFromWindow(v.windowToken, 0)
                 }
             }
         }
@@ -485,7 +484,7 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
         val passwordReset = File(fileListProvider.ensureExtraDirExists(), "PasswordReset")
         if (passwordReset.exists()) {
             val sn = activePlugin.activePump.serialNumber()
-            sp.putString(app.aaps.core.utils.R.string.key_master_password, cryptoUtil.hashPassword(sn))
+            preferences.put(StringKey.ProtectionMasterPassword, cryptoUtil.hashPassword(sn))
             passwordReset.delete()
             ToastUtils.okToast(context, context.getString(app.aaps.core.ui.R.string.password_set))
         }

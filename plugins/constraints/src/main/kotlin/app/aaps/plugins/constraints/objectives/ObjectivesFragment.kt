@@ -39,6 +39,7 @@ import app.aaps.plugins.constraints.objectives.activities.ObjectivesExamDialog
 import app.aaps.plugins.constraints.objectives.dialogs.NtpProgressDialog
 import app.aaps.plugins.constraints.objectives.events.EventObjectivesUpdateGui
 import app.aaps.plugins.constraints.objectives.objectives.Objective.ExamTask
+import app.aaps.plugins.constraints.objectives.objectives.Objective.UITask
 import dagger.android.support.DaggerFragment
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
@@ -244,6 +245,9 @@ class ObjectivesFragment : DaggerFragment() {
                             dialog.show(childFragmentManager, "ObjectivesFragment")
                         }
                     }
+                    if (task is UITask) {
+                        state.setOnClickListener { task.code.invoke(this@ObjectivesFragment.requireContext(), task) { updateGUI() } }
+                    }
                     if (task.isCompleted()) {
                         if (task.learned.isNotEmpty())
                             holder.binding.progress.addView(
@@ -297,7 +301,7 @@ class ObjectivesFragment : DaggerFragment() {
                                     rxBus.send(EventNtpStatus(rh.gs(R.string.failedretrievetime), 99))
                                 }
                             }
-                        }, receiverStatusStore.isConnected)
+                        }, receiverStatusStore.isKnownNetworkStatus && receiverStatusStore.isConnected)
                     }
                 }
             }
@@ -332,7 +336,7 @@ class ObjectivesFragment : DaggerFragment() {
                                     rxBus.send(EventNtpStatus(rh.gs(R.string.failedretrievetime), 99))
                                 }
                             }
-                        }, receiverStatusStore.isConnected)
+                        }, receiverStatusStore.isKnownNetworkStatus && receiverStatusStore.isConnected)
                     }
             }
             holder.binding.unstart.setOnClickListener {
