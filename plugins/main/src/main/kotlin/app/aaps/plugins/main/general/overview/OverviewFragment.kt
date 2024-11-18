@@ -70,6 +70,7 @@ import app.aaps.core.interfaces.rx.events.EventUpdateOverviewCalcProgress
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewGraph
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewIobCob
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewSensitivity
+import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.core.interfaces.source.DexcomBoyda
@@ -164,6 +165,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
     private val secondaryGraphsLabel = ArrayList<TextView>()
 
     private var carbAnimation: AnimationDrawable? = null
+    private var lastUserAction = ""
 
     private var _binding: OverviewFragmentBinding? = null
 
@@ -196,12 +198,12 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         binding.notifications.setHasFixedSize(false)
         binding.notifications.layoutManager = LinearLayoutManager(view.context)
         axisWidth = when {
-            resources.displayMetrics.density <= 120 -> 3
-            resources.displayMetrics.density <= 160 -> 10
-            resources.displayMetrics.density <= 320 -> 35
-            resources.displayMetrics.density <= 420 -> 50
-            resources.displayMetrics.density <= 560 -> 70
-            else                                    -> 80
+            resources.displayMetrics.densityDpi <= 120 -> 3
+            resources.displayMetrics.densityDpi <= 160 -> 10
+            resources.displayMetrics.densityDpi <= 320 -> 35
+            resources.displayMetrics.densityDpi <= 420 -> 50
+            resources.displayMetrics.densityDpi <= 560 -> 70
+            else                                       -> 80
         }
         binding.graphsLayout.bgGraph.gridLabelRenderer?.gridColor = rh.gac(context, app.aaps.core.ui.R.attr.graphGrid)
         binding.graphsLayout.bgGraph.gridLabelRenderer?.reloadStyles()
@@ -526,6 +528,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         val profile = profileFunction.getProfile()
         val profileName = profileFunction.getProfileName()
         val actualBG = iobCobCalculator.ads.actualBg()
+        var list = ""
 
         // QuickWizard button
         val quickWizardEntry = quickWizard.getActive()
@@ -600,7 +603,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             val events = automation.userEvents()
             if (!loop.isDisconnected && pump.isInitialized() && !pump.isSuspended() && profile != null)
                 for (event in events)
-                    if (event.isEnabled && event.canRun())
+                    if (event.isEnabled && event.canRun()) {
                         context?.let { context ->
                             SingleClickButton(context, null, app.aaps.core.ui.R.attr.customBtnStyle).also {
                                 it.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.treatmentButton))
@@ -620,7 +623,14 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                                 }
                             }
                         }
+                        list += event.hashCode()
+                    }
             binding.buttonsLayout.userButtonsLayout.visibility = events.isNotEmpty().toVisibility()
+        }
+        if (list != lastUserAction) {
+            // Synchronize Watch Tiles with overview
+            lastUserAction = list
+            rxBus.send(EventWearUpdateTiles())
         }
     }
 
@@ -728,7 +738,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             secondaryGraphs.clear()
             secondaryGraphsLabel.clear()
             binding.graphsLayout.iobGraph.removeAllViews()
-            for (i in 1 until numOfGraphs) {
+            (1 until numOfGraphs).forEach {
                 val relativeLayout = RelativeLayout(context)
                 relativeLayout.layoutParams = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 

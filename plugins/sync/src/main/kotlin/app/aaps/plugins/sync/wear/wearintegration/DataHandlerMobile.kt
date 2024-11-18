@@ -2,6 +2,8 @@ package app.aaps.plugins.sync.wear.wearintegration
 
 import android.app.NotificationManager
 import android.content.Context
+import android.os.Handler
+import android.os.HandlerThread
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.iob.InMemoryGlucoseValue
 import app.aaps.core.data.model.BCR
@@ -24,6 +26,7 @@ import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.aps.AutosensDataStore
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.automation.AutomationEvent
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -128,6 +131,7 @@ class DataHandlerMobile @Inject constructor(
 
     @Inject lateinit var automation: Automation
     private val disposable = CompositeDisposable()
+    private var handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
 
     private var lastBolusWizard: BolusWizard? = null
     private var lastQuickWizardEntry: QuickWizardEntry? = null
@@ -345,6 +349,20 @@ class DataHandlerMobile @Inject constructor(
                            lastQuickWizardEntry = null
                        }, fabricPrivacy::logException)
         disposable += rxBus
+            .toObservable(EventData.ActionUserActionPreCheck::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({
+                           aapsLogger.debug(LTag.WEAR, "ActionUserActionPreCheck received $it from ${it.sourceNodeId}")
+                           handleUserActionPreCheck(it)
+                       }, fabricPrivacy::logException)
+        disposable += rxBus
+            .toObservable(EventData.ActionUserActionConfirmed::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({
+                           aapsLogger.debug(LTag.WEAR, "ActionUserActionConfirmed received $it from ${it.sourceNodeId}")
+                           handleUserActionConfirmed(it)
+                       }, fabricPrivacy::logException)
+        disposable += rxBus
             .toObservable(EventData.SnoozeAlert::class.java)
             .observeOn(aapsSchedulers.io)
             .subscribe({
@@ -496,6 +514,45 @@ class DataHandlerMobile @Inject constructor(
         )
     }
 
+    private fun handleUserActionPreCheck(command: EventData.ActionUserActionPreCheck) {
+        val pump = activePlugin.activePump
+        val profile = profileFunction.getProfile()
+        if (!loop.isDisconnected && pump.isInitialized() && !pump.isSuspended() && profile != null) {
+            val events = automation.userEvents()
+            events.find { it.hashCode() == command.id }?.let { event ->
+                if (event.isEnabled && event.canRun()) {
+                    rxBus.send(
+                        EventMobileToWear(
+                            EventData.ConfirmAction(
+                                rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
+                                returnCommand = EventData.ActionUserActionConfirmed(command.id, command.title)
+                            )
+                        )
+                    )
+                } else {
+                    sendError(rh.gs(R.string.user_action_not_available, command.title))
+                }
+            } ?: apply {
+                sendError(rh.gs(R.string.user_action_not_available, command.title))
+            }
+        } else {
+            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
+        }
+    }
+
+    private fun handleUserActionConfirmed(command: EventData.ActionUserActionConfirmed) {
+        val pump = activePlugin.activePump
+        val profile = profileFunction.getProfile()
+        if (!loop.isDisconnected && pump.isInitialized() && !pump.isSuspended() && profile != null) {
+            val events = automation.userEvents()
+            events.find { it.hashCode() == command.id }?.let { event ->
+                if (event.isEnabled && event.canRun()) {
+                    handler.post { automation.processEvent(event) }
+                }
+            }
+        }
+    }
+
     private fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
         val actualBg = iobCobCalculator.ads.actualBg()
         val profile = profileFunction.getProfile()
@@ -542,9 +599,9 @@ class DataHandlerMobile @Inject constructor(
         if (quickWizardEntry.useEcarbs() == QuickWizardEntry.YES) {
             val carbs2 = quickWizardEntry.carbs2()
             val offset = quickWizardEntry.time()
-            val durration = quickWizardEntry.duration()
+            val duration = quickWizardEntry.duration()
 
-            eCarbsMessagePart += "\n+" + carbs2.toString() + rh.gs(R.string.grams_short) + "/" + durration.toString() + rh.gs(R.string.hour_short) + "(+" + offset.toString() +
+            eCarbsMessagePart += "\n+" + carbs2.toString() + rh.gs(R.string.grams_short) + "/" + duration.toString() + rh.gs(R.string.hour_short) + "(+" + offset.toString() +
                 rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
         }
 
@@ -836,6 +893,8 @@ class DataHandlerMobile @Inject constructor(
                 )
             )
         )
+        //UserAction
+        sendUserActions()
         // GraphData
         iobCobCalculator.ads.getBucketedDataTableCopy()?.let { bucketedData ->
             rxBus.send(EventMobileToWear(EventData.GraphData(ArrayList(bucketedData.map { getSingleBG(it, null) }))))
@@ -845,6 +904,25 @@ class DataHandlerMobile @Inject constructor(
         // Status
         // Keep status last. Wear start refreshing after status received
         sendStatus(from)
+    }
+
+    private fun AutomationEvent.toWear(now: Long): EventData.UserAction.UserActionEntry =
+        EventData.UserAction.UserActionEntry(
+            timeStamp = now,
+            id = hashCode(),
+            title = title
+        )
+
+    fun sendUserActions() {
+        val now = System.currentTimeMillis()
+        val events = automation.userEvents()
+        rxBus.send(
+            EventMobileToWear(
+                EventData.UserAction(
+                    ArrayList(events.filter { it.isEnabled && it.canRun() }.map { it.toWear(now) })
+                )
+            )
+        )
     }
 
     private fun sendTreatments() {
@@ -960,6 +1038,7 @@ class DataHandlerMobile @Inject constructor(
                 for (bg in predArray) if (bg.value > 39)
                     predictions.add(
                         EventData.SingleBg(
+                            dataset = 0,
                             timeStamp = bg.timestamp,
                             glucoseUnits = GlucoseUnit.MGDL.asText,
                             sgv = bg.value,
@@ -1017,6 +1096,7 @@ class DataHandlerMobile @Inject constructor(
         rxBus.send(
             EventMobileToWear(
                 EventData.Status(
+                    dataset = 0,
                     externalStatus = status,
                     iobSum = iobSum,
                     iobDetail = iobDetail,
@@ -1029,59 +1109,6 @@ class DataHandlerMobile @Inject constructor(
                     batteryLevel = if (phoneBattery >= 30) 1 else 0,
                     patientName = patientName
                 )
-            )
-        )
-    }
-
-    //Both function below can be simplified according to the way external data is built and rules concerning Id between AAPS, AAPSClient, AAPSClient2
-    private fun sendStatusExternal(status: EventData.Status, extId: Int = 1) {
-        rxBus.send(
-            EventMobileToWear(
-                if (status.id != 0)
-                    status
-                else
-                    EventData.Status(
-                        externalStatus = status.externalStatus,
-                        iobSum = status.iobSum,
-                        iobDetail = status.iobDetail,
-                        cob = status.cob,
-                        currentBasal = status.currentBasal,
-                        battery = status.battery,
-                        rigBattery = status.rigBattery,
-                        openApsStatus = status.openApsStatus,
-                        bgi = status.bgi,
-                        batteryLevel = status.batteryLevel,
-                        patientName = status.patientName,
-                        id = extId
-                    )
-            )
-        )
-    }
-
-    private fun sendSingleBGExternal(singleBG: EventData.SingleBg, extId: Int = 1) {
-        rxBus.send(
-            EventMobileToWear(
-                if (singleBG.id != 0)
-                    singleBG
-                else
-                    EventData.SingleBg(
-                        timeStamp = singleBG.timeStamp,
-                        sgvString = singleBG.sgvString,
-                        glucoseUnits = singleBG.glucoseUnits,
-                        slopeArrow = singleBG.slopeArrow,
-                        delta = singleBG.delta,
-                        deltaDetailed = singleBG.deltaDetailed,
-                        avgDelta = singleBG.avgDelta,
-                        avgDeltaDetailed = singleBG.avgDeltaDetailed,
-                        sgvLevel = singleBG.sgvLevel,
-                        sgv = singleBG.sgv,
-                        high = singleBG.high, // highLine
-                        low = singleBG.low, // lowLine
-                        color = singleBG.color,
-                        deltaMgdl = singleBG.deltaMgdl,
-                        avgDeltaMgdl = singleBG.avgDeltaMgdl,
-                        id = extId
-                    )
             )
         )
     }
@@ -1113,6 +1140,7 @@ class DataHandlerMobile @Inject constructor(
         val highLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewHighMark), units)
 
         return EventData.SingleBg(
+            dataset = 0,
             timeStamp = glucoseValue.timestamp,
             sgvString = profileUtil.stringInCurrentUnitsDetect(glucoseValue.recalculated),
             glucoseUnits = units.asText,
@@ -1324,10 +1352,10 @@ class DataHandlerMobile @Inject constructor(
         if (detailedBolusInfo.insulin > 0 || detailedBolusInfo.carbs > 0) {
 
             val action = when {
-                amount == 0.0 -> Action.CARBS
-                carbs == 0 -> Action.BOLUS
+                amount == 0.0     -> Action.CARBS
+                carbs == 0        -> Action.BOLUS
                 carbsDuration > 0 -> Action.EXTENDED_CARBS
-                else -> Action.TREATMENT
+                else              -> Action.TREATMENT
             }
             uel.log(
                 action = action, source = Sources.Wear,
