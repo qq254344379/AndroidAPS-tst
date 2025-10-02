@@ -1,6 +1,7 @@
 package app.aaps.implementation.di
 
 import app.aaps.core.interfaces.alerts.LocalAlertUtils
+import app.aaps.core.interfaces.aps.AutosensData
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.logging.LoggerUtils
@@ -9,6 +10,7 @@ import app.aaps.core.interfaces.notifications.NotificationHolder
 import app.aaps.core.interfaces.overview.LastBgData
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileStore
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.profiling.Profiler
 import app.aaps.core.interfaces.protection.ExportPasswordDataStore
@@ -130,5 +132,7 @@ class ImplementationModule {
         @Binds fun bindsUserEntryPresentationHelper(userEntryPresentationHelperImpl: UserEntryPresentationHelperImpl): UserEntryPresentationHelper
         @Binds fun bindsGlucoseStatusProvider(glucoseStatusProviderImpl: GlucoseStatusProviderImpl): GlucoseStatusProvider
         @Binds fun bindsDecimalFormatter(decimalFormatterImpl: DecimalFormatterImpl): DecimalFormatter
+        @Binds fun bindsProfileStore(profileStoreObject: ProfileStoreObject): ProfileStore
+        @Binds fun bindsAutosensData(autosensDataObject: AutosensDataObject): AutosensData
     }
 }
