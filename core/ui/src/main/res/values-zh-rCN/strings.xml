@@ -204,8 +204,8 @@
     <string name="glucosetype_sensor">传感器</string>
     <string name="manual">手动</string>
     <string name="unknown">未知的</string>
-    <string name="eatingsoon">很快吃饭</string>
-    <string name="hypo">低</string>
+    <string name="eatingsoon">即将进食</string>
+    <string name="hypo">低血糖</string>
     <string name="activity">活动</string>
     <string name="wear">手表</string>
     <string name="automation">自动操作</string>
@@ -499,3 +499,4 @@
     <!--    DecimalFormatterImpl -->
     <!--    Playback-->
 </resources>
+
