@@ -19,6 +19,7 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.core.objects.extensions.toJsonObject
@@ -40,7 +41,7 @@ import javax.inject.Singleton
 
 @Singleton
 class InsulinImpl @Inject constructor(
-    val preferences: Preferences,
+    override val preferences: Preferences,
     val rh: ResourceHelper,
     val profileFunction: ProfileFunction,
     val persistenceLayer: PersistenceLayer,
@@ -168,6 +169,10 @@ class InsulinImpl @Inject constructor(
         }
         return -1
     }
+
+    override val syncedKeys: List<NonPreferenceKey> = listOf(StringNonKey.InsulinConfiguration)
+
+    override fun reloadInternalState() = loadSettings()
 
     @Synchronized
     override fun loadSettings() {

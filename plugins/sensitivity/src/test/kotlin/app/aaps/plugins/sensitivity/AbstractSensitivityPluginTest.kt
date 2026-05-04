@@ -6,6 +6,7 @@ import app.aaps.core.interfaces.aps.Sensitivity
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.shared.tests.TestBase
 import com.google.common.truth.Truth.assertThat
@@ -32,6 +33,10 @@ class AbstractSensitivityPluginTest : TestBase() {
         override fun maxAbsorptionHours(): Double = 8.0
         override val isMinCarbsAbsorptionDynamic: Boolean = true
         override val isOref1: Boolean = true
+
+        override val syncedKeys: List<NonPreferenceKey> = emptyList()
+
+        override fun reloadInternalState() {}
 
         override fun configuration(): JsonObject = JsonObject(emptyMap())
 

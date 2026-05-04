@@ -47,6 +47,7 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.UnitDoubleKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.convertedToAbsolute
@@ -574,6 +575,13 @@ open class OpenAPSSMBPlugin @Inject constructor(
         }
         return value
     }
+
+    override val syncedKeys: List<NonPreferenceKey> = listOf(
+        BooleanKey.ApsUseDynamicSensitivity,
+        IntKey.ApsDynIsfAdjustmentFactor,
+    )
+
+    override fun reloadInternalState() {}
 
     override fun configuration(): JsonObject =
         JsonObject(emptyMap())

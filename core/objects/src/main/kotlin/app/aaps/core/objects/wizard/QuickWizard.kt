@@ -1,7 +1,12 @@
 package app.aaps.core.objects.wizard
 
+import app.aaps.core.interfaces.configuration.ConfigExportImport
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.objects.extensions.put
+import app.aaps.core.objects.extensions.store
+import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -11,11 +16,24 @@ import javax.inject.Singleton
 
 @Singleton
 class QuickWizard @Inject constructor(
-    private val preferences: Preferences,
+    override val preferences: Preferences,
     private val quickWizardEntryProvider: Provider<QuickWizardEntry>
-) {
+) : ConfigExportImport {
 
     private var storage = JSONArray()
+
+    override val syncedKeys: List<NonPreferenceKey> = listOf(StringNonKey.QuickWizard)
+
+    override fun reloadInternalState() {
+        setData(JSONArray(preferences.get(StringNonKey.QuickWizard)))
+    }
+
+    override fun configuration(): JsonObject =
+        JsonObject(emptyMap()).put(StringNonKey.QuickWizard, preferences)
+
+    override fun applyConfiguration(configuration: JsonObject) {
+        configuration.store(StringNonKey.QuickWizard, preferences)
+    }
 
     init {
         setData(JSONArray(preferences.get(StringNonKey.QuickWizard)))

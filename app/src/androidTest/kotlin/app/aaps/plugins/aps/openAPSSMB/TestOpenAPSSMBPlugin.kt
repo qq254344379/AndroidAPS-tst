@@ -34,6 +34,7 @@ import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.target
@@ -62,7 +63,7 @@ open class TestOpenAPSSMBPlugin @Inject constructor(
     private val processedTbrEbData: ProcessedTbrEbData,
     private val hardLimits: HardLimits,
     private val profiler: Profiler,
-    private val preferences: Preferences,
+    override val preferences: Preferences,
     protected val dateUtil: DateUtil,
     private val persistenceLayer: PersistenceLayer,
     private val glucoseStatusProvider: GlucoseStatusProvider,
@@ -92,6 +93,11 @@ open class TestOpenAPSSMBPlugin @Inject constructor(
     // last values
     override var lastAPSRun: Long = 0
     override val algorithm = APSResult.Algorithm.SMB
+
+    override val syncedKeys: List<NonPreferenceKey> = emptyList()
+
+    override fun reloadInternalState() {}
+
     override fun configuration(): JsonObject = JsonObject(emptyMap())
     override fun applyConfiguration(configuration: JsonObject) {
     }

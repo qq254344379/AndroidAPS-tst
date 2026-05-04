@@ -28,6 +28,7 @@ import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.StringKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.withEntries
 import app.aaps.core.objects.constraints.ConstraintObject
@@ -43,7 +44,7 @@ import javax.inject.Singleton
 class SafetyPlugin @Inject constructor(
     aapsLogger: AAPSLogger,
     rh: ResourceHelper,
-    private val preferences: Preferences,
+    override val preferences: Preferences,
     private val constraintChecker: ConstraintsChecker,
     private val activePlugin: ActivePlugin,
     private val hardLimits: HardLimits,
@@ -163,6 +164,14 @@ class SafetyPlugin @Inject constructor(
         carbs.setIfSmaller(maxCarbs, rh.gs(R.string.limitingcarbs, maxCarbs, rh.gs(R.string.maxvalueinpreferences)), this)
         return carbs
     }
+
+    override val syncedKeys: List<NonPreferenceKey> = listOf(
+        StringKey.SafetyAge,
+        DoubleKey.SafetyMaxBolus,
+        IntKey.SafetyMaxCarbs,
+    )
+
+    override fun reloadInternalState() {}
 
     override fun configuration(): JsonObject =
         JsonObject(emptyMap())
