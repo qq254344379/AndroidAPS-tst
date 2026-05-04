@@ -482,6 +482,133 @@ class NSAndroidClientImpl(
             throw UnsuccessfulNightscoutException("Unsuccessful")
     }
 
+    override suspend fun getSettings(identifier: String): NSAndroidClient.ReadResponse<JSONObject?> = callWrapper(dispatcher) {
+
+        val response = api.getSetting(identifier)
+        if (response.isSuccessful) {
+            val eTagString = response.headers()["ETag"]
+            val eTag = eTagString?.substring(3, eTagString.length - 1)?.toLong()
+            return@callWrapper NSAndroidClient.ReadResponse(
+                code = response.raw().networkResponse?.code ?: response.code(),
+                lastServerModified = eTag,
+                values = response.body()?.result
+            )
+        } else if (response.code() == 404) {
+            return@callWrapper NSAndroidClient.ReadResponse(code = 404, lastServerModified = null, values = null)
+        } else if (response.code() in 400..499)
+            throw InvalidParameterNightscoutException(response.errorBody()?.string() ?: response.message())
+        else
+            throw UnsuccessfulNightscoutException("Unsuccessful")
+    }
+
+    override suspend fun getSettingsModifiedSince(from: Long, limit: Int): NSAndroidClient.ReadResponse<List<JSONObject>> = callWrapper(dispatcher) {
+
+        val response = api.getSettingsModifiedSince(from, limit)
+        if (response.isSuccessful) {
+            val eTagString = response.headers()["ETag"]
+            val eTag = eTagString?.substring(3, eTagString.length - 1)?.toLong()
+            return@callWrapper NSAndroidClient.ReadResponse(
+                code = response.raw().networkResponse?.code ?: response.code(),
+                lastServerModified = eTag,
+                values = response.body()?.result.toNotNull()
+            )
+        } else if (response.code() in 400..499)
+            throw InvalidParameterNightscoutException(response.errorBody()?.string() ?: response.message())
+        else
+            throw UnsuccessfulNightscoutException("Unsuccessful")
+    }
+
+    override suspend fun searchSettings(limit: Int): NSAndroidClient.ReadResponse<List<JSONObject>> = callWrapper(dispatcher) {
+
+        val response = api.searchSettings(limit)
+        if (response.isSuccessful) {
+            val eTagString = response.headers()["ETag"]
+            val eTag = eTagString?.substring(3, eTagString.length - 1)?.toLong()
+            return@callWrapper NSAndroidClient.ReadResponse(
+                code = response.raw().networkResponse?.code ?: response.code(),
+                lastServerModified = eTag,
+                values = response.body()?.result.toNotNull()
+            )
+        } else if (response.code() in 400..499)
+            throw InvalidParameterNightscoutException(response.errorBody()?.string() ?: response.message())
+        else
+            throw UnsuccessfulNightscoutException("Unsuccessful")
+    }
+
+    override suspend fun createSettings(settings: JSONObject): CreateUpdateResponse = callWrapper(dispatcher) {
+
+        settings.put("app", "AAPS")
+        val response = api.createSetting(JsonParser.parseString(settings.toString()).asJsonObject)
+        if (response.isSuccessful) {
+            if (response.code() == 200 || response.code() == 201) {
+                return@callWrapper CreateUpdateResponse(
+                    response = response.code(),
+                    identifier = response.body()?.identifier,
+                    isDeduplication = response.body()?.isDeduplication,
+                    deduplicatedIdentifier = response.body()?.deduplicatedIdentifier,
+                    lastModified = response.body()?.lastModified
+                )
+            } else throw UnsuccessfulNightscoutException("Unsuccessful")
+        } else if (response.code() in 400..499) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = null,
+                errorResponse = response.errorBody()?.string() ?: response.message()
+            )
+        } else
+            throw UnsuccessfulNightscoutException(response.errorBody()?.string() ?: response.message())
+    }
+
+    override suspend fun patchSettings(identifier: String, settings: JSONObject): CreateUpdateResponse = callWrapper(dispatcher) {
+
+        val response = api.patchSetting(JsonParser.parseString(settings.toString()).asJsonObject, identifier)
+        if (response.code() == 404) {
+            return@callWrapper CreateUpdateResponse(
+                response = 404,
+                identifier = null,
+                isDeduplication = false,
+                deduplicatedIdentifier = null,
+                lastModified = null
+            )
+        } else if (response.isSuccessful) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = response.body()?.identifier,
+                isDeduplication = response.body()?.isDeduplication == true,
+                deduplicatedIdentifier = response.body()?.deduplicatedIdentifier,
+                lastModified = response.body()?.lastModified
+            )
+        } else if (response.code() in 400..499) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = null,
+                errorResponse = response.errorBody()?.string() ?: response.message()
+            )
+        } else
+            throw UnsuccessfulNightscoutException(response.errorBody()?.string() ?: response.message())
+    }
+
+    override suspend fun deleteSettings(identifier: String): CreateUpdateResponse = callWrapper(dispatcher) {
+
+        val response = api.deleteSetting(identifier)
+        if (response.isSuccessful || response.code() == 404) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = null,
+                isDeduplication = false,
+                deduplicatedIdentifier = null,
+                lastModified = null
+            )
+        } else if (response.code() in 400..499) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = null,
+                errorResponse = response.errorBody()?.string() ?: response.message()
+            )
+        } else
+            throw UnsuccessfulNightscoutException(response.errorBody()?.string() ?: response.message())
+    }
+
     private suspend fun <T> callWrapper(dispatcher: CoroutineDispatcher, block: suspend () -> T): T =
         withContext(dispatcher) {
             retry(

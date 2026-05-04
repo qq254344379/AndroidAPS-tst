@@ -102,4 +102,22 @@ internal interface NightscoutRemoteService {
     @POST("v3/profile")
     suspend fun createProfile(@Body profile: JsonObject): Response<RemoteCreateUpdateResponse>
 
+    @GET("v3/settings/{identifier}")
+    suspend fun getSetting(@Path("identifier") identifier: String): Response<NSResponse<JSONObject>>
+
+    @GET("v3/settings/history/{from}")
+    suspend fun getSettingsModifiedSince(@Path("from") from: Long, @Query("limit") limit: Int = 100): Response<NSResponse<List<JSONObject>>>
+
+    @GET("v3/settings")
+    suspend fun searchSettings(@Query("limit") limit: Int = 100): Response<NSResponse<List<JSONObject>>>
+
+    @POST("v3/settings")
+    suspend fun createSetting(@Body settings: JsonObject): Response<RemoteCreateUpdateResponse>
+
+    @PATCH("v3/settings/{identifier}")
+    suspend fun patchSetting(@Body settings: JsonObject, @Path("identifier") identifier: String): Response<RemoteCreateUpdateResponse>
+
+    @DELETE("v3/settings/{identifier}")
+    suspend fun deleteSetting(@Path("identifier") identifier: String): Response<RemoteCreateUpdateResponse>
+
 }

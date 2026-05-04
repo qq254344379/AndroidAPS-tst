@@ -36,7 +36,7 @@ interface NsClient : Sync {
      */
     fun detectedNsVersion(): String?
 
-    enum class Collection { ENTRIES, TREATMENTS, FOODS, PROFILE }
+    enum class Collection { ENTRIES, TREATMENTS, FOODS, PROFILE, SETTINGS }
 
     /**
      * NSC v3 does first load of all data

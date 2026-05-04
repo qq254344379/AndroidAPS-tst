@@ -45,4 +45,15 @@ interface NSAndroidClient {
     //suspend fun getFoodsModifiedSince(from: Long, limit: Int): ReadResponse<List<NSFood>>
     suspend fun createFood(nsFood: NSFood): CreateUpdateResponse
     suspend fun updateFood(nsFood: NSFood): CreateUpdateResponse
+
+    suspend fun getSettings(identifier: String): ReadResponse<JSONObject?>
+
+    /** History pull. Server requires `api:settings:admin` permission. */
+    suspend fun getSettingsModifiedSince(from: Long, limit: Int = 100): ReadResponse<List<JSONObject>>
+
+    /** List all settings docs. Server requires `api:settings:admin` permission. */
+    suspend fun searchSettings(limit: Int = 100): ReadResponse<List<JSONObject>>
+    suspend fun createSettings(settings: JSONObject): CreateUpdateResponse
+    suspend fun patchSettings(identifier: String, settings: JSONObject): CreateUpdateResponse
+    suspend fun deleteSettings(identifier: String): CreateUpdateResponse
 }

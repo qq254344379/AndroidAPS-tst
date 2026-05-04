@@ -79,6 +79,7 @@ import app.aaps.plugins.sync.nsclientV3.workers.LoadDeviceStatusWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadFoodsWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadLastModificationWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadProfileStoreWorker
+import app.aaps.plugins.sync.nsclientV3.workers.LoadSettingsWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadStatusWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadTreatmentsWorker
 import kotlinx.coroutines.CoroutineScope
@@ -376,6 +377,7 @@ class NSClientV3Plugin @Inject constructor(
             NsClient.Collection.TREATMENTS -> lastLoadedSrvModified.collections.treatments == 0L
             NsClient.Collection.FOODS      -> lastLoadedSrvModified.collections.foods == 0L
             NsClient.Collection.PROFILE    -> lastLoadedSrvModified.collections.profile == 0L
+            NsClient.Collection.SETTINGS   -> lastLoadedSrvModified.collections.settings == 0L
         }
 
     override fun updateLatestBgReceivedIfNewer(latestReceived: Long) {
@@ -692,9 +694,18 @@ class NSClientV3Plugin @Inject constructor(
             "entries"      -> dbOperationEntries(dataPair = dataPair as DataSyncSelector.PairGlucoseValue, progress = progress, operation = operation)
             "food"         -> dbOperationFood(dataPair = dataPair as DataSyncSelector.PairFood, progress = progress, operation = operation)
             "treatments"   -> dbOperationTreatments(dataPair = dataPair, progress = progress, operation = operation, profile = profile)
+            "settings"     -> dbOperationSettings(dataPair = dataPair, progress = progress, operation = operation)
 
             else           -> false
         }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun dbOperationSettings(dataPair: DataSyncSelector.DataPair, progress: String, operation: Operation): Boolean {
+        // Skeleton stub. Payload/identifier/upload trigger not defined yet — see NS API3 settings collection.
+        aapsLogger.debug(LTag.NSCLIENT, "dbOperationSettings: no-op ($operation, $progress)")
+        nsClientRepository.addLog("► SETTINGS", "no-op")
+        return true
+    }
 
     fun storeLastLoadedSrvModified() {
         preferences.put(NsclientStringKey.V3LastModified, Json.encodeToString(LastModified.serializer(), lastLoadedSrvModified))
@@ -736,6 +747,9 @@ class NSClientV3Plugin @Inject constructor(
             .then(OneTimeWorkRequest.Builder(LoadTreatmentsWorker::class.java).build())
             .then(OneTimeWorkRequest.Builder(LoadFoodsWorker::class.java).build())
             .then(OneTimeWorkRequest.Builder(LoadProfileStoreWorker::class.java).build())
+            // No-op stub. When filled in, must update lastLoadedSrvModified.collections.settings,
+            // otherwise isFirstLoad(SETTINGS) stays true forever.
+            .then(OneTimeWorkRequest.Builder(LoadSettingsWorker::class.java).build())
             .then(OneTimeWorkRequest.Builder(LoadDeviceStatusWorker::class.java).build())
             .then(OneTimeWorkRequest.Builder(DataSyncWorker::class.java).build())
             .enqueue()

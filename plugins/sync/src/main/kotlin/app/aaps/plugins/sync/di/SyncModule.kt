@@ -27,6 +27,7 @@ import app.aaps.plugins.sync.nsclientV3.workers.LoadDeviceStatusWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadFoodsWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadLastModificationWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadProfileStoreWorker
+import app.aaps.plugins.sync.nsclientV3.workers.LoadSettingsWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadStatusWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadTreatmentsWorker
 import app.aaps.plugins.sync.smsCommunicator.SmsCommunicatorPlugin
@@ -67,6 +68,7 @@ abstract class SyncModule {
     @ContributesAndroidInjector abstract fun contributesLoadBgWorker(): LoadBgWorker
     @ContributesAndroidInjector abstract fun contributesLoadFoodsWorker(): LoadFoodsWorker
     @ContributesAndroidInjector abstract fun contributesLoadProfileStoreWorker(): LoadProfileStoreWorker
+    @ContributesAndroidInjector abstract fun contributesLoadSettingsWorker(): LoadSettingsWorker
     @ContributesAndroidInjector abstract fun contributesTreatmentWorker(): LoadTreatmentsWorker
     @ContributesAndroidInjector abstract fun contributesLoadDeviceStatusWorker(): LoadDeviceStatusWorker
     @ContributesAndroidInjector abstract fun contributesDataSyncWorker(): DataSyncWorker
