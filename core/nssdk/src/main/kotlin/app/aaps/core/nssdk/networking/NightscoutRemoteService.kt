@@ -16,6 +16,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -116,6 +117,10 @@ internal interface NightscoutRemoteService {
 
     @PATCH("v3/settings/{identifier}")
     suspend fun patchSetting(@Body settings: JsonObject, @Path("identifier") identifier: String): Response<RemoteCreateUpdateResponse>
+
+    /** PUT (NS3 "UPDATE") = upsert. Replaces existing doc, or inserts if absent. */
+    @PUT("v3/settings/{identifier}")
+    suspend fun updateSetting(@Body settings: JsonObject, @Path("identifier") identifier: String): Response<RemoteCreateUpdateResponse>
 
     @DELETE("v3/settings/{identifier}")
     suspend fun deleteSetting(@Path("identifier") identifier: String): Response<RemoteCreateUpdateResponse>

@@ -1,6 +1,8 @@
 package app.aaps.core.interfaces.automation
 
-interface Automation {
+import app.aaps.core.interfaces.configuration.ConfigExportImport
+
+interface Automation : ConfigExportImport {
 
     fun userEvents(): List<AutomationEvent>
     fun findEventById(id: String): AutomationEvent?

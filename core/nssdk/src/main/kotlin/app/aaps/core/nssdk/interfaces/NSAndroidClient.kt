@@ -55,5 +55,8 @@ interface NSAndroidClient {
     suspend fun searchSettings(limit: Int = 100): ReadResponse<List<JSONObject>>
     suspend fun createSettings(settings: JSONObject): CreateUpdateResponse
     suspend fun patchSettings(identifier: String, settings: JSONObject): CreateUpdateResponse
+
+    /** Upsert: replaces existing doc with [identifier], or inserts if absent. NS3 "UPDATE" semantics. */
+    suspend fun updateSettings(identifier: String, settings: JSONObject): CreateUpdateResponse
     suspend fun deleteSettings(identifier: String): CreateUpdateResponse
 }

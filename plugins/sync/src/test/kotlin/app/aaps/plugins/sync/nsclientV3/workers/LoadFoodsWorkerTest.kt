@@ -33,6 +33,7 @@ import org.mockito.Mock
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argThat
+import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -83,7 +84,7 @@ internal class LoadFoodsWorkerTest : TestBaseWithProfile() {
         nsClientV3Plugin = NSClientV3Plugin(
             aapsLogger, rh, preferences, rxBus, context,
             receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
-            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, profileRepository
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, activePlugin, mock(), profileRepository
         )
         nsClientV3Plugin.newestDataOnServer = LastModified(LastModified.Collections())
     }

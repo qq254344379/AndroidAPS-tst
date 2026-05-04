@@ -5,10 +5,13 @@ import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.interfaces.aps.APS
 import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.Sensitivity
+import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.configuration.ConfigExportImport
+import app.aaps.core.interfaces.configuration.RunningConfigurationKeys
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
+import app.aaps.core.interfaces.constraints.Safety
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -18,14 +21,17 @@ import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.interfaces.pump.defs.fillFor
+import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.interfaces.smoothing.Smoothing
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.StringKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
-import app.aaps.core.nssdk.localmodel.devicestatus.NSDeviceStatus
+import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
 import app.aaps.core.objects.extensions.put
 import app.aaps.core.objects.extensions.store
+import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.plugins.configuration.R
 import dagger.Reusable
 import kotlinx.serialization.json.JsonObject
@@ -37,6 +43,9 @@ import javax.inject.Inject
 class RunningConfigurationImpl @Inject constructor(
     private val activePlugin: ActivePlugin,
     private val insulin: Insulin,
+    private val quickWizard: QuickWizard,
+    private val scenes: Scenes,
+    private val automation: Automation,
     private val configBuilder: ConfigBuilder,
     private val preferences: Preferences,
     private val aapsLogger: AAPSLogger,
@@ -45,10 +54,7 @@ class RunningConfigurationImpl @Inject constructor(
     private val notificationManager: NotificationManager,
     private val nsClientRepository: NSClientRepository,
     private val constraintsChecker: ConstraintsChecker
-) : RunningConfiguration {
-
-    private var counter = 0
-    private val every = 12 // Send only every 12 device status to save traffic
+) : RunningConfiguration, RunningConfigurationKeys {
 
     // called in AAPS mode only
     override fun configuration(): JSONObject {
@@ -56,35 +62,56 @@ class RunningConfigurationImpl @Inject constructor(
         val pumpInterface = activePlugin.activePump
 
         if (!pumpInterface.isInitialized()) return json
-        if (counter++ % every == 0)
-            try {
-                val sensitivityInterface = activePlugin.activeSensitivity
-                val safetyInterface = activePlugin.activeSafety
-                val smoothingInterface = activePlugin.activeSmoothing
-                // APS interface is needed for dynamic sensitivity calculation
-                val apsInterface = activePlugin.activeAPS
+        try {
+            val sensitivityInterface = activePlugin.activeSensitivity
+            val safetyInterface = activePlugin.activeSafety
+            val smoothingInterface = activePlugin.activeSmoothing
+            // APS interface is needed for dynamic sensitivity calculation
+            val apsInterface = activePlugin.activeAPS
 
-                json.put("insulin", insulin.id.value)
-                json.put("insulinConfiguration", JSONObject(buildFromPlugin(insulin).toString()))
-                apsInterface?.let {
-                    json.put("aps", it.algorithm.name)
-                    json.put("apsConfiguration", JSONObject(buildFromPlugin(it).toString()))
-                }
-                json.put("sensitivity", sensitivityInterface.id.value)
-                json.put("sensitivityConfiguration", JSONObject(buildFromPlugin(sensitivityInterface).toString()))
-                json.put("smoothing", smoothingInterface.javaClass.simpleName)
-                json.put("overviewConfiguration", JSONObject(buildOverviewConfiguration().toString()))
-                json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
-                json.put("pump", pumpInterface.model().description)
-                json.put("version", config.VERSION_NAME)
-            } catch (e: JSONException) {
-                aapsLogger.error("Unhandled exception", e)
+            json.put("insulin", insulin.id.value)
+            json.put("insulinConfiguration", JSONObject(buildFromPlugin(insulin).toString()))
+            apsInterface?.let {
+                json.put("aps", it.algorithm.name)
+                json.put("apsConfiguration", JSONObject(buildFromPlugin(it).toString()))
             }
+            json.put("sensitivity", sensitivityInterface.id.value)
+            json.put("sensitivityConfiguration", JSONObject(buildFromPlugin(sensitivityInterface).toString()))
+            json.put("smoothing", smoothingInterface.javaClass.simpleName)
+            json.put("overviewConfiguration", JSONObject(buildOverviewConfiguration().toString()))
+            json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
+            json.put("quickWizardConfiguration", JSONObject(buildFromPlugin(quickWizard).toString()))
+            json.put("scenesConfiguration", JSONObject(buildFromPlugin(scenes).toString()))
+            json.put("automationConfiguration", JSONObject(buildFromPlugin(automation).toString()))
+            json.put("pump", pumpInterface.model().description)
+            json.put("version", config.VERSION_NAME)
+        } catch (e: JSONException) {
+            aapsLogger.error("Unhandled exception", e)
+        }
         return json
     }
 
+    override fun observableKeys(): List<NonPreferenceKey> {
+        val keys = mutableListOf<NonPreferenceKey>()
+        keys += insulin.syncedKeys
+        activePlugin.getSpecificPluginsListByInterface(APS::class.java).forEach {
+            keys += (it as APS).syncedKeys
+        }
+        activePlugin.getSpecificPluginsListByInterface(Sensitivity::class.java).forEach {
+            keys += (it as Sensitivity).syncedKeys
+        }
+        activePlugin.getSpecificPluginsListByInterface(Safety::class.java).forEach {
+            keys += (it as Safety).syncedKeys
+        }
+        keys += quickWizard.syncedKeys
+        keys += scenes.syncedKeys
+        keys += automation.syncedKeys
+        keys += SyncedConfigSchema.overviewKeys
+        return keys.distinctBy { it.key }
+    }
+
     // called in NSClient mode only
-    override fun apply(configuration: NSDeviceStatus.Configuration) {
+    override fun apply(configuration: NSRunningConfiguration) {
         assert(config.AAPSCLIENT)
 
         configuration.version?.let {
@@ -149,6 +176,18 @@ class RunningConfigurationImpl @Inject constructor(
 
         configuration.safetyConfiguration?.let { sc ->
             applyToPlugin(activePlugin.activeSafety, sc)
+        }
+
+        configuration.quickWizardConfiguration?.let { qc ->
+            applyToPlugin(quickWizard, qc)
+        }
+
+        configuration.scenesConfiguration?.let { sc ->
+            applyToPlugin(scenes, sc)
+        }
+
+        configuration.automationConfiguration?.let { ac ->
+            applyToPlugin(automation, ac)
         }
     }
 

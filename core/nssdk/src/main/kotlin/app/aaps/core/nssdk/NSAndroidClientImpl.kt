@@ -588,6 +588,27 @@ class NSAndroidClientImpl(
             throw UnsuccessfulNightscoutException(response.errorBody()?.string() ?: response.message())
     }
 
+    override suspend fun updateSettings(identifier: String, settings: JSONObject): CreateUpdateResponse = callWrapper(dispatcher) {
+
+        val response = api.updateSetting(JsonParser.parseString(settings.toString()).asJsonObject, identifier)
+        if (response.isSuccessful) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = response.body()?.identifier,
+                isDeduplication = response.body()?.isDeduplication == true,
+                deduplicatedIdentifier = response.body()?.deduplicatedIdentifier,
+                lastModified = response.body()?.lastModified
+            )
+        } else if (response.code() in 400..499) {
+            return@callWrapper CreateUpdateResponse(
+                response = response.code(),
+                identifier = null,
+                errorResponse = response.errorBody()?.string() ?: response.message()
+            )
+        } else
+            throw UnsuccessfulNightscoutException(response.errorBody()?.string() ?: response.message())
+    }
+
     override suspend fun deleteSettings(identifier: String): CreateUpdateResponse = callWrapper(dispatcher) {
 
         val response = api.deleteSetting(identifier)

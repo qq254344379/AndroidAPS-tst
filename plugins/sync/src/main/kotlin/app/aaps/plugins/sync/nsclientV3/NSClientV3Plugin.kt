@@ -73,6 +73,7 @@ import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientLongKey
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientStringKey
 import app.aaps.plugins.sync.nsclientV3.services.NSClientV3Service
+import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import app.aaps.plugins.sync.nsclientV3.workers.DataSyncWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadBgWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadDeviceStatusWorker
@@ -115,7 +116,9 @@ class NSClientV3Plugin @Inject constructor(
     private val l: L,
     private val nsClientRepository: NSClientRepository,
     private val uel: UserEntryLogger,
-    private val profileRepository: ProfileRepository
+    private val activePlugin: ActivePlugin,
+    private val runningConfigurationPublisher: RunningConfigurationPublisher,
+    private val profileRepository: ProfileRepository,
 ) : NsClient, Sync, PluginBaseWithPreferences(
     PluginDescription()
         .mainType(PluginType.SYNC)
@@ -219,6 +222,7 @@ class NSClientV3Plugin @Inject constructor(
 
         receiverDelegate.grabReceiversState()
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        runningConfigurationPublisher.start(scope)
         rxBus.toFlow(EventAppExit::class.java)
             .onEach {
                 stopService()
@@ -307,6 +311,7 @@ class NSClientV3Plugin @Inject constructor(
         handler?.removeCallbacksAndMessages(null)
         handler?.looper?.quit()
         handler = null
+        runningConfigurationPublisher.stop()
         scope.cancel()
         stopService()
         WorkManager.getInstance(context).cancelUniqueWork(JOB_NAME)

@@ -10,7 +10,6 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.workflow.CalculationWorkflow
 import app.aaps.core.keys.interfaces.Preferences
-import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.mapper.convertToRemoteAndBack
 import app.aaps.plugins.sync.nsclient.data.NSDeviceStatusHandler
 import app.aaps.plugins.sync.nsclient.data.ProcessedDeviceStatusDataImpl
@@ -31,7 +30,6 @@ internal class DeviceStatusExtensionKtTest : TestBase() {
     @Mock lateinit var rh: ResourceHelper
     @Mock lateinit var dateUtil: DateUtil
     @Mock lateinit var config: Config
-    @Mock lateinit var runningConfiguration: RunningConfiguration
     @Mock lateinit var apsResultProvider: Provider<APSResult>
     @Mock lateinit var persistenceLayer: PersistenceLayer
     @Mock lateinit var overviewData: OverviewData
@@ -43,7 +41,7 @@ internal class DeviceStatusExtensionKtTest : TestBase() {
     @BeforeEach
     fun setup() {
         processedDeviceStatusData = ProcessedDeviceStatusDataImpl(apsResultProvider)
-        nsDeviceStatusHandler = NSDeviceStatusHandler(preferences, config, dateUtil, runningConfiguration, processedDeviceStatusData, aapsLogger, persistenceLayer, overviewData, calculationWorkflow, rxBus, testScope)
+        nsDeviceStatusHandler = NSDeviceStatusHandler(preferences, config, dateUtil, processedDeviceStatusData, aapsLogger, persistenceLayer, overviewData, calculationWorkflow, rxBus, testScope)
         whenever(config.AAPSCLIENT).thenReturn(true)
     }
 
@@ -82,6 +80,5 @@ internal class DeviceStatusExtensionKtTest : TestBase() {
         assertThat(nsDeviceStatus2.uploader?.battery).isEqualTo(nsDeviceStatus.uploader?.battery)
         assertThat(nsDeviceStatus2.pump?.battery).isEqualTo(nsDeviceStatus.pump?.battery)
         assertThat(nsDeviceStatus2.openaps?.enacted?.toString()).isEqualTo(nsDeviceStatus.openaps?.enacted?.toString())
-        assertThat(nsDeviceStatus2.configuration?.toString()).isEqualTo(nsDeviceStatus.configuration?.toString())
     }
 }

@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mock
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import kotlin.test.assertIs
 import kotlin.time.Duration.Companion.seconds
@@ -72,7 +73,7 @@ internal class LoadLastModificationWorkerTest : TestBaseWithProfile() {
         nsClientV3Plugin = NSClientV3Plugin(
             aapsLogger, rh, preferences, rxBus, context,
             receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
-            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, profileRepository
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, activePlugin, mock(), profileRepository
         )
         nsClientV3Plugin.newestDataOnServer = null
     }

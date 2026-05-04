@@ -30,6 +30,7 @@ import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.StringKey
+import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.icons.IcPluginAutomation
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -150,6 +151,13 @@ class AutomationPlugin @Inject constructor(
     ownPreferences = listOf(AutomationStringKey::class.java),
     aapsLogger, rh, preferences
 ), Automation {
+
+    override val syncedKeys: List<NonPreferenceKey> = listOf(AutomationStringKey.AutomationEvents)
+
+    override fun reloadInternalState() {
+        loadFromSP()
+        rxBus.send(EventAutomationDataChanged())
+    }
 
     private var disposable: CompositeDisposable = CompositeDisposable()
     private var scope: CoroutineScope? = null

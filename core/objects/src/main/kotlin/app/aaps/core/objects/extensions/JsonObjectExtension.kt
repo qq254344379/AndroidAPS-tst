@@ -49,27 +49,3 @@ fun JsonObject.store(key: NonPreferenceKey, preferences: Preferences): JsonObjec
     }
     return this
 }
-
-fun JsonObject.putIfThereIsValue(key: String, value: Long?): JsonObject =
-    JsonObject(
-        this.toMutableMap().apply {
-            if (value != null && value != 0L)
-                this[key] = JsonPrimitive(value)
-        }
-    )
-
-fun JsonObject.putIfThereIsValue(key: String, value: Double?): JsonObject =
-    JsonObject(
-        this.toMutableMap().apply {
-            if (value != null && value != 0.0)
-                this[key] = JsonPrimitive(value)
-        }
-    )
-
-fun JsonObject.putIfThereIsValue(key: String, value: String?): JsonObject =
-    JsonObject(
-        this.toMutableMap().apply {
-            if (value != null && value.isNotEmpty())
-                this[key] = JsonPrimitive(value)
-        }
-    )

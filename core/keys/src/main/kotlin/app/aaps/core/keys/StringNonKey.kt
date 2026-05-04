@@ -30,6 +30,7 @@ enum class StringNonKey(
     NotificationReaderDedupState(key = "notification_reader_dedup_state", defaultValue = ""),
 
     // Google Drive settings (internal, no preferences UI)
+    @Deprecated("fix")
     GoogleDriveStorageType(key = "google_drive_storage_type", defaultValue = "local"),
     GoogleDriveFolderId(key = "google_drive_folder_id", defaultValue = ""),
     GoogleDriveRefreshToken(key = "google_drive_refresh_token", defaultValue = ""),

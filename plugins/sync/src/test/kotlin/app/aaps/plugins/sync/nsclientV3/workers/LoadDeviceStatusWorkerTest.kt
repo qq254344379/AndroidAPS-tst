@@ -33,6 +33,7 @@ import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mock
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argThat
+import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import kotlin.test.assertIs
 import kotlin.time.Duration.Companion.seconds
@@ -80,7 +81,7 @@ internal class LoadDeviceStatusWorkerTest : TestBaseWithProfile() {
         nsClientV3Plugin = NSClientV3Plugin(
             aapsLogger, rh, preferences, rxBus, context,
             receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
-            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, profileRepository
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, activePlugin, mock(), profileRepository
         )
         nsClientV3Plugin.newestDataOnServer = LastModified(LastModified.Collections())
     }
@@ -110,7 +111,6 @@ internal class LoadDeviceStatusWorkerTest : TestBaseWithProfile() {
             uploader = null,
             pump = null,
             openaps = null,
-            configuration = null
         )
         whenever(nsAndroidClient.getDeviceStatusModifiedSince(anyLong()))
             .thenReturn(listOf(deviceStatus))
@@ -216,7 +216,6 @@ internal class LoadDeviceStatusWorkerTest : TestBaseWithProfile() {
             uploader = null,
             pump = null,
             openaps = null,
-            configuration = null
         )
         val deviceStatus2 = NSDeviceStatus(
             date = now - 2000,
@@ -226,7 +225,6 @@ internal class LoadDeviceStatusWorkerTest : TestBaseWithProfile() {
             uploader = null,
             pump = null,
             openaps = null,
-            configuration = null
         )
         whenever(nsAndroidClient.getDeviceStatusModifiedSince(anyLong()))
             .thenReturn(listOf(deviceStatus1, deviceStatus2))
