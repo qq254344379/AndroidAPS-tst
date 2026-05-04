@@ -39,8 +39,6 @@ import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.convertedToAbsolute
 import app.aaps.core.objects.extensions.getPassedDurationToTimeInMinutes
 import app.aaps.core.objects.extensions.plannedRemainingMinutes
-import app.aaps.core.objects.extensions.put
-import app.aaps.core.objects.extensions.store
 import app.aaps.core.objects.extensions.target
 import app.aaps.core.ui.compose.icons.IcPluginOpenAPS
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -52,7 +50,6 @@ import app.aaps.plugins.aps.keys.ApsIntentKey
 import app.aaps.plugins.aps.openAPSSMB.GlucoseStatusCalculatorSMB
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -317,16 +314,6 @@ class OpenAPSAMAPlugin @Inject constructor(
     override val syncedKeys: List<NonPreferenceKey> = emptyList()
 
     override fun reloadInternalState() {}
-
-    // AMA never delivers SMBs — advertise that explicitly so AAPSClient can hide the SMB indicator
-    // even when the user's local default for ApsUseSmb is true.
-    override fun configuration(): JsonObject =
-        JsonObject(emptyMap())
-            .put(BooleanKey.ApsUseSmb, false)
-
-    override fun applyConfiguration(configuration: JsonObject) {
-        configuration.store(BooleanKey.ApsUseSmb, preferences)
-    }
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "openapsma_settings",
