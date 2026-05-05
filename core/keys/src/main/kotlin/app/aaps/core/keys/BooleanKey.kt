@@ -140,6 +140,11 @@ enum class BooleanKey(
     NsClientCreateAnnouncementsFromCarbsReq("ns_create_announcements_from_carbs_req", false, R.string.pref_title_ns_create_announcements_from_carbs_req, calculatedDefaultValue = true, showInNsClientMode = false),
     NsClientSlowSync("ns_sync_slow", false, R.string.pref_title_ns_slow_sync),
     NsClient3UseWs("ns_use_ws", true, R.string.pref_title_ns_use_ws, R.string.pref_summary_ns_use_ws),
+    NsClientAllowClientControl(
+        "ns_allow_client_control", false,
+        R.string.pref_title_ns_allow_client_control, R.string.pref_summary_ns_allow_client_control,
+        showInNsClientMode = false
+    ),
     OpenHumansWifiOnly("oh_wifi_only", true, R.string.pref_title_openhumans_wifi_only),
     OpenHumansChargingOnly("oh_charging_only", false, R.string.pref_title_openhumans_charging_only),
     XdripSendStatus("xdrip_send_status", false, R.string.pref_title_xdrip_send_status),

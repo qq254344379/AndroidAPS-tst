@@ -803,6 +803,7 @@ class NSClientV3Plugin @Inject constructor(
             StringKey.NsClientUrl,
             StringKey.NsClientAccessToken,
             BooleanKey.NsClient3UseWs,
+            BooleanKey.NsClientAllowClientControl,
             PreferenceSubScreenDef(
                 key = "ns_client_synchronization",
                 titleResId = R.string.ns_sync_options,

@@ -35,4 +35,11 @@ enum class StringNonKey(
     GoogleDriveFolderId(key = "google_drive_folder_id", defaultValue = ""),
     GoogleDriveRefreshToken(key = "google_drive_refresh_token", defaultValue = ""),
 
+    // NSCv3 client-control pairing (excluded from export — secrets / monotonic state)
+    NsClientControlAuthorizedClients(key = "nsclient_control_authorized_clients", defaultValue = "[]", exportable = false),
+    NsClientControlMasterInstallId(key = "nsclient_control_master_install_id", defaultValue = "", exportable = false),
+    NsClientControlClientId(key = "nsclient_control_client_id", defaultValue = "", exportable = false),
+    NsClientControlMasterSecretEnc(key = "nsclient_control_master_secret_enc", defaultValue = "", exportable = false),
+    NsClientControlCapabilities(key = "nsclient_control_capabilities", defaultValue = "", exportable = false),
+
 }
