@@ -143,7 +143,7 @@ enum class BooleanKey(
     NsClientAllowClientControl(
         "ns_allow_client_control", false,
         R.string.pref_title_ns_allow_client_control, R.string.pref_summary_ns_allow_client_control,
-        showInNsClientMode = false
+        showInNsClientMode = false, dependency = NsClient3UseWs
     ),
     OpenHumansWifiOnly("oh_wifi_only", true, R.string.pref_title_openhumans_wifi_only),
     OpenHumansChargingOnly("oh_charging_only", false, R.string.pref_title_openhumans_charging_only),

@@ -23,7 +23,6 @@ data class AuthorizedClient(
     val clientId: String,
     val name: String,
     val encryptedSecret: String,
-    val capabilities: List<String>,
     val state: ClientState,
     val createdAt: Long,
     val lastSeenAt: Long = 0L,

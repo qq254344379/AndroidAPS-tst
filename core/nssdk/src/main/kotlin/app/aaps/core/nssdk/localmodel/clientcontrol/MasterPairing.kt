@@ -11,6 +11,5 @@ package app.aaps.core.nssdk.localmodel.clientcontrol
 data class MasterPairing(
     val masterInstallId: String,
     val clientId: String,
-    val masterSecretEnc: String,
-    val capabilities: List<String>
+    val masterSecretEnc: String
 )

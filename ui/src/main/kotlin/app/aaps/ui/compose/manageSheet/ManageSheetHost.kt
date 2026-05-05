@@ -35,6 +35,8 @@ fun ManageSheetHost(
             showCancelExtendedBolus = manageState.showCancelExtendedBolus,
             showBatteryChange = manageState.showBatteryChange,
             showFill = manageState.showFill,
+            showAuthorizedClients = manageState.showAuthorizedClients,
+            showPairWithMaster = manageState.showPairWithMaster,
             cancelTempBasalText = manageState.cancelTempBasalText,
             cancelExtendedBolusText = manageState.cancelExtendedBolusText,
             isPatchPump = manageState.isPatchPump,

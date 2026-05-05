@@ -24,6 +24,7 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventCustomActionsChanged
 import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.toStringMedium
@@ -156,6 +157,8 @@ class ManageViewModel @Inject constructor(
                     showHistoryBrowser = profile != null,
                     showBatteryChange = pumpDescription.isBatteryReplaceable || pump.isBatteryChangeLoggingEnabled(),
                     showFill = pumpDescription.isRefillingCapable && isInitialized,
+                    showAuthorizedClients = preferences.get(BooleanKey.NsClientAllowClientControl),
+                    showPairWithMaster = config.AAPSCLIENT,
                     cancelTempBasalText = cancelTempBasalText,
                     cancelExtendedBolusText = cancelExtendedBolusText,
                     isPatchPump = pumpDescription.isPatchPump,

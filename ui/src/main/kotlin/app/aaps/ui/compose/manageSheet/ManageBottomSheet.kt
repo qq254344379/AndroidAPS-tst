@@ -69,6 +69,8 @@ fun ManageBottomSheet(
     showCancelExtendedBolus: Boolean,
     showBatteryChange: Boolean,
     showFill: Boolean,
+    showAuthorizedClients: Boolean,
+    showPairWithMaster: Boolean,
     // Cancel text strings
     cancelTempBasalText: String,
     cancelExtendedBolusText: String,
@@ -98,6 +100,8 @@ fun ManageBottomSheet(
             showCancelExtendedBolus = showCancelExtendedBolus,
             showBatteryChange = showBatteryChange,
             showFill = showFill,
+            showAuthorizedClients = showAuthorizedClients,
+            showPairWithMaster = showPairWithMaster,
             cancelTempBasalText = cancelTempBasalText,
             cancelExtendedBolusText = cancelExtendedBolusText,
             isPatchPump = isPatchPump,
@@ -122,6 +126,8 @@ internal fun ManageBottomSheetContent(
     showCancelExtendedBolus: Boolean,
     showBatteryChange: Boolean = false,
     showFill: Boolean = false,
+    showAuthorizedClients: Boolean = false,
+    showPairWithMaster: Boolean = false,
     cancelTempBasalText: String,
     cancelExtendedBolusText: String,
     isPatchPump: Boolean = false,
@@ -210,6 +216,26 @@ internal fun ManageBottomSheetContent(
                         onDismiss = onDismiss,
                         onClick = { onNavigate(NavigationRequest.Element(ElementType.PUMP)) },
                         description = pumpPlugin.name,
+                        modifier = modifier
+                    )
+                }
+            }
+            if (showAuthorizedClients) {
+                add { modifier ->
+                    ManageGridItem(
+                        elementType = ElementType.AUTHORIZED_CLIENTS,
+                        onDismiss = onDismiss,
+                        onNavigate = onNavigate,
+                        modifier = modifier
+                    )
+                }
+            }
+            if (showPairWithMaster) {
+                add { modifier ->
+                    ManageGridItem(
+                        elementType = ElementType.PAIR_WITH_MASTER,
+                        onDismiss = onDismiss,
+                        onNavigate = onNavigate,
                         modifier = modifier
                     )
                 }
@@ -409,9 +435,11 @@ private fun GridSection(
                     .height(IntrinsicSize.Max)
             ) {
                 rowItems.forEach { item ->
-                    item(Modifier
-                             .weight(1f)
-                             .fillMaxHeight())
+                    item(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
                 }
                 if (rowItems.size == 1) {
                     Spacer(modifier = Modifier.weight(1f))

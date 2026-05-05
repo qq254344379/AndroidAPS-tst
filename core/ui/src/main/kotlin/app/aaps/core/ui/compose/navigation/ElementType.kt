@@ -79,6 +79,10 @@ enum class ElementType(
     SCENE(category = ElementCategory.MANAGEMENT, protection = ProtectionCheck.Protection.BOLUS),
     SCENE_MANAGEMENT(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
 
+    // NSCv3 client control — paired devices that can issue signed commands
+    AUTHORIZED_CLIENTS(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
+    PAIR_WITH_MASTER(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
+
     // Running mode / loop (used by UserEntry)
     RUNNING_MODE(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.BOLUS),
     USER_ENTRY,

@@ -59,14 +59,13 @@ class AuthorizedClientsRepository @Inject constructor(
      * Create a new pending pairing. Returns the freshly-generated secret in **plaintext hex**
      * for QR rendering — caller must not persist it. The encrypted form is stored on the entry.
      */
-    fun addPending(name: String, capabilities: List<String>, qrTtlMs: Long, now: Long): PendingResult = synchronized(lock) {
+    fun addPending(name: String, qrTtlMs: Long, now: Long): PendingResult = synchronized(lock) {
         val secretBytes = ClientControlCrypto.newSecretBytes()
         val secretHex = ClientControlCrypto.bytesToHex(secretBytes)
         val entry = AuthorizedClient(
             clientId = ClientControlCrypto.newClientId(),
             name = name,
             encryptedSecret = secureEncrypt.encrypt(secretHex, SECURE_ENCRYPT_ALIAS),
-            capabilities = capabilities,
             state = ClientState.Pending,
             createdAt = now,
             qrExpiresAt = now + qrTtlMs

@@ -62,6 +62,13 @@ dependencies {
     implementation(libs.com.eatthepath.java.otp)
     implementation(libs.com.github.kenglxn.qrgen.android)
 
+    // Client-control pairing scanner — CameraX preview + ZXing decode
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.com.google.zxing.core)
+
     // Garmin
     api(libs.com.garmin.connectiq) { artifact { type = "aar" } }
     androidTestImplementation(libs.com.garmin.connectiq) { artifact { type = "aar" } }

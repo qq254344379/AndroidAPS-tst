@@ -1050,6 +1050,8 @@ class ComposeMainActivity : AppCompatActivity() {
             ElementType.FOOD_MANAGEMENT         -> navController.navigate(AppRoute.FoodManagement.route)
             ElementType.RUNNING_MODE            -> navController.navigate(AppRoute.RunningMode.route)
             ElementType.SCENE_MANAGEMENT        -> navController.navigate(AppRoute.SceneList.route)
+            ElementType.AUTHORIZED_CLIENTS      -> navController.navigate(AppRoute.AuthorizedClients.route)
+            ElementType.PAIR_WITH_MASTER        -> navController.navigate(AppRoute.PairWithMaster.route)
             ElementType.QUICK_LAUNCH_CONFIG     -> navController.navigate(AppRoute.QuickLaunchConfig.route)
 
             // Treatment dialogs

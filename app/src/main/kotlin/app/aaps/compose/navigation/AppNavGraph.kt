@@ -58,6 +58,8 @@ import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.compose.siteRotation.SiteLocationPickerScreen
 import app.aaps.plugins.configuration.setupwizard.SWDefinition
 import app.aaps.plugins.configuration.setupwizard.SetupWizardScreen
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.compose.AuthorizedClientsScreen
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.compose.PairWithMasterScreen
 import app.aaps.ui.compose.calibrationDialog.CalibrationDialogScreen
 import app.aaps.ui.compose.carbsDialog.CarbsDialogScreen
 import app.aaps.ui.compose.careDialog.CareDialogScreen
@@ -509,6 +511,18 @@ fun NavGraphBuilder.appNavGraph(
             onNavigateToEditor = { sceneId ->
                 navController.navigate(AppRoute.SceneWizard.createRoute(sceneId))
             },
+            onNavigateBack = { navController.popBackStack() }
+        )
+    }
+
+    composable(AppRoute.AuthorizedClients.route) {
+        AuthorizedClientsScreen(
+            onNavigateBack = { navController.popBackStack() }
+        )
+    }
+
+    composable(AppRoute.PairWithMaster.route) {
+        PairWithMasterScreen(
             onNavigateBack = { navController.popBackStack() }
         )
     }
