@@ -7,8 +7,9 @@ import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.objects.workflow.LoggingWorker
-import app.aaps.plugins.sync.nsclient.data.NSDeviceStatusHandler
+import app.aaps.core.utils.receivers.DataWorkerStorage
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.data.NSDeviceStatusHandler
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 
@@ -17,6 +18,7 @@ class LoadDeviceStatusWorker(
     params: WorkerParameters
 ) : LoggingWorker(context, params, Dispatchers.IO) {
 
+    @Inject lateinit var dataWorkerStorage: DataWorkerStorage
     @Inject lateinit var nsClientV3Plugin: NSClientV3Plugin
     @Inject lateinit var dateUtil: DateUtil
     @Inject lateinit var nsDeviceStatusHandler: NSDeviceStatusHandler
@@ -49,4 +51,4 @@ class LoadDeviceStatusWorker(
         nsClientV3Plugin.lastOperationError = null
         return Result.success()
     }
-}
+}
