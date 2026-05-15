@@ -66,9 +66,7 @@ jobs:
             fi
           }
 
-          # Check secrets
           check_secret "$GDRIVE_OAUTH2" "GDRIVE_OAUTH2"
-          
           check_secret "$KEYSTORE_BASE64" "KEYSTORE_BASE64"
           check_secret "$KEYSTORE_PASSWORD" "KEYSTORE_PASSWORD"
           check_secret "$KEY_ALIAS" "KEY_ALIAS"
@@ -91,18 +89,16 @@ jobs:
           set -x
           echo "🔐 Validating keystore, alias and password"
 
-          # Create a dummy JAR file (quick method using zip)
           echo "test" > dummy.txt
           zip -q dummy.jar dummy.txt
           rm dummy.txt
-          
-          # Attempt to validate using jarsigner
+
           JARSIGNER_LOG=$(mktemp)
           if ! jarsigner \
-              -keystore "$RUNNER_TEMP/keystore/keystore.jks" \
-              -storepass "$KEYSTORE_PASSWORD" \
-              -keypass "$KEY_PASSWORD" \
-              dummy.jar "$KEY_ALIAS" > "$JARSIGNER_LOG" 2>&1; then
+            -keystore "$RUNNER_TEMP/keystore/keystore.jks" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            dummy.jar "$KEY_ALIAS" > "$JARSIGNER_LOG" 2>&1; then
             echo "❌ Either KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_PASSWORD, or KEY_ALIAS is incorrect"
             echo "🔍 jarsigner error output:"
             cat "$JARSIGNER_LOG"
@@ -112,23 +108,20 @@ jobs:
           rm -f "$JARSIGNER_LOG" dummy.jar
           echo "✅ Keystore, alias, and key password are valid."
 
-          rm -f "$KEYTOOL_LOG"
-          echo "✅ Keystore and credentials validated."
-
       - name: Decode GDrive OAuth2 secrets
         run: |
           echo "🔐 Decoding GDRIVE_OAUTH2..."
           DECODED=$(echo "${{ secrets.GDRIVE_OAUTH2 }}" | base64 -d)
-          
+
           GDRIVE_CLIENT_ID=$(echo "$DECODED" | cut -d'|' -f1)
           GDRIVE_REFRESH_TOKEN=$(echo "$DECODED" | cut -d'|' -f2)
-          
+
           echo "::add-mask::$GDRIVE_CLIENT_ID"
           echo "::add-mask::$GDRIVE_REFRESH_TOKEN"
-          
+
           echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID" >> $GITHUB_ENV
           echo "GDRIVE_REFRESH_TOKEN=$GDRIVE_REFRESH_TOKEN" >> $GITHUB_ENV
-          
+
           echo "✅ GDRIVE_CLIENT_ID and GDRIVE_REFRESH_TOKEN extracted from GDRIVE_OAUTH2"
 
       - name: Retrieving Google Drive access token
@@ -183,7 +176,6 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
-          # Java version is defined in .github/versions.env
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: gradle
@@ -193,17 +185,17 @@ jobs:
 
       - name: Build APKs
         run: |
-              ./gradlew :app:assemble${{ env.BUILD_VARIANT }} :wear:assemble${{ env.BUILD_VARIANT }} \
-              -Dorg.gradle.jvmargs="-Xmx8g -XX:+UseParallelGC -Xss1024m" \
-              -Dkotlin.daemon.jvm.options="-Xmx2g" \
-              -Dkotlin.compiler.execution.strategy="in-process" \
-              -Dorg.gradle.daemon=true \
-              -Dorg.gradle.workers.max=8 \
-              -Dorg.gradle.caching=true \
-              -Pandroid.injected.signing.store.file="$RUNNER_TEMP/keystore/keystore.jks" \
-              -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-              -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-              -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+          ./gradlew :app:assemble${{ env.BUILD_VARIANT }} :wear:assemble${{ env.BUILD_VARIANT }} \
+            -Dorg.gradle.jvmargs="-Xmx8g -XX:+UseParallelGC -Xss1024m" \
+            -Dkotlin.daemon.jvm.options="-Xmx2g" \
+            -Dkotlin.compiler.execution.strategy="in-process" \
+            -Dorg.gradle.daemon=true \
+            -Dorg.gradle.workers.max=8 \
+            -Dorg.gradle.caching=true \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/keystore/keystore.jks" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
       - name: Rename APKs with version
         run: |
@@ -295,10 +287,9 @@ jobs:
 
           echo "🎉 APKs successfully uploaded to Google Drive!"
 
-
   # Configuration: Threshold-based cleanup
   # Cleanup only occurs when total runs exceed: keep_runs + keep_threshold (e.g., 30 + 10 = 40)
-    cleanup:
+  cleanup:
     name: Cleanup Old Workflow Runs
     needs: build
     if: always()
@@ -309,7 +300,4 @@ jobs:
       workflow_name: 'Branch CI'
       keep_runs: 30
       keep_threshold: 10
-
-
-
 
