@@ -1,0 +1,229 @@
+package app.aaps.plugins.source
+
+import android.annotation.SuppressLint
+import android.content.Context
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import app.aaps.core.data.configuration.Constants
+import app.aaps.core.data.model.GV
+import app.aaps.core.data.model.SourceSensor
+import app.aaps.core.data.model.TrendArrow
+import app.aaps.core.data.plugin.PluginType
+import app.aaps.core.data.ue.Sources
+import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationLevel
+import app.aaps.core.interfaces.notifications.NotificationManager
+import app.aaps.core.interfaces.plugin.PluginDescription
+import app.aaps.core.interfaces.receivers.Intents
+import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventRefreshOverview
+import app.aaps.core.interfaces.source.BgSource
+import app.aaps.core.interfaces.ui.UiInteraction
+import app.aaps.core.objects.workflow.LoggingWorker
+import app.aaps.core.ui.compose.icons.IcGenericCgm
+import app.aaps.core.utils.receivers.DataWorkerStorage
+import app.aaps.plugins.source.compose.BgSourceComposeContent
+import kotlinx.coroutines.Dispatchers
+import javax.inject.Inject
+import javax.inject.Singleton
+import app.aaps.core.keys.interfaces.Preferences
+
+@Singleton
+class AidexPlugin @Inject constructor(
+    rh: ResourceHelper,
+    aapsLogger: AAPSLogger,
+    preferences: Preferences,
+    config: Config,
+    private val notificationManager: NotificationManager,
+) : AbstractBgSourcePlugin(
+    PluginDescription()
+        .mainType(PluginType.BGSOURCE)
+        .composeContent { plugin ->
+            BgSourceComposeContent(
+                title = rh.gs(R.string.aidex)
+            )
+        }
+        .icon(IcGenericCgm)
+        .pluginName(R.string.aidex)
+        .shortName(R.string.aidex_short)
+        .preferencesVisibleInSimpleMode(false)
+        .description(R.string.description_source_aidex),
+    ownPreferences = emptyList(),
+    aapsLogger, rh, preferences, config
+), BgSource {
+    @Volatile
+    private var _hasSensorError = false
+
+    companion object {
+        var sensorExpiredNotified = false
+        var sensorErrorNotified = false
+        var sensorStablingNotified = false
+        var replaceSensorNotified = false
+        var signalLostNotified = false
+    }
+
+    override fun hasSensorError(): Boolean = _hasSensorError
+
+    override fun specialEnableCondition(): Boolean {
+        return true
+    }
+
+    class AidexWorker(
+        context: Context,
+        params: WorkerParameters
+    ) : LoggingWorker(context, params, Dispatchers.IO) {
+
+        @Inject lateinit var aidexPlugin: AidexPlugin
+        @Inject lateinit var persistenceLayer: PersistenceLayer
+        @Inject lateinit var dataWorkerStorage: DataWorkerStorage
+        @Inject lateinit var rxBus: RxBus
+        @SuppressLint("CheckResult")
+        override suspend fun doWorkAndLog(): Result {
+            var ret = Result.success()
+
+            if (!aidexPlugin.isEnabled()) return Result.success(workDataOf("Result" to "Plugin not enabled"))
+            val bundle = dataWorkerStorage.pickupBundle(inputData.getLong(DataWorkerStorage.STORE_KEY, -1))
+                ?: return Result.failure(workDataOf("Error" to "missing input data"))
+
+            aapsLogger.debug(LTag.BGSOURCE, "Received Aidex data: $bundle")
+
+            if (bundle.containsKey(Intents.AIDEX_TRANSMITTER_SN)) aapsLogger.debug(LTag.BGSOURCE, "transmitterSerialNumber: " + bundle.getString(Intents.AIDEX_TRANSMITTER_SN))
+            if (bundle.containsKey(Intents.AIDEX_SENSOR_ID)) aapsLogger.debug(LTag.BGSOURCE, "sensorId: " + bundle.getString(Intents.AIDEX_SENSOR_ID))
+
+            val timestamp = bundle.getLong(Intents.AIDEX_TIMESTAMP, 0)
+            val bgType = bundle.getString(Intents.AIDEX_BG_TYPE, "mg/dl")
+            val bgValue = bundle.getDouble(Intents.AIDEX_BG_VALUE, 0.0)
+
+            val bgValueTarget = if (bgType.equals("mg/dl")) bgValue else bgValue * Constants.MMOLL_TO_MGDL
+
+            val sensorExpired = bundle.getBoolean(Intents.AIDEX_SENSOR_EXPIRED, false)
+            val sensorError = bundle.getBoolean(Intents.EXTRA_SENSOR_ERROR, false)
+            val sensorStabling = bundle.getBoolean(Intents.EXTRA_SENSOR_STABILIZING, false)
+            val replaceSensor = bundle.getBoolean(Intents.EXTRA_REPLACE_SENSOR, false)
+            val signalLost = bundle.getBoolean(Intents.EXTRA_SIGNAL_LOST, false)
+
+            aidexPlugin.handleSensorNotifications(sensorExpired, sensorError, sensorStabling, replaceSensor, signalLost)
+
+            aidexPlugin._hasSensorError = sensorExpired || sensorError || replaceSensor || signalLost || sensorStabling
+
+            aapsLogger.debug(LTag.BGSOURCE, "Received Aidex broadcast [time=$timestamp, bgType=$bgType, value=$bgValue, targetValue=$bgValueTarget]")
+
+            val isValidValue = bgValueTarget > 0 && !aidexPlugin._hasSensorError
+
+            if (isValidValue) {
+                val glucoseValues = mutableListOf<GV>()
+                glucoseValues += GV(
+                    timestamp = timestamp,
+                    value = bgValueTarget,
+                    raw = null,
+                    noise = null,
+                    trendArrow = TrendArrow.fromString(bundle.getString(Intents.AIDEX_BG_SLOPE_NAME)),
+                    sourceSensor = SourceSensor.AIDEX
+                )
+                try {
+                    persistenceLayer.insertCgmSourceData(Sources.Aidex, glucoseValues, emptyList(), null)
+                    rxBus.send(EventRefreshOverview("AidexPlugin"))
+                } catch (e: Exception) {
+                    ret = Result.failure(workDataOf("Error" to e.toString()))
+                }
+            } else {
+                aapsLogger.warn(LTag.BGSOURCE, "Invalid glucose value ignored: value=$bgValue, hasError=${aidexPlugin._hasSensorError}")
+            }
+
+            return ret
+        }
+    }
+
+    private fun handleSensorNotifications(
+        sensorExpired: Boolean,
+        sensorError: Boolean,
+        sensorStabling: Boolean,
+        replaceSensor: Boolean,
+        signalLost: Boolean
+    ) {
+        if (sensorExpired) {
+            aapsLogger.warn(LTag.BGSOURCE, "Sensor expired detected!")
+            if (!sensorExpiredNotified) {
+                sensorExpiredNotified = true
+                notificationManager.post(
+                    id =NotificationId.AIDEX_SENSOR_EXPIRED,
+                    textRes = R.string.aidex_sensor_expired,
+                    level = NotificationLevel.URGENT,
+                    validMinutes = 60
+                )
+            }
+        } else {
+            sensorExpiredNotified = false
+            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+        }
+
+        if (replaceSensor) {
+            aapsLogger.warn(LTag.BGSOURCE, "Sensor replacement required!")
+            if (!replaceSensorNotified) {
+                replaceSensorNotified = true
+                notificationManager.post(
+                    id = NotificationId.AIDEX_REPLACE_SENSOR,
+                    textRes = R.string.aidex_sensor_replace,
+                    level = NotificationLevel.NORMAL,
+                    validMinutes = 120
+                )
+            }
+        } else {
+            replaceSensorNotified = false
+            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+        }
+
+        if (sensorError) {
+            aapsLogger.error(LTag.BGSOURCE, "Sensor error detected!")
+            if (!sensorErrorNotified) {
+                sensorErrorNotified = true
+                notificationManager.post(
+                    id = NotificationId.AIDEX_SENSOR_ERROR,
+                    textRes = R.string.aidex_sensor_error,
+                    level = NotificationLevel.URGENT,
+                    validMinutes = 60
+                )
+            }
+        } else {
+            sensorErrorNotified = false
+            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+        }
+
+        if (sensorStabling) {
+            aapsLogger.error(LTag.BGSOURCE, "Sensor is not stable detected!")
+            if (!sensorStablingNotified) {
+                sensorStablingNotified = true
+                notificationManager.post(
+                    id = NotificationId.AIDEX_SENSOR_STABILIZING,
+                    textRes = R.string.aidex_sensor_stabilizing,
+                    level = NotificationLevel.NORMAL,
+                    validMinutes = 60
+                )
+            }
+        } else {
+            sensorStablingNotified = false
+            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+        }
+
+        if (signalLost) {
+            aapsLogger.warn(LTag.BGSOURCE, "Signal lost detected!")
+            if (!signalLostNotified) {
+                signalLostNotified = true
+                notificationManager.post(
+                    id = NotificationId.AIDEX_SIGNAL_LOST,
+                    textRes = R.string.aidex_signal_lost,
+                    level = NotificationLevel.NORMAL,
+                    validMinutes = 30
+                )
+            }
+        } else {
+            signalLostNotified = false
+            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+        }
+    }
+}

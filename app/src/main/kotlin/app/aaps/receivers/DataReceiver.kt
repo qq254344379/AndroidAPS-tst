@@ -15,6 +15,7 @@ import app.aaps.core.utils.extensions.copyLong
 import app.aaps.core.utils.extensions.copyString
 import app.aaps.core.utils.receivers.BundleLogger
 import app.aaps.core.utils.receivers.DataWorkerStorage
+import app.aaps.plugins.source.AidexPlugin
 import app.aaps.plugins.source.DexcomPlugin
 import app.aaps.plugins.source.GlimpPlugin
 import app.aaps.plugins.source.MM640gPlugin
@@ -104,6 +105,10 @@ open class DataReceiver : DaggerBroadcastReceiver() {
 
             Intents.DEXCOM_BG, Intents.DEXCOM_G7_BG   ->
                 OneTimeWorkRequest.Builder(DexcomPlugin.DexcomWorker::class.java)
+                    .setInputData(dataWorkerStorage.storeInputData(bundle, intent.action)).build()
+
+            Intents.AIDEX_NEW_BG_ESTIMATE             ->
+                OneTimeWorkRequest.Builder(AidexPlugin.AidexWorker::class.java)
                     .setInputData(dataWorkerStorage.storeInputData(bundle, intent.action)).build()
 
             else                                      -> null
