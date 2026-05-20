@@ -13,6 +13,7 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.receivers.Intents
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.utils.extensions.copyBoolean
 import app.aaps.core.utils.extensions.copyDouble
 import app.aaps.core.utils.extensions.copyLong
 import app.aaps.core.utils.extensions.copyString
@@ -135,8 +136,22 @@ open class DataReceiver : DaggerBroadcastReceiver() {
 
 
             Intents.AIDEX_NEW_BG_ESTIMATE             ->
-                OneTimeWorkRequest.Builder(AidexPlugin.AidexWorker::class.java)
-                    .setInputData(dataWorkerStorage.storeInputData(bundle, intent.action)).build()
+                enqueueInline(
+                    context, AidexPlugin.AidexWorker::class.java,
+                    Data.Builder().also {
+                        it.copyLong(Intents.AIDEX_TIMESTAMP, bundle)
+                        it.copyString(Intents.AIDEX_BG_TYPE, bundle)
+                        it.copyDouble(Intents.AIDEX_BG_VALUE, bundle)
+                        it.copyString(Intents.AIDEX_BG_SLOPE_NAME, bundle)
+                        it.copyString(Intents.AIDEX_TRANSMITTER_SN, bundle)
+                        it.copyString(Intents.AIDEX_SENSOR_ID, bundle)
+                        it.copyBoolean(Intents.AIDEX_SENSOR_EXPIRED, bundle)
+                        it.copyBoolean(Intents.EXTRA_SENSOR_ERROR,bundle)
+                        it.copyBoolean(Intents.EXTRA_SENSOR_STABILIZING, bundle)
+                        it.copyBoolean(Intents.EXTRA_REPLACE_SENSOR, bundle)
+                        it.copyBoolean(Intents.EXTRA_SIGNAL_LOST, bundle)
+                    }.build()
+                )
 
 
         }

@@ -23,7 +23,6 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
 import app.aaps.core.interfaces.source.BgSource
-import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.objects.workflow.LoggingWorker
 import app.aaps.core.ui.compose.icons.IcGenericCgm
 import app.aaps.core.utils.receivers.DataWorkerStorage
@@ -87,25 +86,25 @@ class AidexPlugin @Inject constructor(
             var ret = Result.success()
 
             if (!aidexPlugin.isEnabled()) return Result.success(workDataOf("Result" to "Plugin not enabled"))
-            val bundle = dataWorkerStorage.pickupBundle(inputData.getLong(DataWorkerStorage.STORE_KEY, -1))
-                ?: return Result.failure(workDataOf("Error" to "missing input data"))
+            val timestamp = inputData.getLong(Intents.AIDEX_TIMESTAMP, 0)
+            val bgType = inputData.getString(Intents.AIDEX_BG_TYPE) ?: "mg/dl"
+            val bgValue = inputData.getDouble(Intents.AIDEX_BG_VALUE, 0.0)
+            val bgSlopeName = inputData.getString(Intents.AIDEX_BG_SLOPE_NAME)
+            val transmitterSN = inputData.getString(Intents.AIDEX_TRANSMITTER_SN)
+            val sensorId = inputData.getString(Intents.AIDEX_SENSOR_ID)
 
-            aapsLogger.debug(LTag.BGSOURCE, "Received Aidex data: $bundle")
-
-            if (bundle.containsKey(Intents.AIDEX_TRANSMITTER_SN)) aapsLogger.debug(LTag.BGSOURCE, "transmitterSerialNumber: " + bundle.getString(Intents.AIDEX_TRANSMITTER_SN))
-            if (bundle.containsKey(Intents.AIDEX_SENSOR_ID)) aapsLogger.debug(LTag.BGSOURCE, "sensorId: " + bundle.getString(Intents.AIDEX_SENSOR_ID))
-
-            val timestamp = bundle.getLong(Intents.AIDEX_TIMESTAMP, 0)
-            val bgType = bundle.getString(Intents.AIDEX_BG_TYPE, "mg/dl")
-            val bgValue = bundle.getDouble(Intents.AIDEX_BG_VALUE, 0.0)
+            aapsLogger.debug(LTag.BGSOURCE, "Received Aidex data [timestamp=$timestamp, bgType=$bgType, bgValue=$bgValue]")
+            if (transmitterSN != null) aapsLogger.debug(LTag.BGSOURCE, "transmitterSerialNumber: $transmitterSN")
+            if (sensorId != null) aapsLogger.debug(LTag.BGSOURCE, "sensorId: $sensorId")
 
             val bgValueTarget = if (bgType.equals("mg/dl")) bgValue else bgValue * Constants.MMOLL_TO_MGDL
 
-            val sensorExpired = bundle.getBoolean(Intents.AIDEX_SENSOR_EXPIRED, false)
-            val sensorError = bundle.getBoolean(Intents.EXTRA_SENSOR_ERROR, false)
-            val sensorStabling = bundle.getBoolean(Intents.EXTRA_SENSOR_STABILIZING, false)
-            val replaceSensor = bundle.getBoolean(Intents.EXTRA_REPLACE_SENSOR, false)
-            val signalLost = bundle.getBoolean(Intents.EXTRA_SIGNAL_LOST, false)
+            val sensorExpired = inputData.getBoolean(Intents.AIDEX_SENSOR_EXPIRED, false)
+            val sensorError = inputData.getBoolean(Intents.EXTRA_SENSOR_ERROR, false)
+            val sensorStabling = inputData.getBoolean(Intents.EXTRA_SENSOR_STABILIZING, false)
+            val replaceSensor = inputData.getBoolean(Intents.EXTRA_REPLACE_SENSOR, false)
+            val signalLost = inputData.getBoolean(Intents.EXTRA_SIGNAL_LOST, false)
+
 
             aidexPlugin.handleSensorNotifications(sensorExpired, sensorError, sensorStabling, replaceSensor, signalLost)
 
@@ -122,7 +121,7 @@ class AidexPlugin @Inject constructor(
                     value = bgValueTarget,
                     raw = null,
                     noise = null,
-                    trendArrow = TrendArrow.fromString(bundle.getString(Intents.AIDEX_BG_SLOPE_NAME)),
+                    trendArrow = TrendArrow.fromString(bgSlopeName),
                     sourceSensor = SourceSensor.AIDEX
                 )
                 try {
