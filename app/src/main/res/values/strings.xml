@@ -15,6 +15,7 @@
     <string name="enable_missed_bg_readings_alert">Alert if no BG data is received</string>
     <string name="enable_pump_unreachable_alert">Alert if pump is unreachable</string>
     <string name="pump_unreachable_threshold">Pump unreachable threshold [min]</string>
+    <string name="pump_unpair">Unpair pump</string>
     <string name="enable_carbs_req_alert">Alert if carbs are required</string>
     <string name="open_navigation">Open navigation</string>
     <string name="close_navigation">Close navigation</string>
@@ -32,5 +33,4 @@
     <string name="simple_mode">Simple mode</string>
     <string name="select">Select</string>
     <string name="set">Set</string>
-
 </resources>
