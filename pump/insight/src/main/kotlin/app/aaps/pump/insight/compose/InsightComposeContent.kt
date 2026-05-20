@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -174,6 +175,7 @@ class InsightComposeContent(
                 PairWizardHost(
                     blePreCheck = blePreCheck,
                     pumpSync = pumpSync,
+                    rxBus = rxBus,
                     onFinish = { currentScreen = InsightScreen.OVERVIEW }
                 )
             }
@@ -185,6 +187,7 @@ class InsightComposeContent(
 private fun PairWizardHost(
     blePreCheck: BlePreCheck,
     pumpSync: PumpSync,
+    rxBus: RxBus,
     onFinish: () -> Unit
 ) {
     var bleReady by remember { mutableStateOf(false) }
@@ -203,6 +206,7 @@ private fun PairWizardHost(
         InsightPairState(
             context = context,
             pumpSync = pumpSync,
+            rxBus = rxBus,
             scope = coroutineScope
         )
     }
@@ -445,7 +449,7 @@ internal class InsightOverviewState(
         add(
             PumpAction(
                 label = rh.gs(CoreUiR.string.refresh),
-                iconRes = CoreUiR.drawable.ic_refresh,
+                icon = Icons.Filled.Refresh,
                 category = ActionCategory.PRIMARY,
                 enabled = !refreshPending,
                 onClick = {
@@ -490,7 +494,7 @@ internal class InsightOverviewState(
             add(
                 PumpAction(
                     label = rh.gs(R.string.unpair),
-                    iconRes = CoreUiR.drawable.ic_bluetooth_white_48dp,
+                    icon = Icons.Filled.Bluetooth,
                     category = ActionCategory.MANAGEMENT,
                     onClick = { _events.tryEmit(InsightOverviewEvent.RequestUnpair) }
                 )
@@ -499,7 +503,7 @@ internal class InsightOverviewState(
             add(
                 PumpAction(
                     label = rh.gs(R.string.insight_pairing),
-                    iconRes = CoreUiR.drawable.ic_bluetooth_white_48dp,
+                    icon = Icons.Filled.Bluetooth,
                     category = ActionCategory.MANAGEMENT,
                     onClick = { _events.tryEmit(InsightOverviewEvent.StartPairing) }
                 )

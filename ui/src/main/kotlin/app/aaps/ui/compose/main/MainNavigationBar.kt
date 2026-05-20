@@ -1,5 +1,6 @@
 package app.aaps.ui.compose.main
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fastfood
@@ -17,7 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.aaps.core.interfaces.plugin.PluginBase
@@ -35,11 +36,17 @@ fun MainNavigationBar(
     modifier: Modifier = Modifier,
     quickWizardCount: Int = 0,
     onAutomationClick: () -> Unit = {},
+    /** Total scenes + automation items defined — drives whether the nav button is shown at all. */
+    automationTotal: Int = 0,
+    /** Subset of [automationTotal] that the user can activate right now — drives the badge. */
     automationCount: Int = 0,
     pumpSetupPlugin: PluginBase? = null,
     bgSetupPlugin: PluginBase? = null,
-    bgQualityBadgeIconRes: Int = 0,
+    bgQualityBadgeIcon: ImageVector? = null,
+    bgQualityBadgeTint: Color = Color.Unspecified,
     bgQualityBadgeDescription: String? = null,
+    objectivesSetupPlugin: PluginBase? = null,
+    objectivesProgressText: String? = null,
     onNavigate: (NavigationRequest) -> Unit = {},
     permissionsMissing: Boolean = false,
     onPermissionsClick: () -> Unit = {},
@@ -55,8 +62,9 @@ fun MainNavigationBar(
     )
 
     NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
+        windowInsets = WindowInsets(0),
         modifier = modifier
     ) {
         // Treatment action button (opens bottom sheet)
@@ -84,27 +92,31 @@ fun MainNavigationBar(
             colors = navColors
         )
 
-        // Automation action button (visible only when actions are available)
-        if (automationCount > 0) {
+        // Scenes/automation button — visible whenever scenes or automation items exist
+        // (regardless of pump/loop/profile state). The badge counts only items the user
+        // can act on right now; gated items are visible inside the sheet, dimmed with reason.
+        if (automationTotal > 0) {
             NavigationBarItem(
                 selected = false,
                 onClick = onAutomationClick,
                 icon = {
                     BadgedBox(
                         badge = {
-                            Badge(containerColor = AapsTheme.generalColors.statusNormal, contentColor = Color.Black) {
-                                Text(text = automationCount.toString())
+                            if (automationCount > 0) {
+                                Badge(containerColor = AapsTheme.generalColors.statusNormal, contentColor = Color.Black) {
+                                    Text(text = automationCount.toString())
+                                }
                             }
                         }
                     ) {
                         Icon(
                             imageVector = IcAutomation,
-                            contentDescription = stringResource(CoreUiR.string.automation),
+                            contentDescription = stringResource(CoreUiR.string.scenes),
                             modifier = Modifier.size(24.dp)
                         )
                     }
                 },
-                label = { Text(text = stringResource(CoreUiR.string.automation)) },
+                label = { Text(text = stringResource(CoreUiR.string.scenes)) },
                 colors = navColors
             )
         }
@@ -155,12 +167,12 @@ fun MainNavigationBar(
                 icon = {
                     BadgedBox(
                         badge = {
-                            if (bgQualityBadgeIconRes != 0) {
+                            if (bgQualityBadgeIcon != null) {
                                 Badge(containerColor = Color.Transparent) {
                                     Icon(
-                                        painter = painterResource(id = bgQualityBadgeIconRes),
+                                        imageVector = bgQualityBadgeIcon,
                                         contentDescription = bgQualityBadgeDescription,
-                                        tint = Color.Unspecified,
+                                        tint = bgQualityBadgeTint,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -171,6 +183,41 @@ fun MainNavigationBar(
                     ) {
                         Icon(
                             imageVector = bgIcon,
+                            contentDescription = label,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                },
+                label = { Text(text = label) },
+                colors = navColors
+            )
+        }
+
+        // Objectives progress (visible while any objective is not yet accomplished)
+        val objectivesIcon = objectivesSetupPlugin?.pluginDescription?.icon
+        if (objectivesSetupPlugin != null && objectivesIcon != null) {
+            val label = stringResource(objectivesSetupPlugin.pluginDescription.pluginName)
+            NavigationBarItem(
+                selected = false,
+                onClick = { onNavigate(NavigationRequest.Plugin(objectivesSetupPlugin.javaClass.simpleName)) },
+                icon = {
+                    BadgedBox(
+                        badge = {
+                            if (objectivesProgressText != null) {
+                                Badge(
+                                    containerColor = AapsTheme.generalColors.statusWarning,
+                                    contentColor = Color.Black
+                                ) { Text(text = objectivesProgressText) }
+                            } else {
+                                Badge(
+                                    containerColor = AapsTheme.generalColors.statusWarning,
+                                    contentColor = Color.Black
+                                ) { Text("!") }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = objectivesIcon,
                             contentDescription = label,
                             modifier = Modifier.size(24.dp)
                         )

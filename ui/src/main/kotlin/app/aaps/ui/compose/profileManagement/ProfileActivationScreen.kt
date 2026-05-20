@@ -12,15 +12,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -53,6 +53,7 @@ import app.aaps.core.data.configuration.Constants
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.DateTimeSection
+import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.EventTimeRow
 import app.aaps.core.ui.compose.LocalDateUtil
 import app.aaps.core.ui.compose.NumberInputRow
@@ -60,9 +61,7 @@ import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.dialogs.DatePickerModal
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
 import app.aaps.core.ui.compose.dialogs.TimePickerModal
-import app.aaps.core.ui.compose.navigation.ElementType
-import app.aaps.core.ui.compose.navigation.color
-import app.aaps.core.ui.compose.navigation.icon
+import app.aaps.core.ui.compose.rememberBringIntoViewOnExpand
 import app.aaps.ui.R
 import java.util.Calendar
 
@@ -217,31 +216,12 @@ fun ProfileActivationScreen(
     Scaffold(
         topBar = {
             AapsTopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = ElementType.PROFILE_MANAGEMENT.icon(),
-                            contentDescription = null,
-                            tint = ElementType.PROFILE_MANAGEMENT.color()
-                        )
-                        Column {
-                            Text(stringResource(R.string.activate_label))
-                            Text(
-                                text = profileName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
+                title = { Text(stringResource(R.string.activate_label)) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(app.aaps.core.ui.R.string.back)
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(app.aaps.core.ui.R.string.close)
                         )
                     }
                 },
@@ -250,10 +230,13 @@ fun ProfileActivationScreen(
         },
         bottomBar = {
             Button(
-                onClick = { showConfirmDialog = true },
+                onClick = {
+                    focusManager.clearFocus()
+                    showConfirmDialog = true
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .imePadding()
+                    .bottomBarSafeArea()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Icon(
@@ -311,7 +294,8 @@ fun ProfileActivationScreen(
 
                     // Timeshift (collapsible)
                     var timeshiftExpanded by rememberSaveable { mutableStateOf(false) }
-                    Column(modifier = itemModifier) {
+                    val timeshiftExpandRequester = rememberBringIntoViewOnExpand(timeshiftExpanded)
+                    Column(modifier = itemModifier.bringIntoViewRequester(timeshiftExpandRequester)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,

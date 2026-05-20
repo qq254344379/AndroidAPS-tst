@@ -15,7 +15,6 @@ import app.aaps.core.interfaces.source.NSClientSource
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.remotemodel.LastModified
-import app.aaps.core.utils.receivers.DataWorkerStorage
 import app.aaps.plugins.sync.nsShared.NsIncomingDataProcessor
 import app.aaps.plugins.sync.nsclient.ReceiverDelegate
 import app.aaps.plugins.sync.nsclientV3.DataSyncSelectorV3
@@ -35,6 +34,7 @@ import org.mockito.Mock
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
+import org.mockito.kotlin.verifyBlocking
 import org.mockito.kotlin.whenever
 import kotlin.test.assertIs
 import kotlin.time.Duration.Companion.seconds
@@ -57,7 +57,6 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
 
     private lateinit var nsClientV3Plugin: NSClientV3Plugin
     private lateinit var receiverDelegate: ReceiverDelegate
-    private lateinit var dataWorkerStorage: DataWorkerStorage
     private lateinit var sut: LoadProfileStoreWorker
 
     init {
@@ -67,7 +66,6 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
                 it.fabricPrivacy = fabricPrivacy
                 it.dateUtil = dateUtil
                 it.nsClientV3Plugin = nsClientV3Plugin
-                it.dataWorkerStorage = dataWorkerStorage
                 it.nsIncomingDataProcessor = nsIncomingDataProcessor
                 it.nsClientRepository = nsClientRepository
             }
@@ -76,7 +74,6 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
 
     @BeforeEach
     fun setUp() {
-        dataWorkerStorage = DataWorkerStorage(context)
         whenever(persistenceLayer.observeChanges(anyOrNull<Class<*>>())).thenReturn(emptyFlow())
         whenever(persistenceLayer.observeAnyChange()).thenReturn(emptyFlow())
         whenever(receiverStatusStore.networkStatusFlow).thenReturn(MutableStateFlow(null))
@@ -85,7 +82,7 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
         nsClientV3Plugin = NSClientV3Plugin(
             aapsLogger, rh, preferences, rxBus, context,
             receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
-            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, activePlugin
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, profileRepository
         )
         nsClientV3Plugin.newestDataOnServer = LastModified(LastModified.Collections())
     }
@@ -247,7 +244,7 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
         val result = sut.doWorkAndLog()
 
         assertIs<ListenableWorker.Result.Success>(result)
-        verify(nsIncomingDataProcessor, never()).processProfile(org.mockito.kotlin.any(), anyBoolean())
+        verifyBlocking(nsIncomingDataProcessor, never()) { processProfile(org.mockito.kotlin.any(), anyBoolean()) }
     }
 
     @Test
@@ -275,10 +272,12 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
         val result = sut.doWorkAndLog()
 
         assertIs<ListenableWorker.Result.Success>(result)
-        verify(nsIncomingDataProcessor).processProfile(
-            org.mockito.kotlin.argThat { getString("defaultProfile") == "Profile2" },
-            anyBoolean()
-        )
+        verifyBlocking(nsIncomingDataProcessor) {
+            processProfile(
+                org.mockito.kotlin.argThat { getString("defaultProfile") == "Profile2" },
+                anyBoolean()
+            )
+        }
     }
 
     @Test
@@ -319,6 +318,6 @@ internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
         val result = sut.doWorkAndLog()
 
         assertIs<ListenableWorker.Result.Success>(result)
-        verify(nsIncomingDataProcessor).processProfile(org.mockito.kotlin.any(), org.mockito.kotlin.eq(true))
+        verifyBlocking(nsIncomingDataProcessor) { processProfile(org.mockito.kotlin.any(), org.mockito.kotlin.eq(true)) }
     }
 }

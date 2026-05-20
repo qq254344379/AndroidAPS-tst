@@ -51,10 +51,12 @@ fun SetupWizardScreen(
     onBack: () -> Unit,
     onImportSettings: () -> Unit,
     onPluginPreferences: (pluginId: String) -> Unit,
+    onPluginOpen: (pluginId: String) -> Unit,
     onSetMasterPassword: () -> Unit,
     onManageInsulin: () -> Unit,
     onManageProfile: () -> Unit,
     onProfileSwitch: () -> Unit,
+    onRunObjectives: () -> Unit,
     onRequestDirectoryAccess: () -> Unit,
     onRequestPermission: (app.aaps.core.interfaces.plugin.PermissionGroup) -> Unit,
     permissionItems: () -> List<Pair<app.aaps.core.interfaces.plugin.PermissionGroup, Boolean>>,
@@ -65,10 +67,12 @@ fun SetupWizardScreen(
     DisposableEffect(Unit) {
         swDefinition.onImportSettings = onImportSettings
         swDefinition.onPluginPreferences = onPluginPreferences
+        swDefinition.onPluginOpen = onPluginOpen
         swDefinition.onSetMasterPassword = onSetMasterPassword
         swDefinition.onManageInsulin = onManageInsulin
         swDefinition.onManageProfile = onManageProfile
         swDefinition.onProfileSwitch = onProfileSwitch
+        swDefinition.onRunObjectives = onRunObjectives
         swDefinition.onRequestDirectoryAccess = onRequestDirectoryAccess
         swDefinition.onRequestPermission = onRequestPermission
         swDefinition.permissionItems = permissionItems
@@ -76,10 +80,12 @@ fun SetupWizardScreen(
         onDispose {
             swDefinition.onImportSettings = null
             swDefinition.onPluginPreferences = null
+            swDefinition.onPluginOpen = null
             swDefinition.onSetMasterPassword = null
             swDefinition.onManageInsulin = null
             swDefinition.onManageProfile = null
             swDefinition.onProfileSwitch = null
+            swDefinition.onRunObjectives = null
             swDefinition.onRequestDirectoryAccess = null
             swDefinition.onRequestPermission = null
             swDefinition.permissionItems = null
@@ -174,7 +180,7 @@ fun SetupWizardScreen(
                     title = { Text(currentScreen?.getHeaderCompose() ?: stringResource(app.aaps.core.ui.R.string.nav_setupwizard)) },
                     navigationIcon = {
                         IconButton(onClick = { showExitDialog = true }) {
-                            Icon(Icons.Default.Close, contentDescription = null)
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(app.aaps.core.ui.R.string.close))
                         }
                     }
                 )

@@ -74,5 +74,9 @@ interface Intents {
         const val EXTRA_REPLACE_SENSOR = "com.microtechmd.cgms.aidex.ReplaceSensor"
 
         const val EXTRA_SIGNAL_LOST = "com.microtechmd.cgms.aidex.SignalLost"
+
+        // Instara App -> AAPS
+        // NOTE: The action name for INSTARA_APP is still called "Teljane_APP"
+        const val INSTARA_APP = "info.nightscout.androidaps.action.Teljane_APP"
     }
 }

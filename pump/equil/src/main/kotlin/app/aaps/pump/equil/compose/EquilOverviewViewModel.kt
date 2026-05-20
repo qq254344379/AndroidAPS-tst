@@ -9,12 +9,15 @@ import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.pump.PumpInsulin
-import app.aaps.core.interfaces.queue.Callback
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.interfaces.Preferences
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.SwapHoriz
 import app.aaps.core.ui.compose.StatusLevel
 import app.aaps.core.ui.compose.pump.ActionCategory
 import app.aaps.core.ui.compose.pump.PumpAction
@@ -34,6 +37,7 @@ import android.content.Context
 import app.aaps.core.interfaces.pump.PumpRate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -224,7 +228,7 @@ class EquilOverviewViewModel @Inject constructor(
             add(
                 PumpAction(
                 label = rh.gs(R.string.equil_pair),
-                iconRes = CoreUiR.drawable.ic_bluetooth_white_48dp,
+                icon = Icons.Filled.Bluetooth,
                 category = ActionCategory.MANAGEMENT,
                 onClick = { _events.tryEmit(EquilOverviewEvent.StartWizard(EquilWorkflow.PAIR)) }
             ))
@@ -232,21 +236,21 @@ class EquilOverviewViewModel @Inject constructor(
             add(
                 PumpAction(
                 label = rh.gs(R.string.equil_dressing),
-                iconRes = CoreUiR.drawable.ic_swap_horiz,
+                icon = Icons.Filled.SwapHoriz,
                 category = ActionCategory.MANAGEMENT,
                 onClick = { _events.tryEmit(EquilOverviewEvent.StartWizard(EquilWorkflow.CHANGE_INSULIN)) }
             ))
             add(
                 PumpAction(
                 label = rh.gs(CoreUiR.string.history),
-                iconRes = CoreUiR.drawable.ic_pump_history,
+                icon = Icons.Filled.History,
                 category = ActionCategory.MANAGEMENT,
                 onClick = { _events.tryEmit(EquilOverviewEvent.StartHistory) }
             ))
             add(
                 PumpAction(
                 label = rh.gs(R.string.equil_unbind),
-                iconRes = CoreUiR.drawable.ic_bluetooth_white_48dp,
+                icon = Icons.Filled.Bluetooth,
                 category = ActionCategory.MANAGEMENT,
                 onClick = { _events.tryEmit(EquilOverviewEvent.StartWizard(EquilWorkflow.UNPAIR)) }
             ))
@@ -257,19 +261,15 @@ class EquilOverviewViewModel @Inject constructor(
         val runMode = equilManager.equilState?.runMode ?: return
         val targetMode = if (runMode == RunMode.RUN) RunMode.SUSPEND else RunMode.RUN
         _isModeChanging.value = true
-        commandQueue.customCommand(
-            CmdModelSet(targetMode.command, aapsLogger, preferences, equilManager),
-            object : Callback() {
-                override fun run() {
-                    _isModeChanging.value = false
-                    aapsLogger.debug(LTag.PUMPCOMM, "toggleMode result: ${result.success}")
-                    if (result.success) {
-                        equilManager.equilState?.runMode = targetMode
-                        _refreshTrigger.value = System.currentTimeMillis()
-                    }
-                }
+        viewModelScope.launch {
+            val r = commandQueue.customCommand(CmdModelSet(targetMode.command, aapsLogger, preferences, equilManager))
+            _isModeChanging.value = false
+            aapsLogger.debug(LTag.PUMPCOMM, "toggleMode result: ${r.success}")
+            if (r.success) {
+                equilManager.equilState?.runMode = targetMode
+                _refreshTrigger.value = System.currentTimeMillis()
             }
-        )
+        }
     }
 
     private fun readableDuration(duration: Duration): String {

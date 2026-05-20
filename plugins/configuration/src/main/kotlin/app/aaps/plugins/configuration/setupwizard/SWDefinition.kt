@@ -6,8 +6,8 @@ import app.aaps.core.interfaces.constraints.Objectives
 import app.aaps.core.interfaces.maintenance.FileListProvider
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PermissionGroup
-import app.aaps.core.interfaces.profile.LocalProfileManager
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.pump.Medtrum
 import app.aaps.core.interfaces.pump.OmnipodDash
 import app.aaps.core.interfaces.pump.OmnipodEros
@@ -15,6 +15,7 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventConfigBuilderChange
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventSWRLStatus
 import app.aaps.core.interfaces.rx.events.EventSWSyncStatus
@@ -29,7 +30,6 @@ import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.crypto.CryptoUtil
 import app.aaps.plugins.configuration.R
-import app.aaps.plugins.configuration.configBuilder.events.EventConfigBuilderUpdateGui
 import app.aaps.plugins.configuration.setupwizard.elements.SWBreak
 import app.aaps.plugins.configuration.setupwizard.elements.SWButton
 import app.aaps.plugins.configuration.setupwizard.elements.SWEditEncryptedPassword
@@ -56,7 +56,7 @@ class SWDefinition @Inject constructor(
     private val preferences: Preferences,
     private val profileFunction: ProfileFunction,
     private val activePlugin: ActivePlugin,
-    private val localProfileManager: LocalProfileManager,
+    private val profileRepository: ProfileRepository,
     private val commandQueue: CommandQueue,
     private val fileListProvider: FileListProvider,
     private val cryptoUtil: CryptoUtil,
@@ -82,10 +82,12 @@ class SWDefinition @Inject constructor(
 
     var onImportSettings: (() -> Unit)? = null
     var onPluginPreferences: ((pluginId: String) -> Unit)? = null
+    var onPluginOpen: ((pluginId: String) -> Unit)? = null
     var onSetMasterPassword: (() -> Unit)? = null
     var onManageInsulin: (() -> Unit)? = null
     var onManageProfile: (() -> Unit)? = null
     var onProfileSwitch: (() -> Unit)? = null
+    var onRunObjectives: (() -> Unit)? = null
     var onRequestDirectoryAccess: (() -> Unit)? = null
     var onRequestPermission: ((PermissionGroup) -> Unit)? = null
     var permissionItems: (() -> List<Pair<PermissionGroup, Boolean>>)? = null
@@ -97,6 +99,7 @@ class SWDefinition @Inject constructor(
         swPluginProvider.get()
             .option(pType, description)
             .onPreferences { pluginId -> onPluginPreferences?.invoke(pluginId) }
+            .onOpenPlugin { pluginId -> onPluginOpen?.invoke(pluginId) }
 
     fun getScreens(): List<SWScreen> {
         if (screens.isEmpty()) {
@@ -106,7 +109,7 @@ class SWDefinition @Inject constructor(
                 config.AAPSCLIENT -> swDefinitionNSClient()
             }
             disposable += rxBus
-                .toObservable(EventConfigBuilderUpdateGui::class.java)
+                .toObservable(EventConfigBuilderChange::class.java)
                 .observeOn(aapsSchedulers.main)
                 .subscribe { rxBus.send(EventSWUpdate(true)) }
         }
@@ -144,7 +147,6 @@ class SWDefinition @Inject constructor(
             .add(swInfoTextProvider.get().label(R.string.setupwizard_units_prompt))
             .add(
                 swRadioButtonProvider.get()
-                    .option(uiInteraction.unitsEntries, uiInteraction.unitsValues)
                     .preference(StringKey.GeneralUnits)
             )
             .validator { preferences.get(StringKey.GeneralUnits).isNotEmpty() }
@@ -257,7 +259,7 @@ class SWDefinition @Inject constructor(
             .add(swInfoTextProvider.get().label(R.string.setupwizard_profile_info))
             .add(swBreakProvider.get())
             .add(swButtonProvider.get().text(app.aaps.core.ui.R.string.profile).action { onManageProfile?.invoke() })
-            .validator { localProfileManager.numOfProfiles > 0 && localProfileManager.isValid() }
+            .validator { profileRepository.profiles.value.let { it.isNotEmpty() && it.all { p -> profileRepository.validateStructured(p).isEmpty() } } }
 
     private val screenProfileSwitch
         get() = swScreenProvider.get().with(app.aaps.core.ui.R.string.careportal_profileswitch)
@@ -333,8 +335,10 @@ class SWDefinition @Inject constructor(
         get() = swScreenProvider.get().with(app.aaps.core.ui.R.string.objectives)
             .skippable(false)
             .add(swInfoTextProvider.get().label(R.string.startobjective))
+            .add(swBreakProvider.get())
+            .add(swButtonProvider.get().text(R.string.open_objectives).action { onRunObjectives?.invoke() })
             .validator { activePlugin.activeObjectives?.isStarted(Objectives.FIRST_OBJECTIVE) == true }
-            .visibility { config.APS && activePlugin.activeObjectives?.isStarted(Objectives.FIRST_OBJECTIVE) == false }
+            .visibility { config.APS && activePlugin.activeObjectives?.allAccomplished == false }
 
     private fun swDefinitionFull() = // List all the screens here
         add(screenSetupWizard)

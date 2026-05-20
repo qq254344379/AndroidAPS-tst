@@ -18,14 +18,17 @@ import app.aaps.wear.complications.LongStatusFlippedComplication
 import app.aaps.wear.complications.SgvComplication
 import app.aaps.wear.complications.SgvComplicationExt1
 import app.aaps.wear.complications.SgvComplicationExt2
+import app.aaps.wear.complications.SgvLargeComplication
 import app.aaps.wear.complications.UploaderBatteryComplication
 import app.aaps.wear.complications.WallpaperComplication
 import app.aaps.wear.heartrate.HeartRateListener
 import app.aaps.wear.tile.ActionsTileService
+import app.aaps.wear.tile.BgGraphTileService
 import app.aaps.wear.tile.RunningModeTileService
 import app.aaps.wear.tile.QuickWizardTileService
 import app.aaps.wear.tile.TempTargetTileService
 import app.aaps.wear.tile.TileBase
+import app.aaps.wear.tile.SceneTileService
 import app.aaps.wear.tile.UserActionTileService
 import app.aaps.wear.watchfaces.CircleWatchface
 import app.aaps.wear.watchfaces.CustomWatchface
@@ -59,6 +62,7 @@ abstract class WearServicesModule {
     @ContributesAndroidInjector abstract fun contributesSgvComplication(): SgvComplication
     @ContributesAndroidInjector abstract fun contributesSgvComplicationExt1(): SgvComplicationExt1
     @ContributesAndroidInjector abstract fun contributesSgvComplicationExt2(): SgvComplicationExt2
+    @ContributesAndroidInjector abstract fun contributesSgvLargeComplication(): SgvLargeComplication
     @ContributesAndroidInjector abstract fun contributesUploaderBatteryComplication(): UploaderBatteryComplication
     @ContributesAndroidInjector abstract fun contributesWallpaperComplication(): WallpaperComplication
 
@@ -67,9 +71,11 @@ abstract class WearServicesModule {
     @ContributesAndroidInjector abstract fun contributesCircleWatchface(): CircleWatchface
     @ContributesAndroidInjector abstract fun contributesCustomWatchface(): CustomWatchface
 
+    @ContributesAndroidInjector abstract fun contributesBgGraphTileService(): BgGraphTileService
     @ContributesAndroidInjector abstract fun contributesTileBase(): TileBase
     @ContributesAndroidInjector abstract fun contributesQuickWizardTileService(): QuickWizardTileService
     @ContributesAndroidInjector abstract fun contributesUserActionTileService(): UserActionTileService
+    @ContributesAndroidInjector abstract fun contributesSceneTileService(): SceneTileService
     @ContributesAndroidInjector abstract fun contributesTempTargetTileService(): TempTargetTileService
     @ContributesAndroidInjector abstract fun contributesActionsTileService(): ActionsTileService
     @ContributesAndroidInjector abstract fun contributesRunningModeTileService(): RunningModeTileService

@@ -29,14 +29,12 @@ dependencies {
     testImplementation(project(":plugins:main"))
     testImplementation(project(":pump:virtual"))
 
-    api(libs.androidx.constraintlayout)
     api(libs.com.google.android.gms.playservices.location)
-    api(libs.kotlin.reflect)
+    implementation(libs.kotlin.reflect)
     // OpenStreetMap for map picker
-    api(libs.org.osmdroid)
+    implementation(libs.org.osmdroid)
 
     // Compose dependencies
-    api(libs.androidx.activity.compose)
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.ui)
     api(libs.androidx.ui.graphics)
@@ -45,7 +43,6 @@ dependencies {
     api(libs.androidx.compose.material3)
     api(libs.androidx.compose.material.icons.extended)
     api(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.lifecycle.process)
     implementation(libs.sh.calvin.reorderable)
 
     ksp(libs.com.google.dagger.compiler)
