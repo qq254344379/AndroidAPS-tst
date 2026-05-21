@@ -480,12 +480,11 @@ internal class InsightOverviewState(
                     onClick = {
                         tbrOverNotificationPending = true
                         refresh()
-                        commandQueue.setTBROverNotification(object : Callback() {
-                            override fun run() {
-                                tbrOverNotificationPending = false
-                                refresh()
-                            }
-                        }, !block.isEnabled)
+                        appScope.launch {
+                            commandQueue.setTBROverNotification(!block.isEnabled)
+                            tbrOverNotificationPending = false
+                            refresh()
+                        }
                     }
                 )
             )

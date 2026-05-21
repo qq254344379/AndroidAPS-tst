@@ -32,8 +32,6 @@ import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.implementation.queue.commands.CommandBolus
 import app.aaps.implementation.queue.commands.CommandCustomCommand
-import app.aaps.implementation.queue.commands.CommandInsightSetTBROverNotification
-import app.aaps.implementation.queue.commands.CommandLoadEvents
 import app.aaps.implementation.queue.commands.CommandLoadHistory
 import app.aaps.implementation.queue.commands.CommandSMBBolus
 import app.aaps.implementation.queue.commands.CommandSetProfile
@@ -70,6 +68,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     @Mock lateinit var persistenceLayer: PersistenceLayer
     @Mock lateinit var pumpSync: PumpSync
     @Mock lateinit var localAlertUtils: LocalAlertUtils
+    private val localAlertUtilsProvider: Provider<LocalAlertUtils> by lazy { Provider { localAlertUtils } }
     @Mock lateinit var jobName: CommandQueueName
     @Mock lateinit var workManager: WorkManager
     @Mock lateinit var infos: ListenableFuture<List<WorkInfo>>
@@ -94,7 +93,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         decimalFormatter: DecimalFormatter,
         pumpEnactResultProvider: Provider<PumpEnactResult>,
         pumpSync: PumpSync,
-        localAlertUtils: LocalAlertUtils,
+        localAlertUtils: Provider<LocalAlertUtils>,
         jobName: CommandQueueName,
         workManager: WorkManager,
         appScope: CoroutineScope,
@@ -115,8 +114,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             when (it) {
                 is CommandBolus                         -> it.pumpEnactResultProvider = pumpEnactResultProvider
                 is CommandCustomCommand                 -> it.pumpEnactResultProvider = pumpEnactResultProvider
-                is CommandInsightSetTBROverNotification -> it.pumpEnactResultProvider = pumpEnactResultProvider
-                is CommandLoadEvents                    -> it.pumpEnactResultProvider = pumpEnactResultProvider
                 is CommandLoadHistory                   -> it.pumpEnactResultProvider = pumpEnactResultProvider
                 is CommandSMBBolus                      -> it.pumpEnactResultProvider = pumpEnactResultProvider
                 is CommandSetProfile                    -> it.pumpEnactResultProvider = pumpEnactResultProvider
@@ -144,11 +141,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
                 it.rh = rh
                 it.activePlugin = activePlugin
             }
-            if (it is CommandLoadEvents) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
             if (it is QueueWorker) {
                 it.aapsLogger = aapsLogger
                 it.queue = commandQueue
@@ -171,7 +163,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             whenever(persistenceLayer.observeChanges(anyOrNull<Class<*>>())).thenReturn(emptyFlow())
             commandQueue = CommandQueueMocked(
                 injector, aapsLogger, rxBus, rh, constraintChecker, profileFunction, activePlugin,
-                config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtils, jobName, workManager, testScope, bolusProgressData
+                config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, jobName, workManager, testScope, bolusProgressData
             )
             testPumpPlugin.pumpDescription.basalMinimumRate = 0.1
             testPumpPlugin.connected = true
@@ -220,7 +212,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         commandQueue = CommandQueueImplementation(
             injector, aapsLogger, rxBus, rh,
             constraintChecker, profileFunction, activePlugin,
-            config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtils, jobName, workManager, testScope, bolusProgressData
+            config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, jobName, workManager, testScope, bolusProgressData
         )
         val handler: Handler = mock()
         whenever(handler.post(anyOrNull())).thenAnswer { invocation: InvocationOnMock ->
@@ -305,7 +297,8 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         assertThat(commandQueue.size()).isEqualTo(3)
 
         // add loadEvents
-        commandQueue.loadEvents(null)
+        backgroundScope.launch { commandQueue.loadEvents() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(4)
 
         // add clearAlarms
@@ -416,18 +409,20 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun isLoadEventsCommandInQueue() {
+    fun isLoadEventsCommandInQueue() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.loadEvents(null)
+        backgroundScope.launch { commandQueue.loadEvents() }
+        yield()
 
         // then
         assertThat(commandQueue.isReadStatusScheduled()).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
-        commandQueue.loadEvents(null)
+        // next replaces the previously queued command (size stays at 1)
+        backgroundScope.launch { commandQueue.loadEvents() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
@@ -583,12 +578,13 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun isSetTbrNotificationCommandInQueue() {
+    fun isSetTbrNotificationCommandInQueue() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.setTBROverNotification(null, true)
+        backgroundScope.launch { commandQueue.setTBROverNotification(true) }
+        yield()
 
         // then
         assertThat(commandQueue.isReadStatusScheduled()).isFalse()

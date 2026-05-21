@@ -6,8 +6,6 @@ import app.aaps.implementation.queue.CommandQueueName
 import app.aaps.implementation.queue.QueueWorker
 import app.aaps.implementation.queue.commands.CommandBolus
 import app.aaps.implementation.queue.commands.CommandCustomCommand
-import app.aaps.implementation.queue.commands.CommandInsightSetTBROverNotification
-import app.aaps.implementation.queue.commands.CommandLoadEvents
 import app.aaps.implementation.queue.commands.CommandLoadHistory
 import app.aaps.implementation.queue.commands.CommandReadStatus
 import app.aaps.implementation.queue.commands.CommandSMBBolus
@@ -37,8 +35,6 @@ open class CommandQueueModule {
 
         @ContributesAndroidInjector fun queueWorkerInjector(): QueueWorker
         @ContributesAndroidInjector fun commandBolusInjector(): CommandBolus
-        @ContributesAndroidInjector fun commandInsightSetTBROverNotificationInjector(): CommandInsightSetTBROverNotification
-        @ContributesAndroidInjector fun commandLoadEventsInjector(): CommandLoadEvents
         @ContributesAndroidInjector fun commandLoadHistoryInjector(): CommandLoadHistory
         @ContributesAndroidInjector fun commandReadStatusInjector(): CommandReadStatus
         @ContributesAndroidInjector fun commandSetProfileInjector(): CommandSetProfile

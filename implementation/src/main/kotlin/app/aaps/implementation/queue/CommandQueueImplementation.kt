@@ -103,7 +103,7 @@ class CommandQueueImplementation @Inject constructor(
     private val decimalFormatter: DecimalFormatter,
     private val pumpEnactResultProvider: Provider<PumpEnactResult>,
     private val pumpSync: PumpSync,
-    private val localAlertUtils: LocalAlertUtils,
+    private val localAlertUtils: Provider<LocalAlertUtils>,
     private val jobName: CommandQueueName,
     private val workManager: WorkManager,
     @ApplicationScope private val appScope: CoroutineScope,
@@ -450,9 +450,13 @@ class CommandQueueImplementation @Inject constructor(
         return deferred.await()
     }
 
-    override fun setTBROverNotification(callback: Callback?, enable: Boolean) {
-        add(CommandInsightSetTBROverNotification(injector, enable, callback))
+    override suspend fun setTBROverNotification(enable: Boolean): PumpEnactResult {
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandInsightSetTBROverNotification(aapsLogger, rh, activePlugin, pumpEnactResultProvider, enable, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
+        return deferred.await()
     }
 
     @Synchronized
@@ -576,7 +580,7 @@ class CommandQueueImplementation @Inject constructor(
             return executingNowError()
         }
         val deferred = CompletableDeferred<PumpEnactResult>()
-        add(CommandReadStatus(aapsLogger, rh, activePlugin, localAlertUtils, pumpEnactResultProvider, reason, object : Callback() {
+        add(CommandReadStatus(aapsLogger, rh, activePlugin, localAlertUtils.get(), pumpEnactResultProvider, reason, object : Callback() {
             override fun run() {
                 deferred.complete(result)
             }
@@ -637,17 +641,15 @@ class CommandQueueImplementation @Inject constructor(
         return deferred.await()
     }
 
-    // returns true if command is queued
-    override fun loadEvents(callback: Callback?) {
-        if (isRunning(CommandType.LOAD_EVENTS)) {
-            callback?.result(executingNowError())?.run()
-            return
-        }
-        // remove all unfinished
+    override suspend fun loadEvents(): PumpEnactResult {
+        if (isRunning(CommandType.LOAD_EVENTS)) return executingNowError()
         removeAll(CommandType.LOAD_EVENTS)
-        // add new command to queue
-        add(CommandLoadEvents(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandLoadEvents(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
+        return deferred.await()
     }
 
     override suspend fun clearAlarms(): PumpEnactResult {

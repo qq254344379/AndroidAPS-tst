@@ -527,11 +527,10 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
         SystemClock.sleep(2000)
 
         // Do not call update status directly, reconnection may be needed
-        commandQueue.loadEvents(object : Callback() {
-            override fun run() {
-                rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_bolus_status)))
-            }
-        })
+        scope.launch {
+            commandQueue.loadEvents()
+            rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_bolus_status)))
+        }
     }
 
     fun stopBolus() {
@@ -560,11 +559,10 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
 
         // Get history records, this will update the previous basals
         // Do not call update status directly, reconnection may be needed
-        commandQueue.loadEvents(object : Callback() {
-            override fun run() {
-                rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_temp_basal_status)))
-            }
-        })
+        scope.launch {
+            commandQueue.loadEvents()
+            rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_temp_basal_status)))
+        }
 
         return result
     }
@@ -574,11 +572,10 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
 
         // Get history records, this will update the previous basals
         // Do not call update status directly, reconnection may be needed
-        commandQueue.loadEvents(object : Callback() {
-            override fun run() {
-                rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_temp_basal_status)))
-            }
-        })
+        scope.launch {
+            commandQueue.loadEvents()
+            rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_temp_basal_status)))
+        }
 
         return result
     }
@@ -594,7 +591,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
         if (result) result = packet?.let { sendPacketAndGetResponse(it) } == true
 
         // Get history records, this will update the pump state and add changes in TBR to AAPS history
-        commandQueue.loadEvents(null)
+        scope.launch { commandQueue.loadEvents() }
 
         return result
     }
@@ -739,7 +736,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                     R.string.pump_is_suspended,
                 )
                 // Pump will report proper TBR for this from loadEvents()
-                commandQueue.loadEvents(null)
+                scope.launch { commandQueue.loadEvents() }
             }
 
             MedtrumPumpState.HOURLY_MAX_SUSPENDED -> {
@@ -750,7 +747,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                     soundRes = app.aaps.core.ui.R.raw.alarm
                 )
                 // Pump will report proper TBR for this from loadEvents()
-                commandQueue.loadEvents(null)
+                scope.launch { commandQueue.loadEvents() }
             }
 
             MedtrumPumpState.DAILY_MAX_SUSPENDED  -> {
@@ -761,7 +758,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                     soundRes = app.aaps.core.ui.R.raw.alarm
                 )
                 // Pump will report proper TBR for this from loadEvents()
-                commandQueue.loadEvents(null)
+                scope.launch { commandQueue.loadEvents() }
             }
 
             MedtrumPumpState.OCCLUSION,
