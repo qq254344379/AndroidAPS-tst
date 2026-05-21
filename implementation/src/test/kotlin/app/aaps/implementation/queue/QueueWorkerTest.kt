@@ -6,20 +6,22 @@ import androidx.work.ListenableWorker
 import androidx.work.WorkManager
 import androidx.work.testing.TestListenableWorkerBuilder
 import app.aaps.core.data.pump.defs.PumpDescription
+import app.aaps.core.interfaces.alerts.LocalAlertUtils
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.objects.constraints.ConstraintObject
-import app.aaps.implementation.queue.commands.CommandTempBasalAbsolute
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers
@@ -35,6 +37,8 @@ class QueueWorkerTest : TestBaseWithProfile() {
     @Mock lateinit var powerManager: PowerManager
     @Mock lateinit var uiInteraction: UiInteraction
     @Mock lateinit var persistenceLayer: PersistenceLayer
+    @Mock lateinit var pumpSync: PumpSync
+    @Mock lateinit var localAlertUtils: LocalAlertUtils
     @Mock lateinit var jobName: CommandQueueName
     @Mock lateinit var workManager: WorkManager
 
@@ -43,11 +47,6 @@ class QueueWorkerTest : TestBaseWithProfile() {
 
     init {
         addInjector {
-            if (it is CommandTempBasalAbsolute) {
-                it.aapsLogger = aapsLogger
-                it.activePlugin = activePlugin
-                it.rh = rh
-            }
             if (it is QueueWorker) {
                 it.aapsLogger = aapsLogger
                 it.queue = commandQueue
@@ -71,7 +70,7 @@ class QueueWorkerTest : TestBaseWithProfile() {
         commandQueue = CommandQueueImplementation(
             injector, aapsLogger, rxBus, rh, constraintChecker,
             profileFunction, activePlugin, config, dateUtil, fabricPrivacy,
-            uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, jobName, workManager, testScope, bolusProgressData
+            uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtils, jobName, workManager, testScope, bolusProgressData
         )
 
         val pumpDescription = PumpDescription()
@@ -97,8 +96,10 @@ class QueueWorkerTest : TestBaseWithProfile() {
 
     @Test
     fun commandIsPickedUp() = runTest(timeout = 30.seconds) {
-        commandQueue.tempBasalAbsolute(2.0, 60, true, validProfile, PumpSync.TemporaryBasalType.NORMAL, null)
+        val tbrJob = launch { commandQueue.tempBasalAbsolute(2.0, 60, true, validProfile, PumpSync.TemporaryBasalType.NORMAL) }
+        yield()
         val result = sut.doWorkAndLog()
+        tbrJob.join()
         assertIs<ListenableWorker.Result.Success>(result)
         assertThat(commandQueue.size()).isEqualTo(0)
     }
