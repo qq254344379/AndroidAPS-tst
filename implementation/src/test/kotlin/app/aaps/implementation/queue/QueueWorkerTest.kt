@@ -48,7 +48,7 @@ class QueueWorkerTest : TestBaseWithProfile() {
     @Mock lateinit var workManager: WorkManager
 
     private val testScope = CoroutineScope(Dispatchers.Unconfined)
-    private val bolusProgressData by lazy { BolusProgressData(ch, rh) }
+    private val bolusProgressData by lazy { BolusProgressData(ch, rh, testScope) }
 
     init {
         addInjector {
@@ -75,7 +75,7 @@ class QueueWorkerTest : TestBaseWithProfile() {
         commandQueue = CommandQueueImplementation(
             injector, aapsLogger, rxBus, rh, constraintChecker,
             profileFunction, activePlugin, config, dateUtil, fabricPrivacy,
-            uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
+            uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, preferences, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
         )
 
         val pumpDescription = PumpDescription()

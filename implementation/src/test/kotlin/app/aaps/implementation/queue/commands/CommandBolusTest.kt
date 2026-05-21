@@ -10,7 +10,6 @@ import app.aaps.implementation.pump.PumpEnactResultObject
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.kotlin.doReturn
@@ -23,11 +22,6 @@ class CommandBolusTest : TestBaseWithProfile() {
     @Mock lateinit var bolusProgressData: BolusProgressData
 
     private val info = DetailedBolusInfo().apply { insulin = 1.0 }
-
-    @BeforeEach
-    fun setUp() {
-        whenever(bolusProgressData.currentGeneration).thenReturn(0)
-    }
 
     private fun newCommand(type: Command.CommandType = Command.CommandType.BOLUS, callback: Callback? = null) =
         CommandBolus(
@@ -46,7 +40,7 @@ class CommandBolusTest : TestBaseWithProfile() {
         val result = newCommand().execute()
 
         assertThat(result).isSameInstanceAs(pumpResult)
-        verify(bolusProgressData).complete()
+        verify(bolusProgressData).completeAndAutoClear()
     }
 
     @Test

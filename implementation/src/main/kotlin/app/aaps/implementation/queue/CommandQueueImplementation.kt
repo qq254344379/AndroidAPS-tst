@@ -46,6 +46,7 @@ import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.getCustomizedName
 import app.aaps.core.objects.profile.ProfileSealed
@@ -103,6 +104,7 @@ class CommandQueueImplementation @Inject constructor(
     private val decimalFormatter: DecimalFormatter,
     private val pumpEnactResultProvider: Provider<PumpEnactResult>,
     private val pumpSync: PumpSync,
+    private val preferences: Preferences,
     private val localAlertUtils: Provider<LocalAlertUtils>,
     private val smsCommunicator: Provider<SmsCommunicator>,
     private val jobName: CommandQueueName,
@@ -371,7 +373,7 @@ class CommandQueueImplementation @Inject constructor(
         val deferred = CompletableDeferred<PumpEnactResult>()
         val cb = object : Callback() { override fun run() { deferred.complete(result) } }
         if (detailedBolusInfo.bolusType == BS.Type.SMB) {
-            add(CommandSMBBolus(injector, detailedBolusInfo, cb))
+            add(CommandSMBBolus(aapsLogger, rh, dateUtil, activePlugin, persistenceLayer, preferences, bolusProgressData, pumpEnactResultProvider, detailedBolusInfo, cb))
         } else {
             add(CommandBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, bolusProgressData, detailedBolusInfo, cb, type))
             if (type == CommandType.BOLUS) { // Notify Wear about upcoming bolus

@@ -4,7 +4,6 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.implementation.queue.CommandQueueImplementation
 import app.aaps.implementation.queue.CommandQueueName
 import app.aaps.implementation.queue.QueueWorker
-import app.aaps.implementation.queue.commands.CommandSMBBolus
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -28,7 +27,6 @@ open class CommandQueueModule {
         @Binds fun bindCommandQueueInjector(commandQueueImplementation: CommandQueueImplementation): CommandQueue
 
         @ContributesAndroidInjector fun queueWorkerInjector(): QueueWorker
-        @ContributesAndroidInjector fun commandCommandSMBBolusInjector(): CommandSMBBolus
     }
 
     @Provides

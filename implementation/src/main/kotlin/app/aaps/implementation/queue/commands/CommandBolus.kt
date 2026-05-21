@@ -1,6 +1,5 @@
 package app.aaps.implementation.queue.commands
 
-import android.os.SystemClock
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.plugin.ActivePlugin
@@ -28,17 +27,8 @@ class CommandBolus(
     override suspend fun execute(): PumpEnactResult {
         val r = activePlugin.activePump.deliverTreatment(detailedBolusInfo)
         aapsLogger.debug(LTag.PUMPQUEUE, "Result success: ${r.success} enacted: ${r.enacted}")
-        if (r.success) {
-            bolusProgressData.complete()
-            // Delay clear so UI can show completion state without blocking the queue
-            val gen = bolusProgressData.currentGeneration
-            Thread {
-                SystemClock.sleep(5000)
-                bolusProgressData.clearIfSameGeneration(gen)
-            }.start()
-        } else {
-            bolusProgressData.clear()
-        }
+        if (r.success) bolusProgressData.completeAndAutoClear()
+        else bolusProgressData.clear()
         return r
     }
 

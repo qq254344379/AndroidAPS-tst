@@ -29,8 +29,8 @@ import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
-import app.aaps.implementation.queue.commands.CommandSMBBolus
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import com.google.common.util.concurrent.ListenableFuture
@@ -71,7 +71,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     @Mock lateinit var infos: ListenableFuture<List<WorkInfo>>
 
     private val testScope = CoroutineScope(Dispatchers.Unconfined)
-    private val bolusProgressData by lazy { BolusProgressData(ch, rh) }
+    private val bolusProgressData by lazy { BolusProgressData(ch, rh, testScope) }
 
     class CommandQueueMocked(
         injector: HasAndroidInjector,
@@ -90,6 +90,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         decimalFormatter: DecimalFormatter,
         pumpEnactResultProvider: Provider<PumpEnactResult>,
         pumpSync: PumpSync,
+        preferences: Preferences,
         localAlertUtils: Provider<LocalAlertUtils>,
         smsCommunicator: Provider<SmsCommunicator>,
         jobName: CommandQueueName,
@@ -99,7 +100,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     ) : CommandQueueImplementation(
         injector, aapsLogger, rxBus, rh, constraintChecker, profileFunction,
         activePlugin, config, dateUtil, fabricPrivacy,
-        uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtils, smsCommunicator, jobName, workManager, appScope, bolusProgressData
+        uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, preferences, localAlertUtils, smsCommunicator, jobName, workManager, appScope, bolusProgressData
     ) {
 
         override fun notifyAboutNewCommand(): Boolean = true
@@ -108,14 +109,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
 
     init {
         addInjector {
-            // pumpEnactResultProvider is required by every Command's default cancel(commentResId)
-            if (it is CommandSMBBolus) {
-                it.pumpEnactResultProvider = pumpEnactResultProvider
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-                it.bolusProgressData = bolusProgressData
-            }
             if (it is QueueWorker) {
                 it.aapsLogger = aapsLogger
                 it.queue = commandQueue
@@ -138,7 +131,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             whenever(persistenceLayer.observeChanges(anyOrNull<Class<*>>())).thenReturn(emptyFlow())
             commandQueue = CommandQueueMocked(
                 injector, aapsLogger, rxBus, rh, constraintChecker, profileFunction, activePlugin,
-                config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
+                config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, preferences, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
             )
             testPumpPlugin.pumpDescription.basalMinimumRate = 0.1
             testPumpPlugin.connected = true
@@ -187,7 +180,7 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         commandQueue = CommandQueueImplementation(
             injector, aapsLogger, rxBus, rh,
             constraintChecker, profileFunction, activePlugin,
-            config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
+            config, dateUtil, fabricPrivacy, uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, preferences, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
         )
         val handler: Handler = mock()
         whenever(handler.post(anyOrNull())).thenAnswer { invocation: InvocationOnMock ->

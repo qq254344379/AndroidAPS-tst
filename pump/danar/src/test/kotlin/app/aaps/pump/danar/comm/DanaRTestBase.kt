@@ -36,8 +36,8 @@ open class DanaRTestBase : TestBaseWithProfile() {
     @Mock lateinit var danaHistoryRecordDao: DanaHistoryRecordDao
     @Mock lateinit var uiInteraction: UiInteraction
 
-    val bolusProgressData by lazy { BolusProgressData(ch, rh) }
     private val testScope = CoroutineScope(Dispatchers.Unconfined)
+    val bolusProgressData by lazy { BolusProgressData(ch, rh, testScope) }
 
     @BeforeEach
     fun setup() {
