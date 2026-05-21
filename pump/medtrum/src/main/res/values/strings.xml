@@ -149,4 +149,5 @@
     <string name="bolus_error_reason_unable_to_send_command">Unable to send bolus command</string>
     <string name="bolus_error_reason_communication_lost">Timeout getting bolus status</string>
     <string name="bolus_error_reason_pump_error">Pump error</string>
+<string name="pump_unpair">Unpair pump</string>
 </resources>
