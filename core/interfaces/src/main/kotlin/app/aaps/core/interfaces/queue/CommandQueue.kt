@@ -9,6 +9,22 @@ import app.aaps.core.interfaces.pump.PumpSync
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
+/**
+ * **Deadlock warning** — the queue is processed by a single [QueueWorker]; one command at a
+ * time. Awaiting a suspend method on this interface from inside the body of another queued
+ * command's `execute()` (directly, or transitively via `Pump.getPumpStatus()`,
+ * `Pump.deliverTreatment()`, BLE message handlers running on the SerialIOThread, etc.) will
+ * deadlock: the awaited command sits in the queue waiting for the worker, but the worker is
+ * busy executing the caller.
+ *
+ * If you need to enqueue another command from such a context, do not await — fire-and-forget
+ * via a scope that outlives the current call:
+ *
+ * ```
+ * pluginScope.launch { commandQueue.readStatus(reason) }   // pump plugin
+ * appScope.launch { commandQueue.readStatus(reason) }      // BLE handlers, services
+ * ```
+ */
 interface CommandQueue {
 
     var waitingForDisconnect: Boolean

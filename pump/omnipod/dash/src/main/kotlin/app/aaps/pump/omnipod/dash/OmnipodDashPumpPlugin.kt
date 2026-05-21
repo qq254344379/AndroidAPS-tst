@@ -1346,9 +1346,10 @@ class OmnipodDashPumpPlugin @Inject constructor(
                     aapsLogger.info(LTag.PUMP, "syncStopTemporaryBasalWithPumpId ret=$ret pumpId=${historyEntry.pumpId()}")
                     podStateManager.tempBasal = null
 
-                    // Evaluate basal drift correction after confirmed temp basal cancel
+                    // Evaluate basal drift correction after confirmed temp basal cancel.
                     if (podStateManager.needsBasalCorrection()) {
-                        commandQueue.customCommand(CommandDeliverBasalCorrection())
+                        // Queue-worker deadlock guard — don't unwrap the .launch. See CommandQueue kdoc.
+                        pluginScope.launch { commandQueue.customCommand(CommandDeliverBasalCorrection()) }
                     }
                 }
                 notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
@@ -1369,7 +1370,8 @@ class OmnipodDashPumpPlugin @Inject constructor(
                     notificationManager.dismiss(NotificationId.FAILED_UPDATE_PROFILE)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC)
-                    commandQueue.customCommand(CommandDisableSuspendAlerts(rh))
+                    // Queue-worker deadlock guard — don't unwrap the .launch. See CommandQueue kdoc.
+                    pluginScope.launch { commandQueue.customCommand(CommandDisableSuspendAlerts(rh)) }
                 }
             }
 
@@ -1393,7 +1395,8 @@ class OmnipodDashPumpPlugin @Inject constructor(
                     notificationManager.dismiss(NotificationId.FAILED_UPDATE_PROFILE)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC)
-                    commandQueue.customCommand(CommandDisableSuspendAlerts(rh))
+                    // Queue-worker deadlock guard — don't unwrap the .launch. See CommandQueue kdoc.
+                    pluginScope.launch { commandQueue.customCommand(CommandDisableSuspendAlerts(rh)) }
                 }
             }
 
@@ -1409,11 +1412,12 @@ class OmnipodDashPumpPlugin @Inject constructor(
                 } else {
                     podStateManager.tempBasal = command.tempBasal
 
-                    // Evaluate basal drift correction after confirmed temp basal set
+                    // Evaluate basal drift correction after confirmed temp basal set.
                     if (!commandQueue.isCustomCommandInQueue(CommandDeliverBasalCorrection::class.java) &&
                         podStateManager.needsBasalCorrection()
                     ) {
-                        commandQueue.customCommand(CommandDeliverBasalCorrection())
+                        // Queue-worker deadlock guard — don't unwrap the .launch. See CommandQueue kdoc.
+                        pluginScope.launch { commandQueue.customCommand(CommandDeliverBasalCorrection()) }
                     }
                 }
                 notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
