@@ -33,14 +33,14 @@ interface CommandQueue {
     suspend fun cancelExtended(): PumpEnactResult
     suspend fun readStatus(reason: String): PumpEnactResult
     fun statusInQueue(): Boolean
-    fun loadHistory(type: Byte, callback: Callback?)
-    fun setUserOptions(callback: Callback?)
+    suspend fun loadHistory(type: Byte): PumpEnactResult
+    suspend fun setUserOptions(): PumpEnactResult
     suspend fun loadTDDs(): PumpEnactResult
     suspend fun loadEvents(): PumpEnactResult
     suspend fun clearAlarms(): PumpEnactResult
     suspend fun deactivate(): PumpEnactResult
     suspend fun updateTime(): PumpEnactResult
-    fun customCommand(customCommand: CustomCommand, callback: Callback?)
+    suspend fun customCommand(customCommand: CustomCommand): PumpEnactResult
     fun isCustomCommandRunning(customCommandType: Class<out CustomCommand>): Boolean
     fun isCustomCommandInQueue(customCommandType: Class<out CustomCommand>): Boolean
     fun spannedStatus(): Spanned
@@ -71,30 +71,4 @@ interface CommandQueue {
             })
         }
 
-    suspend fun loadHistory(type: Byte): PumpEnactResult =
-        suspendCancellableCoroutine { cont ->
-            loadHistory(type, object : Callback() {
-                override fun run() {
-                    cont.resume(result)
-                }
-            })
-        }
-
-    suspend fun setUserOptions(): PumpEnactResult =
-        suspendCancellableCoroutine { cont ->
-            setUserOptions(object : Callback() {
-                override fun run() {
-                    cont.resume(result)
-                }
-            })
-        }
-
-    suspend fun customCommand(customCommand: CustomCommand): PumpEnactResult =
-        suspendCancellableCoroutine { cont ->
-            customCommand(customCommand, object : Callback() {
-                override fun run() {
-                    cont.resume(result)
-                }
-            })
-        }
 }

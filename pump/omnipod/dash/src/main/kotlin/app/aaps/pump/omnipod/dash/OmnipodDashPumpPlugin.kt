@@ -501,7 +501,7 @@ class OmnipodDashPumpPlugin @Inject constructor(
             preferences.observe(OmnipodIntPreferenceKey.ExpirationAlarmHours).drop(1).map {},
             preferences.observe(OmnipodBooleanPreferenceKey.LowReservoirAlert).drop(1).map {},
             preferences.observe(OmnipodIntPreferenceKey.LowReservoirAlertUnits).drop(1).map {},
-        ).onEach { commandQueue.customCommand(CommandUpdateAlertConfiguration(), null) }.launchIn(newScope)
+        ).onEach { commandQueue.customCommand(CommandUpdateAlertConfiguration()) }.launchIn(newScope)
     }
 
     override suspend fun onStop() {
@@ -1348,7 +1348,7 @@ class OmnipodDashPumpPlugin @Inject constructor(
 
                     // Evaluate basal drift correction after confirmed temp basal cancel
                     if (podStateManager.needsBasalCorrection()) {
-                        commandQueue.customCommand(CommandDeliverBasalCorrection(), null)
+                        commandQueue.customCommand(CommandDeliverBasalCorrection())
                     }
                 }
                 notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
@@ -1369,7 +1369,7 @@ class OmnipodDashPumpPlugin @Inject constructor(
                     notificationManager.dismiss(NotificationId.FAILED_UPDATE_PROFILE)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC)
-                    commandQueue.customCommand(CommandDisableSuspendAlerts(rh), null)
+                    commandQueue.customCommand(CommandDisableSuspendAlerts(rh))
                 }
             }
 
@@ -1393,7 +1393,7 @@ class OmnipodDashPumpPlugin @Inject constructor(
                     notificationManager.dismiss(NotificationId.FAILED_UPDATE_PROFILE)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)
                     notificationManager.dismiss(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC)
-                    commandQueue.customCommand(CommandDisableSuspendAlerts(rh), null)
+                    commandQueue.customCommand(CommandDisableSuspendAlerts(rh))
                 }
             }
 
@@ -1413,7 +1413,7 @@ class OmnipodDashPumpPlugin @Inject constructor(
                     if (!commandQueue.isCustomCommandInQueue(CommandDeliverBasalCorrection::class.java) &&
                         podStateManager.needsBasalCorrection()
                     ) {
-                        commandQueue.customCommand(CommandDeliverBasalCorrection(), null)
+                        commandQueue.customCommand(CommandDeliverBasalCorrection())
                     }
                 }
                 notificationManager.dismiss(NotificationId.OMNIPOD_TBR_ALERTS)

@@ -31,11 +31,8 @@ import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.implementation.queue.commands.CommandBolus
-import app.aaps.implementation.queue.commands.CommandCustomCommand
-import app.aaps.implementation.queue.commands.CommandLoadHistory
 import app.aaps.implementation.queue.commands.CommandSMBBolus
 import app.aaps.implementation.queue.commands.CommandSetProfile
-import app.aaps.implementation.queue.commands.CommandSetUserSettings
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import com.google.common.util.concurrent.ListenableFuture
@@ -113,11 +110,8 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
             // pumpEnactResultProvider is required by every Command's default cancel(commentResId)
             when (it) {
                 is CommandBolus                         -> it.pumpEnactResultProvider = pumpEnactResultProvider
-                is CommandCustomCommand                 -> it.pumpEnactResultProvider = pumpEnactResultProvider
-                is CommandLoadHistory                   -> it.pumpEnactResultProvider = pumpEnactResultProvider
                 is CommandSMBBolus                      -> it.pumpEnactResultProvider = pumpEnactResultProvider
                 is CommandSetProfile                    -> it.pumpEnactResultProvider = pumpEnactResultProvider
-                is CommandSetUserSettings               -> it.pumpEnactResultProvider = pumpEnactResultProvider
             }
             if (it is CommandBolus) {
                 it.aapsLogger = aapsLogger
@@ -130,16 +124,6 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
                 it.rh = rh
                 it.activePlugin = activePlugin
                 it.bolusProgressData = bolusProgressData
-            }
-            if (it is CommandCustomCommand) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
-            }
-            if (it is CommandLoadHistory) {
-                it.aapsLogger = aapsLogger
-                it.rh = rh
-                it.activePlugin = activePlugin
             }
             if (it is QueueWorker) {
                 it.aapsLogger = aapsLogger
@@ -293,7 +277,8 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
         //        assertThat(commandQueue.size()).isEqualTo(3)
 
         // add loadHistory
-        commandQueue.loadHistory(0.toByte(), null)
+        backgroundScope.launch { commandQueue.loadHistory(0.toByte()) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(3)
 
         // add loadEvents
@@ -371,13 +356,15 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun isCustomCommandRunning() {
+    fun isCustomCommandRunning() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.customCommand(CustomCommand1(), null)
-        commandQueue.customCommand(CustomCommand2(), null)
+        backgroundScope.launch { commandQueue.customCommand(CustomCommand1()) }
+        yield()
+        backgroundScope.launch { commandQueue.customCommand(CustomCommand2()) }
+        yield()
         commandQueue.pickup()
 
         // then
@@ -393,18 +380,20 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun isSetUserOptionsCommandInQueue() {
+    fun isSetUserOptionsCommandInQueue() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.setUserOptions(null)
+        backgroundScope.launch { commandQueue.setUserOptions() }
+        yield()
 
         // then
         assertThat(commandQueue.isReadStatusScheduled()).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
-        commandQueue.setUserOptions(null)
+        // next replaces the previously queued command (size stays at 1)
+        backgroundScope.launch { commandQueue.setUserOptions() }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
@@ -498,18 +487,20 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun isLoadHistoryCommandInQueue() {
+    fun isLoadHistoryCommandInQueue() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.loadHistory(0, null)
+        backgroundScope.launch { commandQueue.loadHistory(0) }
+        yield()
 
         // then
         assertThat(commandQueue.isReadStatusScheduled()).isFalse()
         assertThat(commandQueue.size()).isEqualTo(1)
-        // next should be ignored
-        commandQueue.loadHistory(0, null)
+        // next replaces the previously queued command (size stays at 1)
+        backgroundScope.launch { commandQueue.loadHistory(0) }
+        yield()
         assertThat(commandQueue.size()).isEqualTo(1)
     }
 
@@ -592,26 +583,30 @@ class CommandQueueImplementationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun differentCustomCommandsAllowed() {
+    fun differentCustomCommandsAllowed() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.customCommand(CustomCommand1(), null)
-        commandQueue.customCommand(CustomCommand2(), null)
+        backgroundScope.launch { commandQueue.customCommand(CustomCommand1()) }
+        yield()
+        backgroundScope.launch { commandQueue.customCommand(CustomCommand2()) }
+        yield()
 
         // then
         assertThat(commandQueue.size()).isEqualTo(2)
     }
 
     @Test
-    fun sameCustomCommandNotAllowed() {
+    fun sameCustomCommandNotAllowed() = runTest {
         // given
         assertThat(commandQueue.size()).isEqualTo(0)
 
         // when
-        commandQueue.customCommand(CustomCommand1(), null)
-        commandQueue.customCommand(CustomCommand1(), null)
+        backgroundScope.launch { commandQueue.customCommand(CustomCommand1()) }
+        yield()
+        backgroundScope.launch { commandQueue.customCommand(CustomCommand1()) }
+        yield()
 
         // then
         assertThat(commandQueue.size()).isEqualTo(1)

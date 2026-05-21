@@ -602,30 +602,26 @@ class CommandQueueImplementation @Inject constructor(
         return false
     }
 
-    // returns true if command is queued
-    override fun loadHistory(type: Byte, callback: Callback?) {
-        if (isRunning(CommandType.LOAD_HISTORY)) {
-            callback?.result(executingNowError())?.run()
-            return
-        }
-        // remove all unfinished
+    override suspend fun loadHistory(type: Byte): PumpEnactResult {
+        if (isRunning(CommandType.LOAD_HISTORY)) return executingNowError()
         removeAll(CommandType.LOAD_HISTORY)
-        // add new command to queue
-        add(CommandLoadHistory(injector, type, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandLoadHistory(aapsLogger, rh, activePlugin, pumpEnactResultProvider, type, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
+        return deferred.await()
     }
 
-    // returns true if command is queued
-    override fun setUserOptions(callback: Callback?) {
-        if (isRunning(CommandType.SET_USER_SETTINGS)) {
-            callback?.result(executingNowError())?.run()
-            return
-        }
-        // remove all unfinished
+    override suspend fun setUserOptions(): PumpEnactResult {
+        if (isRunning(CommandType.SET_USER_SETTINGS)) return executingNowError()
         removeAll(CommandType.SET_USER_SETTINGS)
-        // add new command to queue
-        add(CommandSetUserSettings(injector, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandSetUserSettings(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
+        return deferred.await()
     }
 
     override suspend fun loadTDDs(): PumpEnactResult {
@@ -691,16 +687,15 @@ class CommandQueueImplementation @Inject constructor(
         return deferred.await()
     }
 
-    override fun customCommand(customCommand: CustomCommand, callback: Callback?) {
-        if (isCustomCommandInQueue(customCommand.javaClass)) {
-            callback?.result(executingNowError())?.run()
-            return
-        }
-        // remove all unfinished
+    override suspend fun customCommand(customCommand: CustomCommand): PumpEnactResult {
+        if (isCustomCommandInQueue(customCommand.javaClass)) return executingNowError()
         removeAllCustomCommands(customCommand.javaClass)
-        // add new command to queue
-        add(CommandCustomCommand(injector, customCommand, callback))
+        val deferred = CompletableDeferred<PumpEnactResult>()
+        add(CommandCustomCommand(aapsLogger, activePlugin, pumpEnactResultProvider, customCommand, object : Callback() {
+            override fun run() { deferred.complete(result) }
+        }))
         notifyAboutNewCommand()
+        return deferred.await()
     }
 
     @Synchronized

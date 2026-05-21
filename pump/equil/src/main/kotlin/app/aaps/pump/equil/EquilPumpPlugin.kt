@@ -195,8 +195,8 @@ class EquilPumpPlugin @Inject constructor(
 
     override suspend fun getPumpStatus(reason: String) {
         if (equilManager.isActivationCompleted()) {
-            commandQueue.customCommand(CmdModeAndHistoryGet(), null)
-            commandQueue.customCommand(CmdDevicesGet(aapsLogger, preferences, equilManager), null)
+            commandQueue.customCommand(CmdModeAndHistoryGet())
+            commandQueue.customCommand(CmdDevicesGet(aapsLogger, preferences, equilManager))
         }
     }
 
