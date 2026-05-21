@@ -11,6 +11,7 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.PumpSync
+import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -41,6 +42,8 @@ class QueueWorkerTest : TestBaseWithProfile() {
     @Mock lateinit var pumpSync: PumpSync
     @Mock lateinit var localAlertUtils: LocalAlertUtils
     private val localAlertUtilsProvider: Provider<LocalAlertUtils> by lazy { Provider { localAlertUtils } }
+    @Mock lateinit var smsCommunicator: SmsCommunicator
+    private val smsCommunicatorProvider: Provider<SmsCommunicator> by lazy { Provider { smsCommunicator } }
     @Mock lateinit var jobName: CommandQueueName
     @Mock lateinit var workManager: WorkManager
 
@@ -72,7 +75,7 @@ class QueueWorkerTest : TestBaseWithProfile() {
         commandQueue = CommandQueueImplementation(
             injector, aapsLogger, rxBus, rh, constraintChecker,
             profileFunction, activePlugin, config, dateUtil, fabricPrivacy,
-            uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, jobName, workManager, testScope, bolusProgressData
+            uiInteraction, notificationManager, persistenceLayer, decimalFormatter, pumpEnactResultProvider, pumpSync, localAlertUtilsProvider, smsCommunicatorProvider, jobName, workManager, testScope, bolusProgressData
         )
 
         val pumpDescription = PumpDescription()
