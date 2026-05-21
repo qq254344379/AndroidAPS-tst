@@ -158,7 +158,7 @@ class AidexPlugin @Inject constructor(
             }
         } else {
             sensorExpiredNotified = false
-            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+            notificationManager.dismiss(NotificationId.AIDEX_SENSOR_EXPIRED)
         }
 
         if (replaceSensor) {
@@ -174,7 +174,7 @@ class AidexPlugin @Inject constructor(
             }
         } else {
             replaceSensorNotified = false
-            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+            notificationManager.dismiss(NotificationId.AIDEX_REPLACE_SENSOR)
         }
 
         if (sensorError) {
@@ -190,7 +190,7 @@ class AidexPlugin @Inject constructor(
             }
         } else {
             sensorErrorNotified = false
-            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+            notificationManager.dismiss(NotificationId.AIDEX_SENSOR_ERROR)
         }
 
         if (sensorStabling) {
@@ -206,7 +206,7 @@ class AidexPlugin @Inject constructor(
             }
         } else {
             sensorStablingNotified = false
-            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+            notificationManager.dismiss(NotificationId.AIDEX_SENSOR_STABILIZING)
         }
 
         if (signalLost) {
@@ -222,7 +222,7 @@ class AidexPlugin @Inject constructor(
             }
         } else {
             signalLostNotified = false
-            notificationManager.dismiss(NotificationId.BG_READINGS_MISSED)
+            notificationManager.dismiss(NotificationId.AIDEX_SIGNAL_LOST)
         }
     }
 }
