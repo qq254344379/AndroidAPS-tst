@@ -1,7 +1,8 @@
 package app.aaps.implementation.queue.commands
 
+import app.aaps.core.interfaces.pump.Insight
+import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.PumpEnactResult
-import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.Callback
 import app.aaps.core.interfaces.queue.Command
 import app.aaps.implementation.pump.PumpEnactResultObject
@@ -9,52 +10,67 @@ import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
-class CommandExtendedBolusTest : TestBaseWithProfile() {
+class CommandInsightSetTBROverNotificationTest : TestBaseWithProfile() {
 
-    private fun newCommand(
-        insulin: Double = 1.5,
-        durationInMinutes: Int = 30,
-        callback: Callback? = null
-    ) = CommandExtendedBolus(
-        aapsLogger, rh, activePlugin, pumpEnactResultProvider,
-        insulin, durationInMinutes, callback
-    )
+    private fun newCommand(enabled: Boolean = true, callback: Callback? = null) =
+        CommandInsightSetTBROverNotification(aapsLogger, rh, activePlugin, pumpEnactResultProvider, enabled, callback)
 
     @Test
-    fun `execute returns pump's setExtendedBolus result`() = runTest {
+    fun `execute on Insight pump returns pump's setTBROverNotification result`() = runTest {
         val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val pump = mock<PumpWithConcentration> { on { setExtendedBolus(1.5, 30) } doReturn pumpResult }
-        whenever(activePlugin.activePump).thenReturn(pump)
+        val insightPump = mock<Pump>(extraInterfaces = arrayOf(Insight::class))
+        whenever((insightPump as Insight).setTBROverNotification(true)).thenReturn(pumpResult)
+        whenever(activePlugin.activePumpInternal).thenReturn(insightPump)
 
-        val result = newCommand(insulin = 1.5, durationInMinutes = 30).execute()
+        val result = newCommand(enabled = true).execute()
 
         assertThat(result).isSameInstanceAs(pumpResult)
+        verify(insightPump).setTBROverNotification(true)
+    }
+
+    @Test
+    fun `execute passes the enabled flag through to the pump`() = runTest {
+        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
+        val insightPump = mock<Pump>(extraInterfaces = arrayOf(Insight::class))
+        whenever((insightPump as Insight).setTBROverNotification(false)).thenReturn(pumpResult)
+        whenever(activePlugin.activePumpInternal).thenReturn(insightPump)
+
+        newCommand(enabled = false).execute()
+
+        verify(insightPump).setTBROverNotification(false)
+    }
+
+    @Test
+    fun `execute on non-Insight pump returns success not enacted`() = runTest {
+        whenever(activePlugin.activePumpInternal).thenReturn(testPumpPlugin)
+
+        val result = newCommand().execute()
+
+        assertThat(result.success).isTrue()
+        assertThat(result.enacted).isFalse()
     }
 
     @Test
     fun `executeWithCallback forwards execute result to callback`() = runTest {
-        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val pump = mock<PumpWithConcentration> { on { setExtendedBolus(1.5, 30) } doReturn pumpResult }
-        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(activePlugin.activePumpInternal).thenReturn(testPumpPlugin)
         var received: PumpEnactResult? = null
         val callback = object : Callback() {
             override fun run() { received = result }
         }
 
-        newCommand(insulin = 1.5, durationInMinutes = 30, callback = callback).executeWithCallback()
+        newCommand(callback = callback).executeWithCallback()
 
-        assertThat(received).isSameInstanceAs(pumpResult)
+        assertThat(received).isNotNull()
+        assertThat(received!!.success).isTrue()
     }
 
     @Test
     fun `executeWithCallback with null callback does not crash`() = runTest {
-        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val pump = mock<PumpWithConcentration> { on { setExtendedBolus(1.5, 30) } doReturn pumpResult }
-        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(activePlugin.activePumpInternal).thenReturn(testPumpPlugin)
 
         newCommand(callback = null).executeWithCallback()
     }
@@ -95,12 +111,7 @@ class CommandExtendedBolusTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun `commandType is EXTENDEDBOLUS`() {
-        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.EXTENDEDBOLUS)
-    }
-
-    @Test
-    fun `log includes insulin and duration`() {
-        assertThat(newCommand(insulin = 2.5, durationInMinutes = 45).log()).isEqualTo("EXTENDEDBOLUS 2.5 U 45 min")
+    fun `commandType is INSIGHT_SET_TBR_OVER_ALARM`() {
+        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.INSIGHT_SET_TBR_OVER_ALARM)
     }
 }

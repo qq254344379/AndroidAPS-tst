@@ -1,5 +1,7 @@
 package app.aaps.implementation.queue.commands
 
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.Callback
@@ -9,58 +11,71 @@ import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import org.mockito.Mock
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
-class CommandExtendedBolusTest : TestBaseWithProfile() {
+class CommandBolusTest : TestBaseWithProfile() {
 
-    private fun newCommand(
-        insulin: Double = 1.5,
-        durationInMinutes: Int = 30,
-        callback: Callback? = null
-    ) = CommandExtendedBolus(
-        aapsLogger, rh, activePlugin, pumpEnactResultProvider,
-        insulin, durationInMinutes, callback
-    )
+    @Mock lateinit var bolusProgressData: BolusProgressData
+
+    private val info = DetailedBolusInfo().apply { insulin = 1.0 }
+
+    private fun newCommand(type: Command.CommandType = Command.CommandType.BOLUS, callback: Callback? = null) =
+        CommandBolus(
+            aapsLogger, rh, activePlugin, pumpEnactResultProvider, bolusProgressData,
+            info, callback, type
+        )
 
     @Test
-    fun `execute returns pump's setExtendedBolus result`() = runTest {
+    fun `execute returns pump result and marks complete on success`() = runTest {
         val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val pump = mock<PumpWithConcentration> { on { setExtendedBolus(1.5, 30) } doReturn pumpResult }
+        val pump = mock<PumpWithConcentration> {
+            onBlocking { deliverTreatment(info) } doReturn pumpResult
+        }
         whenever(activePlugin.activePump).thenReturn(pump)
 
-        val result = newCommand(insulin = 1.5, durationInMinutes = 30).execute()
+        val result = newCommand().execute()
 
         assertThat(result).isSameInstanceAs(pumpResult)
+        verify(bolusProgressData).completeAndAutoClear()
+    }
+
+    @Test
+    fun `execute clears progress data on failure`() = runTest {
+        val pumpResult = PumpEnactResultObject(rh).success(false).enacted(false)
+        val pump = mock<PumpWithConcentration> {
+            onBlocking { deliverTreatment(info) } doReturn pumpResult
+        }
+        whenever(activePlugin.activePump).thenReturn(pump)
+
+        val result = newCommand().execute()
+
+        assertThat(result).isSameInstanceAs(pumpResult)
+        verify(bolusProgressData).clear()
     }
 
     @Test
     fun `executeWithCallback forwards execute result to callback`() = runTest {
         val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val pump = mock<PumpWithConcentration> { on { setExtendedBolus(1.5, 30) } doReturn pumpResult }
+        val pump = mock<PumpWithConcentration> {
+            onBlocking { deliverTreatment(info) } doReturn pumpResult
+        }
         whenever(activePlugin.activePump).thenReturn(pump)
         var received: PumpEnactResult? = null
         val callback = object : Callback() {
             override fun run() { received = result }
         }
 
-        newCommand(insulin = 1.5, durationInMinutes = 30, callback = callback).executeWithCallback()
+        newCommand(callback = callback).executeWithCallback()
 
         assertThat(received).isSameInstanceAs(pumpResult)
     }
 
     @Test
-    fun `executeWithCallback with null callback does not crash`() = runTest {
-        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val pump = mock<PumpWithConcentration> { on { setExtendedBolus(1.5, 30) } doReturn pumpResult }
-        whenever(activePlugin.activePump).thenReturn(pump)
-
-        newCommand(callback = null).executeWithCallback()
-    }
-
-    @Test
-    fun `cancel invokes callback with success by default`() {
+    fun `cancel clears progress data and invokes callback with success by default`() {
         whenever(rh.gs(app.aaps.core.ui.R.string.command_replaced)).thenReturn("replaced")
         var received: PumpEnactResult? = null
         val callback = object : Callback() {
@@ -71,10 +86,11 @@ class CommandExtendedBolusTest : TestBaseWithProfile() {
 
         assertThat(received).isNotNull()
         assertThat(received!!.success).isTrue()
+        verify(bolusProgressData).clear()
     }
 
     @Test
-    fun `cancel invokes callback with failure when success=false`() {
+    fun `cancel clears progress data and invokes callback with failure when success=false`() {
         whenever(rh.gs(app.aaps.core.ui.R.string.command_replaced)).thenReturn("replaced")
         var received: PumpEnactResult? = null
         val callback = object : Callback() {
@@ -85,22 +101,13 @@ class CommandExtendedBolusTest : TestBaseWithProfile() {
 
         assertThat(received).isNotNull()
         assertThat(received!!.success).isFalse()
+        verify(bolusProgressData).clear()
     }
 
     @Test
-    fun `cancel with null callback does not crash`() {
-        whenever(rh.gs(app.aaps.core.ui.R.string.connectiontimedout)).thenReturn("timeout")
-
-        newCommand(callback = null).cancel(app.aaps.core.ui.R.string.connectiontimedout)
+    fun `commandType is what constructor was given`() {
+        assertThat(newCommand(type = Command.CommandType.BOLUS).commandType).isEqualTo(Command.CommandType.BOLUS)
+        assertThat(newCommand(type = Command.CommandType.SMB_BOLUS).commandType).isEqualTo(Command.CommandType.SMB_BOLUS)
     }
 
-    @Test
-    fun `commandType is EXTENDEDBOLUS`() {
-        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.EXTENDEDBOLUS)
-    }
-
-    @Test
-    fun `log includes insulin and duration`() {
-        assertThat(newCommand(insulin = 2.5, durationInMinutes = 45).log()).isEqualTo("EXTENDEDBOLUS 2.5 U 45 min")
-    }
 }

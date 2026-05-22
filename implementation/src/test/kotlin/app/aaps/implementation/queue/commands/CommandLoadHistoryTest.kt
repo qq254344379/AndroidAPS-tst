@@ -1,6 +1,7 @@
 package app.aaps.implementation.queue.commands
 
-import app.aaps.core.interfaces.pump.Medtrum
+import app.aaps.core.interfaces.pump.Dana
+import app.aaps.core.interfaces.pump.Diaconn
 import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.queue.Callback
@@ -11,29 +12,41 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
-class CommandUpdateTimeTest : TestBaseWithProfile() {
+class CommandLoadHistoryTest : TestBaseWithProfile() {
 
-    private fun newCommand(callback: Callback? = null) =
-        CommandUpdateTime(aapsLogger, rh, activePlugin, pumpEnactResultProvider, callback)
+    private fun newCommand(type: Byte = 0, callback: Callback? = null) =
+        CommandLoadHistory(aapsLogger, rh, activePlugin, pumpEnactResultProvider, type, callback)
 
     @Test
-    fun `execute on Medtrum pump returns pump's updateTime result`() = runTest {
+    fun `execute on Dana pump returns pump's loadHistory result and passes type`() = runTest {
         val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
-        val medtrumPump = mock<Pump>(extraInterfaces = arrayOf(Medtrum::class))
-        whenever((medtrumPump as Medtrum).updateTime()).thenReturn(pumpResult)
-        whenever(activePlugin.activePumpInternal).thenReturn(medtrumPump)
+        val danaPump = mock<Pump>(extraInterfaces = arrayOf(Dana::class))
+        whenever((danaPump as Dana).loadHistory(5)).thenReturn(pumpResult)
+        whenever(activePlugin.activePumpInternal).thenReturn(danaPump)
+
+        val result = newCommand(type = 5).execute()
+
+        assertThat(result).isSameInstanceAs(pumpResult)
+        verify(danaPump).loadHistory(5)
+    }
+
+    @Test
+    fun `execute on Diaconn pump returns pump's loadHistory result`() = runTest {
+        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
+        val diaconnPump = mock<Pump>(extraInterfaces = arrayOf(Diaconn::class))
+        whenever((diaconnPump as Diaconn).loadHistory()).thenReturn(pumpResult)
+        whenever(activePlugin.activePumpInternal).thenReturn(diaconnPump)
 
         val result = newCommand().execute()
 
         assertThat(result).isSameInstanceAs(pumpResult)
-        assertThat(result.success).isTrue()
-        assertThat(result.enacted).isTrue()
     }
 
     @Test
-    fun `execute on non-Medtrum pump returns success not enacted`() = runTest {
+    fun `execute on unrelated pump returns success not enacted`() = runTest {
         whenever(activePlugin.activePumpInternal).thenReturn(testPumpPlugin)
 
         val result = newCommand().execute()
@@ -50,11 +63,10 @@ class CommandUpdateTimeTest : TestBaseWithProfile() {
             override fun run() { received = result }
         }
 
-        newCommand(callback).executeWithCallback()
+        newCommand(callback = callback).executeWithCallback()
 
         assertThat(received).isNotNull()
         assertThat(received!!.success).isTrue()
-        assertThat(received.enacted).isFalse()
     }
 
     @Test
@@ -72,7 +84,7 @@ class CommandUpdateTimeTest : TestBaseWithProfile() {
             override fun run() { received = result }
         }
 
-        newCommand(callback).cancel(app.aaps.core.ui.R.string.command_replaced)
+        newCommand(callback = callback).cancel(app.aaps.core.ui.R.string.command_replaced)
 
         assertThat(received).isNotNull()
         assertThat(received!!.success).isTrue()
@@ -86,26 +98,19 @@ class CommandUpdateTimeTest : TestBaseWithProfile() {
             override fun run() { received = result }
         }
 
-        newCommand(callback).cancel(app.aaps.core.ui.R.string.command_replaced, success = false)
+        newCommand(callback = callback).cancel(app.aaps.core.ui.R.string.command_replaced, success = false)
 
         assertThat(received).isNotNull()
         assertThat(received!!.success).isFalse()
     }
 
     @Test
-    fun `cancel with null callback does not crash`() {
-        whenever(rh.gs(app.aaps.core.ui.R.string.connectiontimedout)).thenReturn("timeout")
-
-        newCommand(callback = null).cancel(app.aaps.core.ui.R.string.connectiontimedout)
+    fun `commandType is LOAD_HISTORY`() {
+        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.LOAD_HISTORY)
     }
 
     @Test
-    fun `commandType is UPDATE_TIME`() {
-        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.UPDATE_TIME)
-    }
-
-    @Test
-    fun `log is UPDATE TIME`() {
-        assertThat(newCommand().log()).isEqualTo("UPDATE TIME")
+    fun `log includes type`() {
+        assertThat(newCommand(type = 7).log()).isEqualTo("LOAD HISTORY 7")
     }
 }

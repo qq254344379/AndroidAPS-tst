@@ -1,5 +1,7 @@
 package app.aaps.implementation.queue.commands
 
+import app.aaps.core.interfaces.pump.Dana
+import app.aaps.core.interfaces.pump.Diaconn
 import app.aaps.core.interfaces.pump.Medtrum
 import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.PumpEnactResult
@@ -13,27 +15,49 @@ import org.junit.jupiter.api.Test
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 
-class CommandUpdateTimeTest : TestBaseWithProfile() {
+class CommandLoadEventsTest : TestBaseWithProfile() {
 
     private fun newCommand(callback: Callback? = null) =
-        CommandUpdateTime(aapsLogger, rh, activePlugin, pumpEnactResultProvider, callback)
+        CommandLoadEvents(aapsLogger, rh, activePlugin, pumpEnactResultProvider, callback)
 
     @Test
-    fun `execute on Medtrum pump returns pump's updateTime result`() = runTest {
+    fun `execute on Dana pump returns pump's loadEvents result`() = runTest {
+        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
+        val danaPump = mock<Pump>(extraInterfaces = arrayOf(Dana::class))
+        whenever((danaPump as Dana).loadEvents()).thenReturn(pumpResult)
+        whenever(activePlugin.activePumpInternal).thenReturn(danaPump)
+
+        val result = newCommand().execute()
+
+        assertThat(result).isSameInstanceAs(pumpResult)
+    }
+
+    @Test
+    fun `execute on Diaconn pump returns pump's loadHistory result`() = runTest {
+        val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
+        val diaconnPump = mock<Pump>(extraInterfaces = arrayOf(Diaconn::class))
+        whenever((diaconnPump as Diaconn).loadHistory()).thenReturn(pumpResult)
+        whenever(activePlugin.activePumpInternal).thenReturn(diaconnPump)
+
+        val result = newCommand().execute()
+
+        assertThat(result).isSameInstanceAs(pumpResult)
+    }
+
+    @Test
+    fun `execute on Medtrum pump returns pump's loadEvents result`() = runTest {
         val pumpResult = PumpEnactResultObject(rh).success(true).enacted(true)
         val medtrumPump = mock<Pump>(extraInterfaces = arrayOf(Medtrum::class))
-        whenever((medtrumPump as Medtrum).updateTime()).thenReturn(pumpResult)
+        whenever((medtrumPump as Medtrum).loadEvents()).thenReturn(pumpResult)
         whenever(activePlugin.activePumpInternal).thenReturn(medtrumPump)
 
         val result = newCommand().execute()
 
         assertThat(result).isSameInstanceAs(pumpResult)
-        assertThat(result.success).isTrue()
-        assertThat(result.enacted).isTrue()
     }
 
     @Test
-    fun `execute on non-Medtrum pump returns success not enacted`() = runTest {
+    fun `execute on unrelated pump returns success not enacted`() = runTest {
         whenever(activePlugin.activePumpInternal).thenReturn(testPumpPlugin)
 
         val result = newCommand().execute()
@@ -54,7 +78,6 @@ class CommandUpdateTimeTest : TestBaseWithProfile() {
 
         assertThat(received).isNotNull()
         assertThat(received!!.success).isTrue()
-        assertThat(received.enacted).isFalse()
     }
 
     @Test
@@ -93,19 +116,12 @@ class CommandUpdateTimeTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun `cancel with null callback does not crash`() {
-        whenever(rh.gs(app.aaps.core.ui.R.string.connectiontimedout)).thenReturn("timeout")
-
-        newCommand(callback = null).cancel(app.aaps.core.ui.R.string.connectiontimedout)
+    fun `commandType is LOAD_EVENTS`() {
+        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.LOAD_EVENTS)
     }
 
     @Test
-    fun `commandType is UPDATE_TIME`() {
-        assertThat(newCommand().commandType).isEqualTo(Command.CommandType.UPDATE_TIME)
-    }
-
-    @Test
-    fun `log is UPDATE TIME`() {
-        assertThat(newCommand().log()).isEqualTo("UPDATE TIME")
+    fun `log is LOAD EVENTS`() {
+        assertThat(newCommand().log()).isEqualTo("LOAD EVENTS")
     }
 }
