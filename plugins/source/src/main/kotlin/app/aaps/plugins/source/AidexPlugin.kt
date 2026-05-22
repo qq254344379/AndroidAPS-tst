@@ -2,6 +2,7 @@ package app.aaps.plugins.source
 
 import android.annotation.SuppressLint
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import app.aaps.core.data.configuration.Constants
@@ -23,14 +24,13 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
 import app.aaps.core.interfaces.source.BgSource
+import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.workflow.LoggingWorker
 import app.aaps.core.ui.compose.icons.IcGenericCgm
-import app.aaps.core.utils.receivers.DataWorkerStorage
 import app.aaps.plugins.source.compose.BgSourceComposeContent
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 import javax.inject.Singleton
-import app.aaps.core.keys.interfaces.Preferences
 
 @Singleton
 class AidexPlugin @Inject constructor(
@@ -55,16 +55,17 @@ class AidexPlugin @Inject constructor(
     ownPreferences = emptyList(),
     aapsLogger, rh, preferences, config
 ), BgSource {
+
     @Volatile
     private var _hasSensorError = false
 
-    companion object {
-        var sensorExpiredNotified = false
-        var sensorErrorNotified = false
-        var sensorStablingNotified = false
-        var replaceSensorNotified = false
-        var signalLostNotified = false
-    }
+    // Per-condition "already-notified" latches: prevent re-posting the same notification on every
+    // BG event while the underlying sensor flag stays true. Reset when the flag clears.
+    private var sensorExpiredNotified = false
+    private var sensorErrorNotified = false
+    private var sensorStablingNotified = false
+    private var replaceSensorNotified = false
+    private var signalLostNotified = false
 
     override fun hasSensorError(): Boolean = _hasSensorError
 
@@ -79,8 +80,8 @@ class AidexPlugin @Inject constructor(
 
         @Inject lateinit var aidexPlugin: AidexPlugin
         @Inject lateinit var persistenceLayer: PersistenceLayer
-        @Inject lateinit var dataWorkerStorage: DataWorkerStorage
         @Inject lateinit var rxBus: RxBus
+
         @SuppressLint("CheckResult")
         override suspend fun doWorkAndLog(): Result {
             var ret = Result.success()
@@ -97,14 +98,13 @@ class AidexPlugin @Inject constructor(
             if (transmitterSN != null) aapsLogger.debug(LTag.BGSOURCE, "transmitterSerialNumber: $transmitterSN")
             if (sensorId != null) aapsLogger.debug(LTag.BGSOURCE, "sensorId: $sensorId")
 
-            val bgValueTarget = if (bgType.equals("mg/dl")) bgValue else bgValue * Constants.MMOLL_TO_MGDL
+            val bgValueTarget = if (bgType == "mg/dl") bgValue else bgValue * Constants.MMOLL_TO_MGDL
 
             val sensorExpired = inputData.getBoolean(Intents.AIDEX_SENSOR_EXPIRED, false)
             val sensorError = inputData.getBoolean(Intents.EXTRA_SENSOR_ERROR, false)
             val sensorStabling = inputData.getBoolean(Intents.EXTRA_SENSOR_STABILIZING, false)
             val replaceSensor = inputData.getBoolean(Intents.EXTRA_REPLACE_SENSOR, false)
             val signalLost = inputData.getBoolean(Intents.EXTRA_SIGNAL_LOST, false)
-
 
             aidexPlugin.handleSensorNotifications(sensorExpired, sensorError, sensorStabling, replaceSensor, signalLost)
 
@@ -138,7 +138,8 @@ class AidexPlugin @Inject constructor(
         }
     }
 
-    private fun handleSensorNotifications(
+    @VisibleForTesting
+    internal fun handleSensorNotifications(
         sensorExpired: Boolean,
         sensorError: Boolean,
         sensorStabling: Boolean,
@@ -150,7 +151,7 @@ class AidexPlugin @Inject constructor(
             if (!sensorExpiredNotified) {
                 sensorExpiredNotified = true
                 notificationManager.post(
-                    id =NotificationId.AIDEX_SENSOR_EXPIRED,
+                    id = NotificationId.AIDEX_SENSOR_EXPIRED,
                     textRes = R.string.aidex_sensor_expired,
                     level = NotificationLevel.URGENT,
                     validMinutes = 60
