@@ -108,7 +108,7 @@ class SmsCommunicatorPluginTest : TestBaseWithProfile() {
         // Without this, the gate sees null mode and PumpCommandGate.check throws NPE.
         runBlocking { whenever(loop.runningMode()).thenReturn(RM.Mode.CLOSED_LOOP) }
         smsCommunicatorPlugin = SmsCommunicatorPlugin(
-            aapsLogger, rh, smsManager, preferences, constraintChecker, rxBus, profileFunction, profileUtil, activePlugin, insulin, profileRepository,
+            aapsLogger, rh, smsManager, preferences, constraintChecker, profileFunction, profileUtil, activePlugin, insulin, profileRepository,
             commandQueue, loop, iobCobCalculator, xDripBroadcast, otp, config, dateUtilMocked, uel,
             smbGlucoseStatusProvider, persistenceLayer, decimalFormatter, configBuilder, pumpStatusProvider, notificationManager,
             runningModeGuard, testScope, repository

@@ -26,6 +26,7 @@ internal class ClientPairingRepositoryTest {
         override fun encrypt(plaintextSecret: String, keystoreAlias: String): String = "ENC:$keystoreAlias:${plaintextSecret.reversed()}"
         override fun decrypt(encryptedSecret: String): String = encryptedSecret.removePrefix("ENC:NsClientControlSecret:").reversed()
         override fun isValidDataString(data: String?): Boolean = !rejectsBlobValidation && data != null && data.startsWith("ENC:")
+        override fun deleteKey(keystoreAlias: String) {}
     }
 
     private lateinit var sut: ClientPairingRepository

@@ -10,7 +10,6 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.objects.workflow.LoggingWorker
 import app.aaps.core.utils.JsonHelper
-import app.aaps.core.utils.receivers.DataWorkerStorage
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.NsIncomingDataProcessor
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +22,6 @@ class LoadProfileStoreWorker(
     params: WorkerParameters
 ) : LoggingWorker(context, params, Dispatchers.IO) {
 
-    @Inject lateinit var dataWorkerStorage: DataWorkerStorage
     @Inject lateinit var nsClientV3Plugin: NSClientV3Plugin
     @Inject lateinit var dateUtil: DateUtil
     @Inject lateinit var nsIncomingDataProcessor: NsIncomingDataProcessor

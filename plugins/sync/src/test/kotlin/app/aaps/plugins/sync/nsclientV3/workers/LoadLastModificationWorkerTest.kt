@@ -74,7 +74,7 @@ internal class LoadLastModificationWorkerTest : TestBaseWithProfile() {
         nsClientV3Plugin = NSClientV3Plugin(
             aapsLogger, rh, preferences, rxBus, context,
             receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
-            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, activePlugin, mock(), mock(), profileRepository
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, mock(), mock(), profileRepository
         )
         nsClientV3Plugin.newestDataOnServer = null
     }

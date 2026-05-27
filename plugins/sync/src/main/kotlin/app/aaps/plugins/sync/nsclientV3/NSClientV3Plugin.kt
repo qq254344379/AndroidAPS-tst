@@ -121,7 +121,6 @@ class NSClientV3Plugin @Inject constructor(
     private val l: L,
     private val nsClientRepository: NSClientRepository,
     private val uel: UserEntryLogger,
-    private val activePlugin: ActivePlugin,
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
     private val profileRepository: ProfileRepository,

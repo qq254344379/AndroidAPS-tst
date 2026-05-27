@@ -233,7 +233,7 @@ class ExportPasswordDataStoreImpl @Inject constructor(
         if (passwordStr.isNotEmpty()) {
             val aliasInBlob = passwordStr.split(":").getOrNull(1)
             if (aliasInBlob != null && aliasInBlob != KEYSTORE_ALIAS) {
-                log.info(LTag.CORE, "$MODULE: legacy alias '$aliasInBlob' in stored password, clearing for re-entry with hardened key")
+                aapsLogger.info(LTag.CORE, "$MODULE: legacy alias '$aliasInBlob' in stored password, clearing for re-entry with hardened key")
                 clearPassword(context)
                 passwordStr = ""
                 timestampStr = ""
