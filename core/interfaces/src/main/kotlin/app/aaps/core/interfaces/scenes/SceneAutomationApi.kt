@@ -40,6 +40,15 @@ interface SceneAutomationApi {
     /** End the active scene (deactivate) or dismiss the expired banner. No-op if nothing active. */
     suspend fun stopActiveScene(): SceneAutomationResult
 
+    /**
+     * Deactivate the active scene then activate [targetSceneId] as a chain follow-up.
+     * Re-checks canChain preconditions (target enabled, loop running, pump initialized, profile set)
+     * at execute time as a TOCTOU guard — drops back to plain deactivate if anything's off.
+     * Single canonical place for the "Skip to <X>" choice exposed by the End Scene dialog and the
+     * scene.stop client-control command with triggerChain=true.
+     */
+    suspend fun stopActiveSceneAndStartScene(targetSceneId: String): SceneAutomationResult
+
     /** Resolved icon for the scene's stored icon key, or null if the scene is missing. */
     fun iconForScene(sceneId: String): ImageVector?
 }
@@ -50,4 +59,24 @@ sealed interface SceneAutomationResult {
     data object SceneNotFound : SceneAutomationResult
     data object SceneDisabled : SceneAutomationResult
     data class Failed(val message: String?) : SceneAutomationResult
+
+    /**
+     * Returned only by [SceneAutomationApi.stopActiveSceneAndStartScene] when the chain
+     * follow-up actually reached the target (the active scene was deactivated AND the
+     * target was activated). Carries action-level detail so callers can present a richer
+     * notification than [Failed]'s opaque message would allow.
+     *
+     * - [failedCount] == 0 → every target action succeeded (treat as success).
+     * - [failedCount] > 0  → target was activated but some actions failed (the
+     *   "X of Y failed" case the End Scene dialog surfaces as SCENE_CHAIN_ERROR).
+     *
+     * [endedSceneName] is null only if no scene was actually active at deactivate time
+     * (the dialog could have raced an expiry); in that case the chain still ran.
+     */
+    data class ChainCompleted(
+        val endedSceneName: String?,
+        val targetSceneName: String,
+        val failedCount: Int,
+        val totalCount: Int
+    ) : SceneAutomationResult
 }

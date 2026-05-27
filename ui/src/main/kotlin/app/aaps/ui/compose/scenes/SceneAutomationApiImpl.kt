@@ -15,7 +15,8 @@ import javax.inject.Singleton
 class SceneAutomationApiImpl @Inject constructor(
     private val sceneRepository: SceneRepository,
     private val sceneExecutor: SceneExecutor,
-    private val activeSceneManager: ActiveSceneManager
+    private val activeSceneManager: ActiveSceneManager,
+    private val sceneChainTargetResolver: SceneChainTargetResolver
 ) : SceneAutomationApi {
 
     override val scenesFlow: StateFlow<String> get() = sceneRepository.scenesFlow
@@ -55,6 +56,32 @@ class SceneAutomationApiImpl @Inject constructor(
         val result = sceneExecutor.activate(scene, effective)
         return if (result.success) SceneAutomationResult.Success
         else SceneAutomationResult.Failed(result.errorMessage)
+    }
+
+    override suspend fun stopActiveSceneAndStartScene(targetSceneId: String): SceneAutomationResult {
+        // TOCTOU re-check: caller (dialog or wire command) captured the target id at some earlier
+        // moment; in the gap the target may have been disabled/deleted, the pump dropped, the loop
+        // suspended, or the profile cleared. End the current scene cleanly either way; only
+        // activate the target if everything is still healthy.
+        val endedName = activeSceneManager.getActiveState()?.scene?.name
+        val target = sceneRepository.getScene(targetSceneId)
+        val canActivate = target != null && target.isEnabled && sceneChainTargetResolver.runtimeAllowsActivation()
+        val deactivateResult = sceneExecutor.deactivate()
+        if (!deactivateResult.success) return SceneAutomationResult.Failed(deactivateResult.errorMessage)
+        if (!canActivate) return when {
+            target == null    -> SceneAutomationResult.SceneNotFound
+            !target.isEnabled -> SceneAutomationResult.SceneDisabled
+            else              -> SceneAutomationResult.Failed(null) // preconditions failed (loop/pump/profile)
+        }
+        val activateResult = sceneExecutor.activate(target, target.defaultDurationMinutes)
+        // ChainCompleted carries action-level detail so callers (notifications) can render the
+        // "ended → target: X of Y failed" message without re-implementing the activation logic.
+        return SceneAutomationResult.ChainCompleted(
+            endedSceneName = endedName,
+            targetSceneName = target.name,
+            failedCount = activateResult.actionResults.count { !it.success },
+            totalCount = activateResult.actionResults.size
+        )
     }
 
     override fun setEnabled(id: String, enabled: Boolean): SceneAutomationResult {

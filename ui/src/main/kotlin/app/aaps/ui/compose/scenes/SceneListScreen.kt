@@ -48,6 +48,7 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
+import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.dialogs.OkDialog
 import app.aaps.core.ui.compose.navigation.ElementType
@@ -78,11 +79,26 @@ fun SceneListScreen(
         }
 
         is SceneListViewModel.DialogState.ConfirmDeactivation -> {
-            SceneDeactivationDialog(
-                state = state,
-                onConfirm = viewModel::confirmDeactivation,
-                onDismiss = viewModel::dismissDialog
-            )
+            if (state.chainTargetName != null) {
+                // Same 3-button affordance as MainViewModel.requestSceneDeactivation: primary
+                // "Skip to <X>" fast-forwards to the chained scene; secondary just stops; cancel
+                // dismisses. Body summarises the revert actions, identical to the 2-button path.
+                ThreeButtonDialog(
+                    title = stringResource(R.string.scene_confirm_deactivate, state.sceneName),
+                    message = state.revertSummaries.joinToString("\n") { "• $it" },
+                    primaryLabel = stringResource(R.string.scene_skip_to_format, state.chainTargetName),
+                    onPrimary = viewModel::confirmDeactivationAndChain,
+                    secondaryLabel = stringResource(R.string.scene_deactivate),
+                    onSecondary = viewModel::confirmDeactivation,
+                    onDismiss = viewModel::dismissDialog
+                )
+            } else {
+                SceneDeactivationDialog(
+                    state = state,
+                    onConfirm = viewModel::confirmDeactivation,
+                    onDismiss = viewModel::dismissDialog
+                )
+            }
         }
 
         is SceneListViewModel.DialogState.ValidationError     -> {

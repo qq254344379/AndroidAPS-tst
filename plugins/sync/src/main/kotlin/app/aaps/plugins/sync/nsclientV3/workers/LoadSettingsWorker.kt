@@ -10,6 +10,7 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.objects.workflow.LoggingWorker
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.extensions.toRunningConfiguration
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
@@ -34,6 +35,7 @@ class LoadSettingsWorker(
     @Inject lateinit var runningConfiguration: RunningConfiguration
     @Inject lateinit var config: Config
     @Inject lateinit var dateUtil: DateUtil
+    @Inject lateinit var orphanDetector: OrphanDetector
 
     override suspend fun doWorkAndLog(): Result {
         val client = nsClientV3Plugin.nsAndroidClient ?: return Result.success()
@@ -50,6 +52,7 @@ class LoadSettingsWorker(
                     ?: response.lastServerModified
                 doc.toString().toRunningConfiguration()?.let { configuration ->
                     runningConfiguration.apply(configuration)
+                    orphanDetector.onSettingsDoc(configuration, srvModified ?: 0L)
                     val ts = srvModified?.let { dateUtil.dateAndTimeAndSecondsString(it) } ?: "?"
                     nsClientRepository.addLog("◄ SETTINGS", "applied srvModified=$ts")
                 } ?: nsClientRepository.addLog("◄ SETTINGS", "doc present but missing/invalid runningConfig")

@@ -8,6 +8,7 @@ import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneAction
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
@@ -17,6 +18,8 @@ import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
+import app.aaps.core.interfaces.scenes.ClientControlSceneSender
+import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.objects.extensions.profileNames
@@ -45,9 +48,13 @@ class SceneListViewModel @Inject constructor(
     private val profileUtil: ProfileUtil,
     private val profileRepository: ProfileRepository,
     private val rh: ResourceHelper,
+    private val rxBus: RxBus,
     private val dateUtil: DateUtil,
     private val translator: Translator,
-    private val rxBus: RxBus
+    private val config: Config,
+    private val clientControlSceneSender: ClientControlSceneSender,
+    private val sceneChainTargetResolver: SceneChainTargetResolver,
+    private val sceneAutomationApi: SceneAutomationApi
 ) : ViewModel() {
 
     /** All defined scenes */
@@ -137,7 +144,11 @@ class SceneListViewModel @Inject constructor(
 
         data class ConfirmDeactivation(
             val sceneName: String,
-            val revertSummaries: List<String>
+            val revertSummaries: List<String>,
+            /** Non-null when the active scene chains to a runnable target — render 3-button dialog
+             *  with "Skip to <chainTargetName>" alongside "End Scene". */
+            val chainTargetId: String? = null,
+            val chainTargetName: String? = null
         ) : DialogState()
 
         data class ValidationError(
@@ -173,7 +184,15 @@ class SceneListViewModel @Inject constructor(
         val state = _dialogState.value as? DialogState.ConfirmActivation ?: return
         _dialogState.value = null
         viewModelScope.launch {
-            sceneExecutor.activate(state.scene)
+            if (config.AAPSCLIENT) {
+                // AAPSClient: publish scene.start to the paired master. Pass null durationMinutes
+                // so the master honours the scene's stored default — keeps wire format minimal
+                // and prevents drift between client and master scene definitions.
+                clientControlSceneSender.sendSceneStart(state.scene.id, durationMinutes = null)
+                    .surfaceErrorDialog(rxBus, rh)
+            } else {
+                sceneExecutor.activate(state.scene)
+            }
         }
     }
 
@@ -181,9 +200,17 @@ class SceneListViewModel @Inject constructor(
         val activeState = activeSceneManager.getActiveState() ?: return
         viewModelScope.launch {
             val revertSummaries = buildRevertSummaries(activeState)
+            // Same chain detection MainViewModel.requestSceneDeactivation uses. On master we want
+            // the runtime-aware check (don't offer chain when loop suspended / pump down /
+            // profile cleared); on AAPSClient we use the catalog-only check (local runtime
+            // state doesn't reflect master) and rely on master's TOCTOU re-check at receipt.
+            val chainTarget = if (config.AAPSCLIENT) sceneChainTargetResolver.resolveCatalogChainTarget(activeState.scene)
+            else sceneChainTargetResolver.resolveRunnableChainTarget(activeState.scene)
             _dialogState.value = DialogState.ConfirmDeactivation(
                 sceneName = activeState.scene.name,
-                revertSummaries = revertSummaries
+                revertSummaries = revertSummaries,
+                chainTargetId = chainTarget?.id,
+                chainTargetName = chainTarget?.name
             )
         }
     }
@@ -191,7 +218,21 @@ class SceneListViewModel @Inject constructor(
     fun confirmDeactivation() {
         _dialogState.value = null
         viewModelScope.launch {
-            sceneExecutor.deactivate()
+            if (config.AAPSCLIENT) clientControlSceneSender.sendSceneStop(triggerChain = false)
+                .surfaceErrorDialog(rxBus, rh)
+            else sceneExecutor.deactivate()
+        }
+    }
+
+    /** Secondary action on the 3-button dialog: end current scene and immediately fire the chain target. */
+    fun confirmDeactivationAndChain() {
+        val state = _dialogState.value as? DialogState.ConfirmDeactivation ?: return
+        val targetId = state.chainTargetId ?: return
+        _dialogState.value = null
+        viewModelScope.launch {
+            if (config.AAPSCLIENT) clientControlSceneSender.sendSceneStop(triggerChain = true)
+                .surfaceErrorDialog(rxBus, rh)
+            else sceneAutomationApi.stopActiveSceneAndStartScene(targetId)
         }
     }
 

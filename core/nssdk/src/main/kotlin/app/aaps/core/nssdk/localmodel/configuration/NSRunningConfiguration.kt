@@ -28,7 +28,25 @@ data class NSRunningConfiguration(
     val quickWizardConfiguration: JsonObject? = null,
     val scenesConfiguration: JsonObject? = null,
     val automationConfiguration: JsonObject? = null,
-    val activeScene: NSActiveScene? = null
+    val activeScene: NSActiveScene? = null,
+    val authorizedClients: NSAuthorizedClients? = null
+)
+
+/**
+ * Master-published roster of clientIds that are currently authorized to issue commands.
+ * Only `Active` entries are exposed — Pending pairings (not yet handshook) are omitted
+ * so a client checking membership doesn't get false-positives during the pairing window.
+ *
+ * Block presence is the backward-compat marker:
+ * - **Block absent** (null): older master, no signal. Clients must not infer orphan status.
+ * - **Block present with our clientId in [clientIds]**: authorized.
+ * - **Block present without our clientId**: orphan (revoked or master-wiped) — surface re-pair UI.
+ *
+ * Only `clientId` strings are exposed. Names, timestamps, secrets stay master-local.
+ */
+@Serializable
+data class NSAuthorizedClients(
+    val clientIds: List<String> = emptyList()
 )
 
 /**

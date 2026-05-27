@@ -98,6 +98,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.encodeToJsonElement
+import org.json.JSONObject
 import java.security.InvalidParameterException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -152,7 +153,7 @@ class NSClientV3Plugin @Inject constructor(
     companion object {
 
         const val RECORDS_TO_LOAD = 500
-        private const val CLIENT_CONTROL_POLL_MS = 30_000L
+        private val CLIENT_CONTROL_POLL_MS = T.mins(5).msecs()
     }
 
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -229,17 +230,23 @@ class NSClientV3Plugin @Inject constructor(
         receiverDelegate.grabReceiversState()
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         runningConfigurationPublisher.start(scope)
-        // Master-side: poll inbound client-control envelopes (hello + future commands).
-        // Reactive to the toggle — enabling fires up the loop immediately, disabling cancels it
-        // via collectLatest cancelling the previous emission's body. Bound to the plugin's scope
-        // so it also stops cleanly on plugin disable / app exit.
+        // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
+        // WS settings-collection listener in NSClientV3Service that calls into
+        // [handleClientControlSettingsEvent]; this loop only catches docs that arrived while
+        // WS was disconnected. Cadence mirrors the main NS refresh interval.
+        // Reactive to the toggle — enabling fires up the loop, disabling cancels it via
+        // collectLatest cancelling the previous emission's body.
         scope.launch {
             preferences.observe(BooleanKey.NsClientAllowClientControl)
                 .collectLatest { enabled ->
                     if (!enabled) return@collectLatest
                     while (isActive) {
-                        runCatching { clientControlReceiver.processPendingHellos() }
-                            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl poll failed: ${it.message}", it) }
+                        // Skip the tick when WS is up — the listener has already delivered any
+                        // docs in real time. Mirrors the main runLoop pattern in this file.
+                        if (!preferences.get(BooleanKey.NsClient3UseWs)) {
+                            runCatching { clientControlReceiver.processPending() }
+                                .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl poll failed: ${it.message}", it) }
+                        }
                         delay(CLIENT_CONTROL_POLL_MS)
                     }
                 }
@@ -307,6 +314,19 @@ class NSClientV3Plugin @Inject constructor(
             handler?.postDelayed(runLoop, refreshInterval)
         }
         handler?.postDelayed(runLoop, T.mins(2).msecs())
+    }
+
+    /**
+     * WS-push entry for client-control envelopes. NSClientV3Service routes settings-collection
+     * create/update events here. No-op when the master toggle is off so non-master devices ignore
+     * any client-control identifiers that happen to land in their settings stream.
+     */
+    fun handleClientControlSettingsEvent(identifier: String, doc: JSONObject) {
+        if (!preferences.get(BooleanKey.NsClientAllowClientControl)) return
+        scope.launch {
+            runCatching { clientControlReceiver.onSettingsDocChanged(identifier, doc) }
+                .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl WS dispatch failed for $identifier: ${it.message}", it) }
+        }
     }
 
     fun scheduleIrregularExecution(refreshToken: Boolean = false) {

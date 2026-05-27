@@ -61,12 +61,17 @@ class ClientPairingRepository @Inject constructor(
      * Persist a freshly-scanned [PairingPayload]. Overwrites any existing pairing — the
      * caller is expected to confirm with the user before calling. Resets the counter so
      * the first signed message after pairing is counter=1.
+     *
+     * [now] is persisted so [OrphanDetector][app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector]
+     * can ignore settings/aaps docs whose `srvModified` predates the pairing — master may not
+     * have republished the roster yet.
      */
-    fun pair(payload: PairingPayload): Unit = synchronized(lock) {
+    fun pair(payload: PairingPayload, now: Long): Unit = synchronized(lock) {
         preferences.put(StringNonKey.NsClientControlMasterInstallId, payload.masterInstallId)
         preferences.put(StringNonKey.NsClientControlClientId, payload.clientId)
         preferences.put(StringNonKey.NsClientControlMasterSecretEnc, secureEncrypt.encrypt(payload.secretHex, SECURE_ENCRYPT_ALIAS))
         preferences.put(LongNonKey.NsClientControlCounterSent, 0L)
+        preferences.put(LongNonKey.NsClientControlPairedAt, now)
     }
 
     /** Clears all pairing state. Counter reset stops a re-pair from inheriting the old counter. */
@@ -75,6 +80,7 @@ class ClientPairingRepository @Inject constructor(
         preferences.put(StringNonKey.NsClientControlClientId, "")
         preferences.put(StringNonKey.NsClientControlMasterSecretEnc, "")
         preferences.put(LongNonKey.NsClientControlCounterSent, 0L)
+        preferences.put(LongNonKey.NsClientControlPairedAt, 0L)
     }
 
     /**

@@ -3,9 +3,13 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.scenes.ClientControlSceneSender
+import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
-import app.aaps.core.nssdk.localmodel.clientcontrol.HelloMessage
+import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
@@ -37,39 +41,73 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) {
+) : ClientControlSceneSender {
 
     companion object {
 
         const val IDENTIFIER_PREFIX = "aaps_clientcontrol_"
         const val IDENTIFIER_HELLO_PREFIX = "${IDENTIFIER_PREFIX}hello_"
+        const val IDENTIFIER_CMD_PREFIX = "${IDENTIFIER_PREFIX}cmd_"
         const val SCHEMA_VERSION = 1
     }
 
     private val json = Json { encodeDefaults = true }
 
     /**
-     * Build + sign a hello envelope for the current pairing and write it to NS.
-     * Returns true on HTTP 2xx, false otherwise (caller logs / surfaces).
+     * Build + sign an envelope carrying [message] and write it to the NS settings collection
+     * under the identifier appropriate for that message family. Returns true on HTTP 2xx.
+     *
+     * **Identifier scheme:**
+     * - Hello: `aaps_clientcontrol_hello_<clientId>`
+     * - Commands: `aaps_clientcontrol_cmd_<type>_<clientId>` where `<type>` is the variant's
+     *   polymorphic discriminator (e.g. `scene.start`). Per-type slots prevent cross-type
+     *   collision (a fresh `scene.start` won't overwrite an unprocessed `scene.stop`).
+     *
+     * **Same-type latest-wins is intentional**: if the user fires two commands of the same
+     * type before the master has acknowledged the first (e.g. tap "Sleep" then change mind
+     * and tap "Exercise"), `updateSettings` with the same identifier overwrites the first.
+     * Master only sees the latter — which matches user intent ("I changed my mind"). For
+     * scene control with human-paced taps this is the right semantics; if a future variant
+     * needs queueing (e.g. sequenced bolus commands), it must use a different identifier
+     * scheme and is responsible for inventing one.
+     *
+     * The identifier selector is an exhaustive `when` so adding a new [ClientControlMessage]
+     * variant forces a hello-vs-command classification at compile time.
      */
-    suspend fun publishHello(): Boolean {
+    suspend fun publish(message: ClientControlMessage): ClientControlSendResult {
         val pairing = pairingRepository.currentPairing() ?: run {
-            aapsLogger.error(LTag.NSCLIENT, "ClientControl: publishHello called while unpaired")
-            return false
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: publish called while unpaired")
+            return ClientControlSendResult.NotPaired
         }
-        val helloJson = json.encodeToString(HelloMessage.serializer(), HelloMessage())
-        val envelope = pairingRepository.nextSignedEnvelope("hello", helloJson, dateUtil.now()) ?: run {
-            aapsLogger.error(LTag.NSCLIENT, "ClientControl: failed to build signed hello envelope")
-            return false
+        val payload = json.encodeToString(ClientControlMessage.serializer(), message)
+        // Derive envelope.type from the payload's polymorphic discriminator so the two cannot
+        // drift — there is exactly one source of truth (the variant's @SerialName).
+        val type = json.parseToJsonElement(payload).jsonObject["type"]?.jsonPrimitive?.content ?: run {
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: serializer produced no discriminator for $message")
+            return ClientControlSendResult.PublishFailed("no discriminator")
         }
-        val identifier = "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
+        val envelope = pairingRepository.nextSignedEnvelope(type, payload, dateUtil.now()) ?: run {
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: failed to sign envelope for type=$type")
+            return ClientControlSendResult.PublishFailed("sign failed")
+        }
+        val identifier = when (message) {
+            is ClientControlMessage.Hello      -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
+            is ClientControlMessage.SceneStart,
+            is ClientControlMessage.SceneStop  -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
+        }
         return uploadEnvelope(identifier, envelope)
     }
 
-    private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): Boolean {
+    override suspend fun sendSceneStart(sceneId: String, durationMinutes: Int?): ClientControlSendResult =
+        publish(ClientControlMessage.SceneStart(sceneId, durationMinutes))
+
+    override suspend fun sendSceneStop(triggerChain: Boolean): ClientControlSendResult =
+        publish(ClientControlMessage.SceneStop(triggerChain))
+
+    private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): ClientControlSendResult {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: NS client not initialized")
-            return false
+            return ClientControlSendResult.PublishFailed("NS client not initialized")
         }
         val envelopeJson = json.encodeToString(SignedEnvelope.serializer(), envelope)
         val doc = JSONObject().apply {
@@ -83,16 +121,21 @@ class ClientControlPublisher @Inject constructor(
             put("envelope", JSONObject(envelopeJson))
         }
         return runCatching { client.updateSettings(identifier, doc) }
-            .onSuccess { resp ->
-                if (resp.response in 200..299) {
-                    nsClientRepository.addLog("► CLIENTCTL", "$identifier counter=${envelope.counter}")
-                } else {
-                    aapsLogger.error(LTag.NSCLIENT, "ClientControl publish HTTP ${resp.response}: ${resp.errorResponse}")
-                    nsClientRepository.addLog("✕ CLIENTCTL", "$identifier HTTP ${resp.response}")
+            .fold(
+                onSuccess = { resp ->
+                    if (resp.response in 200..299) {
+                        nsClientRepository.addLog("► CLIENTCTL", "$identifier counter=${envelope.counter}")
+                        ClientControlSendResult.Success
+                    } else {
+                        aapsLogger.error(LTag.NSCLIENT, "ClientControl publish HTTP ${resp.response}: ${resp.errorResponse}")
+                        nsClientRepository.addLog("✕ CLIENTCTL", "$identifier HTTP ${resp.response}")
+                        ClientControlSendResult.PublishFailed("HTTP ${resp.response}")
+                    }
+                },
+                onFailure = { t ->
+                    aapsLogger.error(LTag.NSCLIENT, "ClientControl publish exception: ${t.message}", t)
+                    ClientControlSendResult.PublishFailed(t.message)
                 }
-            }
-            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl publish exception: ${it.message}", it) }
-            .map { it.response in 200..299 }
-            .getOrDefault(false)
+            )
     }
 }

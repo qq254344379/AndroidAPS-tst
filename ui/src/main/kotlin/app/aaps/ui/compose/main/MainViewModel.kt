@@ -45,6 +45,9 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
+import app.aaps.core.interfaces.scenes.ClientControlSceneSender
+import app.aaps.core.interfaces.scenes.SceneAutomationApi
+import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.ui.IconsProvider
 import app.aaps.core.interfaces.ui.UiInteraction
@@ -65,8 +68,10 @@ import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
 import app.aaps.ui.compose.scenes.ActiveSceneManager
+import app.aaps.ui.compose.scenes.SceneChainTargetResolver
 import app.aaps.ui.compose.scenes.SceneExecutor
 import app.aaps.ui.compose.scenes.SceneRepository
+import app.aaps.ui.compose.scenes.surfaceErrorDialog
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -114,11 +119,14 @@ class MainViewModel @Inject constructor(
     private val protectionCheck: ProtectionCheck,
     private val sceneRepository: SceneRepository,
     private val sceneExecutor: SceneExecutor,
+    private val sceneChainTargetResolver: SceneChainTargetResolver,
     private val activeSceneManager: ActiveSceneManager,
+    private val sceneAutomationApi: SceneAutomationApi,
     private val rxBus: RxBus,
     private val runningModeGuard: RunningModeGuard,
     private val notificationManager: NotificationManager,
-    private val nsClient: NsClient
+    private val nsClient: NsClient,
+    private val clientControlSceneSender: ClientControlSceneSender
 ) : ViewModel() {
 
     // Event-driven state (drawer, dialogs, simple-mode preference). Imperative .update{} calls
@@ -704,18 +712,14 @@ class MainViewModel @Inject constructor(
         val message = rh.gs(app.aaps.core.ui.R.string.scene_confirm_deactivate, activeState.scene.name)
         // When the scene chains to a runnable follow-up, "Skip to <Next>" becomes the primary
         // action and "End Scene" the alternative — the chain represents the user's pre-declared
-        // intent for what happens next, so it's the recommended path on early end. Preconditions
-        // mirror SceneExpiryWorker.runChain (target enabled, loop running, pump initialized,
-        // profile set); they are re-checked at execute time as a TOCTOU guard.
-        val chain = activeState.scene.endAction as? SceneEndAction.ChainScene
-        val target = chain?.let { sceneRepository.getScene(it.sceneId) }
-        val ready = target != null &&
-            target.isEnabled &&
-            !loop.runningMode().pausesLoopExecution() &&
-            activePlugin.activePump.isInitialized() &&
-            profileFunction.getProfile() != null
+        // intent for what happens next, so it's the recommended path on early end. On master,
+        // preconditions are re-checked at execute time as a TOCTOU guard inside the resolver;
+        // on AAPSClient we use the catalog-only check (the local pump/loop/profile don't
+        // reflect master state — see SceneChainTargetResolver KDoc).
+        val target = if (config.AAPSCLIENT) sceneChainTargetResolver.resolveCatalogChainTarget(activeState.scene)
+        else sceneChainTargetResolver.resolveRunnableChainTarget(activeState.scene)
         _actionConfirmation.update {
-            if (ready) ActionConfirmation(
+            if (target != null) ActionConfirmation(
                 title = rh.gs(app.aaps.core.ui.R.string.scene_deactivate),
                 message = message,
                 onConfirmAction = ConfirmableAction.DeactivateAndChainScene(target.id),
@@ -789,50 +793,64 @@ class MainViewModel @Inject constructor(
             }
 
             is ConfirmableAction.ActivateScene            -> {
-                val scene = sceneRepository.getScene(action.sceneId) ?: return@launch
-                sceneExecutor.activate(scene, action.durationMinutes)
+                if (config.AAPSCLIENT) {
+                    // AAPSClient: publish scene.start to the paired master. The catalogue is in
+                    // sceneRepository (synced via Phase 2a) so the id is meaningful on master.
+                    clientControlSceneSender.sendSceneStart(action.sceneId, action.durationMinutes)
+                        .surfaceErrorDialog(rxBus, rh)
+                } else {
+                    val scene = sceneRepository.getScene(action.sceneId) ?: return@launch
+                    sceneExecutor.activate(scene, action.durationMinutes)
+                }
             }
 
             is ConfirmableAction.DeactivateScene          -> {
-                sceneExecutor.deactivate()
+                if (config.AAPSCLIENT) clientControlSceneSender.sendSceneStop(triggerChain = false)
+                    .surfaceErrorDialog(rxBus, rh)
+                else sceneExecutor.deactivate()
             }
 
             is ConfirmableAction.DeactivateAndChainScene  -> {
-                // User chose "Skip to <Next>": end current scene early, then activate the chain
-                // target. Always deactivates (user committed to ending the current scene); the
-                // chain is best-effort. Re-checks preconditions at execute time as a TOCTOU
-                // guard — the dialog may have been open for arbitrary time, during which the
-                // target could be disabled/deleted, the pump dropped, the loop suspended, or the
-                // profile cleared. If anything changed, we end the current scene cleanly and
-                // skip the chain rather than partially activating onto an unhealthy state.
-                val endedName = activeSceneManager.getActiveState()?.scene?.name
-                val target = sceneRepository.getScene(action.targetSceneId)
-                val canChain = target != null &&
-                    target.isEnabled &&
-                    !loop.runningMode().pausesLoopExecution() &&
-                    activePlugin.activePump.isInitialized() &&
-                    profileFunction.getProfile() != null
-                sceneExecutor.deactivate()
-                if (!canChain) return@launch
-                // Smart-cast: canChain==true implies target!=null (canChain itself includes target!=null).
-                val result = sceneExecutor.activate(target)
-                if (result.success && endedName != null) {
-                    notificationManager.post(
-                        id = NotificationId.SCENE_CHAINED,
-                        text = rh.gs(app.aaps.core.ui.R.string.scene_chained_format, endedName, target.name)
-                    )
-                } else if (!result.success) {
-                    val failed = result.actionResults.count { !it.success }
-                    notificationManager.post(
-                        id = NotificationId.SCENE_CHAIN_ERROR,
-                        text = rh.gs(
-                            app.aaps.core.ui.R.string.scene_chain_error_summary,
-                            endedName ?: "",
-                            target.name,
-                            failed,
-                            result.actionResults.size
-                        )
-                    )
+                if (config.AAPSCLIENT) {
+                    // AAPSClient: master will derive the chain target from its current active
+                    // scene state at receipt time, so we don't pass action.targetSceneId over
+                    // the wire — see ClientControlMessage.SceneStop KDoc.
+                    clientControlSceneSender.sendSceneStop(triggerChain = true)
+                        .surfaceErrorDialog(rxBus, rh)
+                    return@launch
+                }
+                // Delegate the canChain + execute sequence to SceneAutomationApiImpl — single
+                // canonical implementation shared with the client-control scene.stop(triggerChain)
+                // path. The ChainCompleted variant carries enough detail (ended/target names + per-
+                // action counts) to post the SCENE_CHAINED success or SCENE_CHAIN_ERROR partial-fail
+                // notification without re-implementing the activation logic here.
+                when (val result = sceneAutomationApi.stopActiveSceneAndStartScene(action.targetSceneId)) {
+                    is SceneAutomationResult.ChainCompleted -> {
+                        if (result.failedCount == 0 && result.endedSceneName != null) {
+                            notificationManager.post(
+                                id = NotificationId.SCENE_CHAINED,
+                                text = rh.gs(app.aaps.core.ui.R.string.scene_chained_format, result.endedSceneName, result.targetSceneName)
+                            )
+                        } else if (result.failedCount > 0) {
+                            notificationManager.post(
+                                id = NotificationId.SCENE_CHAIN_ERROR,
+                                text = rh.gs(
+                                    app.aaps.core.ui.R.string.scene_chain_error_summary,
+                                    result.endedSceneName ?: "",
+                                    result.targetSceneName,
+                                    result.failedCount,
+                                    result.totalCount
+                                )
+                            )
+                        }
+                    }
+                    // Target gone / disabled / preconditions failed: chain silently dropped, matching
+                    // the prior inline behavior (the user committed to ending the scene; the chain
+                    // was best-effort). Failed(deactivate-error) also stays silent here for parity.
+                    SceneAutomationResult.SceneNotFound,
+                    SceneAutomationResult.SceneDisabled,
+                    is SceneAutomationResult.Failed,
+                    SceneAutomationResult.Success           -> Unit
                 }
             }
         }

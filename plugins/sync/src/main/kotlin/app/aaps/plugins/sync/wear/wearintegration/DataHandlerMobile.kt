@@ -1011,11 +1011,14 @@ class DataHandlerMobile @Inject constructor(
 
     private suspend fun handleSceneConfirmed(command: EventData.ActionSceneConfirmed) {
         when (val result = scenes.runScene(command.id)) {
-            is SceneAutomationResult.Success       -> Unit
+            is SceneAutomationResult.Success        -> Unit
             is SceneAutomationResult.SceneNotFound,
-            is SceneAutomationResult.SceneDisabled -> sendError(rh.gs(R.string.scene_not_available, command.title))
+            is SceneAutomationResult.SceneDisabled  -> sendError(rh.gs(R.string.scene_not_available, command.title))
 
-            is SceneAutomationResult.Failed        -> sendError(result.message ?: rh.gs(R.string.scene_not_available, command.title))
+            is SceneAutomationResult.Failed         -> sendError(result.message ?: rh.gs(R.string.scene_not_available, command.title))
+            // runScene never returns ChainCompleted (only stopActiveSceneAndStartScene does), but the
+            // sealed interface forces exhaustiveness here.
+            is SceneAutomationResult.ChainCompleted -> Unit
         }
     }
 

@@ -31,6 +31,8 @@ import app.aaps.core.nssdk.mapper.toNSTreatment
 import app.aaps.plugins.sync.nsclientV3.NSAlarmObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.NsIncomingDataProcessor
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.data.NSDeviceStatusHandler
 import app.aaps.plugins.sync.nsclientV3.extensions.toRunningConfiguration
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
@@ -62,6 +64,7 @@ class NSClientV3Service : DaggerService() {
     @Inject lateinit var nsDeviceStatusHandler: NSDeviceStatusHandler
     @Inject lateinit var nsClientRepository: NSClientRepository
     @Inject lateinit var runningConfiguration: RunningConfiguration
+    @Inject lateinit var orphanDetector: OrphanDetector
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private val disposable = CompositeDisposable()
@@ -268,7 +271,18 @@ class NSClientV3Service : DaggerService() {
                 storeDataForDb.requestStoreFoods()
             }
 
-            "settings"     -> if (config.AAPSCLIENT) docString.toRunningConfiguration()?.let { runningConfiguration.apply(it) }
+            "settings"     -> {
+                if (config.AAPSCLIENT) docString.toRunningConfiguration()?.let {
+                    runningConfiguration.apply(it)
+                    orphanDetector.onSettingsDoc(it, docJson.optLong("srvModified", 0L))
+                }
+                // Master-side: route client-control envelopes (paired-client → master commands)
+                // to the receiver. The plugin gates on the master toggle and on the identifier
+                // prefix internally, so it's safe to forward every settings doc here.
+                val identifier = docJson.optString("identifier")
+                if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX))
+                    nsClientV3Plugin.handleClientControlSettingsEvent(identifier, docJson)
+            }
         }
     }
 

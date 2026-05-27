@@ -10,8 +10,10 @@ import app.aaps.core.interfaces.rx.events.EventConfigBuilderChange
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
+import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.objects.extensions.observeChange
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.AuthorizedClientsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Provider
@@ -49,6 +52,7 @@ class RunningConfigurationPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val config: Config,
     private val dateUtil: DateUtil,
+    private val authorizedRepository: AuthorizedClientsRepository,
 ) {
 
     private var job: Job? = null
@@ -63,8 +67,11 @@ class RunningConfigurationPublisher @Inject constructor(
             val keyTriggers: List<Flow<Unit>> = runningConfigurationKeys.observableKeys()
                 .map { preferences.observeChange(it) }
             val switchTrigger: Flow<Unit> = rxBus.toFlow(EventConfigBuilderChange::class.java).map { }
+            // Authorized-clients changes (pair / unpair / revoke / markActive) republish so paired
+            // clients can read the current roster and detect when they've been orphaned.
+            val authorizedClientsTrigger: Flow<Unit> = authorizedRepository.observe().map { }
 
-            (keyTriggers + switchTrigger).merge()
+            (keyTriggers + switchTrigger + authorizedClientsTrigger).merge()
                 .debounce(DEBOUNCE_MS)
                 .collect { publish() }
         }
@@ -79,6 +86,14 @@ class RunningConfigurationPublisher @Inject constructor(
         val client = nsClientV3Plugin.get().nsAndroidClient ?: return
         val payload = runningConfiguration.configuration()
         if (payload.length() == 0) return // pump not initialized yet
+        // Append the authorized-clients roster directly on the runningConfig JSONObject — the
+        // canonical RunningConfiguration plugin (in :plugins:configuration) cannot reach
+        // AuthorizedClientsRepository without a new inter-module dependency, so we attach
+        // this master-local block here instead. Only Active entries are exposed.
+        val activeClientIds = authorizedRepository.current(dateUtil.now())
+            .filter { it.state == ClientState.Active }
+            .map { it.clientId }
+        payload.put("authorizedClients", JSONObject().put("clientIds", JSONArray(activeClientIds)))
         val doc = JSONObject().apply {
             // NS APIv3 validateCommon requires date / utcOffset / app on UPDATE; all three are
             // immutable after first create, so pick stable constants — the doc represents a

@@ -56,6 +56,15 @@ class AuthorizedClientsRepository @Inject constructor(
         preferences.observe(StringNonKey.NsClientControlAuthorizedClients).map { decode(it) }
 
     /**
+     * Look up an entry without pruning expired pendings. Use only when the caller needs to
+     * distinguish "truly never paired" from "pairing-window expired" for diagnostics —
+     * general code should prefer [current] so expired entries are pruned out automatically.
+     */
+    fun findRaw(clientId: String): AuthorizedClient? = synchronized(lock) {
+        decode().firstOrNull { it.clientId == clientId }
+    }
+
+    /**
      * Create a new pending pairing. Returns the freshly-generated secret in **plaintext hex**
      * for QR rendering — caller must not persist it. The encrypted form is stored on the entry.
      */

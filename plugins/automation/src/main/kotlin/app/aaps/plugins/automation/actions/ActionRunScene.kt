@@ -37,18 +37,23 @@ class ActionRunScene(injector: HasAndroidInjector) : Action(injector) {
 
     override suspend fun doAction(): PumpEnactResult =
         when (val result = sceneApi.runScene(scene.value)) {
-            SceneAutomationResult.Success       ->
+            SceneAutomationResult.Success            ->
                 pumpEnactResultProvider.get().success(true).comment(app.aaps.core.ui.R.string.ok)
 
-            SceneAutomationResult.SceneNotFound ->
+            SceneAutomationResult.SceneNotFound      ->
                 pumpEnactResultProvider.get().success(false).comment(R.string.action_scene_not_found)
 
-            SceneAutomationResult.SceneDisabled ->
+            SceneAutomationResult.SceneDisabled      ->
                 pumpEnactResultProvider.get().success(false).comment(R.string.action_scene_disabled)
 
-            is SceneAutomationResult.Failed     ->
+            is SceneAutomationResult.Failed          ->
                 pumpEnactResultProvider.get().success(false)
                     .comment(result.message ?: rh.gs(app.aaps.core.ui.R.string.error))
+
+            // runScene never returns ChainCompleted (only stopActiveSceneAndStartScene does);
+            // the sealed interface forces exhaustiveness here.
+            is SceneAutomationResult.ChainCompleted  ->
+                pumpEnactResultProvider.get().success(true).comment(app.aaps.core.ui.R.string.ok)
         }
 
     override fun hasDialog(): Boolean = true

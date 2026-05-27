@@ -386,6 +386,10 @@
     <string name="scene_no_profile_store">No profile store available</string>
     <string name="scene_no_actions">Scene has no actions</string>
     <string name="scene_profile_not_found">Profile \"%1$s\" not found</string>
+    <string name="clientcontrol_error_not_paired_title">Not paired</string>
+    <string name="clientcontrol_error_not_paired_message">This device isn\'t paired with a master AAPS. Pair from the Manage sheet first.</string>
+    <string name="clientcontrol_error_publish_failed_title">Couldn\'t send command</string>
+    <string name="clientcontrol_error_publish_failed_message">Failed to reach Nightscout. Check connection and try again.</string>
     <string name="scene_revert_tt">Cancel temporary target</string>
     <string name="scene_revert_profile">Revert profile change</string>
     <string name="scene_revert_smb_on">Re-enable SMB</string>
