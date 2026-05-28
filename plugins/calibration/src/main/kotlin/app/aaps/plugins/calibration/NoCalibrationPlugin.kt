@@ -2,6 +2,7 @@ package app.aaps.plugins.calibration
 
 import app.aaps.core.data.iob.InMemoryGlucoseValue
 import app.aaps.core.data.plugin.PluginType
+import app.aaps.core.interfaces.calibration.AddEntryResult
 import app.aaps.core.interfaces.calibration.Calibration
 import app.aaps.core.interfaces.calibration.CalibrationContext
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -32,5 +33,7 @@ class NoCalibrationPlugin @Inject constructor(
         @Suppress("UNUSED_PARAMETER") context: CalibrationContext
     ): MutableList<InMemoryGlucoseValue> = data
 
-    override suspend fun addEntry(bgMgdl: Double, timestamp: Long) = Unit
+    override suspend fun addEntry(bgMgdl: Double, timestamp: Long): AddEntryResult = AddEntryResult.Accepted
+
+    override suspend fun checkPreconditions(): AddEntryResult = AddEntryResult.Accepted
 }
