@@ -54,6 +54,7 @@ class OkCancelDialogTest {
                 OkCancelDialog(
                     title = "Confirm delete",
                     message = "Are you sure?",
+                    secondMessage = "Second message",
                     onConfirm = {},
                     onDismiss = {}
                 )
@@ -62,6 +63,7 @@ class OkCancelDialogTest {
 
         compose.onNodeWithText("Confirm delete").assertIsDisplayed()
         compose.onNodeWithText("Are you sure?").assertIsDisplayed()
+        compose.onNodeWithText("Second message").assertIsDisplayed()
         compose.onNodeWithText(okLabel).assertIsDisplayed()
         compose.onNodeWithText(cancelLabel).assertIsDisplayed()
     }
