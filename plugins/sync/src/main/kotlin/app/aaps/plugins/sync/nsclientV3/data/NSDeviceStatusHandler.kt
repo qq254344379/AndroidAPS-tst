@@ -17,9 +17,11 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.devicestatus.NSDeviceStatus
 import app.aaps.core.utils.JsonHelper.safeGetString
 import app.aaps.core.utils.JsonHelper.safeGetStringAllowNull
+import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 /*
@@ -86,7 +88,10 @@ class NSDeviceStatusHandler @Inject constructor(
     private val overviewData: OverviewData,
     private val calculationWorkflow: CalculationWorkflow,
     private val rxBus: RxBus,
-    @ApplicationScope private val appScope: CoroutineScope
+    @ApplicationScope private val appScope: CoroutineScope,
+    // Provider to avoid a Dagger init cycle — NSClientV3Plugin itself is constructed before
+    // any handler injection completes.
+    private val nsClientV3Plugin: Provider<NSClientV3Plugin>
 ) {
 
     fun handleNewData(deviceStatuses: Array<NSDeviceStatus>) {
@@ -103,8 +108,12 @@ class NSDeviceStatusHandler @Inject constructor(
                 nsDeviceStatus.pump?.let { preferences.put(BooleanNonKey.ObjectivesPumpStatusIsAvailableInNS, true) }  // Objective 0
             }
         }
-        if (config.AAPSCLIENT && deviceStatuses.isNotEmpty())
+        if (config.AAPSCLIENT && deviceStatuses.isNotEmpty()) {
+            // Master-alive heartbeat — gates scene controls in the UI when master goes silent
+            // for longer than the staleness window, even while the local WS is still up.
+            nsClientV3Plugin.get().bumpDevicestatusHeartbeat(dateUtil.now())
             rxBus.send(EventNsClientStatusUpdated())
+        }
     }
 
     private fun updateDeviceData(deviceStatus: NSDeviceStatus) {

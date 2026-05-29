@@ -52,20 +52,27 @@ data class NSAuthorizedClients(
 /**
  * Wire view of the currently running scene published by the master.
  *
- * Carries the scene definition id, activation timing, and the **NS identifiers** of the
- * records the scene created (TempTarget / ProfileSwitch / RunningMode / TherapyEvent).
- * Local Room IDs and the master-only `priorSmb` flag are deliberately not shipped.
+ * Carries the scene definition id, activation timing, lifecycle phase, and the **NS
+ * identifiers** of the records the scene created (TempTarget / ProfileSwitch /
+ * RunningMode / TherapyEvent). Local Room IDs and the master-only `priorSmb` flag are
+ * deliberately not shipped.
+ *
+ * [lifecycle] is master-owned: "ACTIVE" while the scene is running, "EXPIRED" once
+ * master has run its expiry side-effects (revert SMB, chain scheduling). Encoded as
+ * String so this DTO stays free of any core/data dependency; consumers map back to the
+ * [app.aaps.core.data.model.SceneLifecycle] enum. Null is treated as ACTIVE for
+ * backward compatibility with masters that pre-date this field.
  *
  * NS IDs may be null transiently while the corresponding record is still uploading on the
- * master; they fill in on subsequent publishes. Clients compute `expired` from
- * `now > activatedAt + durationMs`; master clears the entire `activeScene` block when the
- * scene is dismissed.
+ * master; they fill in on subsequent publishes. Master clears the entire `activeScene`
+ * block when the scene is dismissed.
  */
 @Serializable
 data class NSActiveScene(
     val sceneId: String,
     val activatedAt: Long,
     val durationMs: Long,
+    val lifecycle: String? = null,
     val ttNsId: String? = null,
     val psNsId: String? = null,
     val rmNsId: String? = null,

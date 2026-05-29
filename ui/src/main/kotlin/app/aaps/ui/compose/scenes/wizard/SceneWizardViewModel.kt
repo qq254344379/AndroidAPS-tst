@@ -17,11 +17,12 @@ import app.aaps.core.interfaces.tempTargets.toTTPresets
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.keys.StringNonKey
-import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.objects.extensions.profileNames
 import app.aaps.ui.compose.scenes.SceneRepository
 import app.aaps.ui.compose.scenes.SceneTemplate
 import app.aaps.ui.compose.scenes.toScenes
+import app.aaps.ui.compose.scenes.validOnly
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -125,7 +126,7 @@ class SceneWizardViewModel @Inject constructor(
 
     /** Other existing scenes available as chain targets (all except the one being edited), reactive. */
     val availableChainTargets: StateFlow<List<Scene>> = sceneRepository.scenesFlow
-        .map { raw -> raw.toScenes().filter { it.id != editingSceneId } }
+        .map { raw -> raw.toScenes().validOnly().filter { it.id != editingSceneId } }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

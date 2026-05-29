@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.iob.InMemoryGlucoseValue
 import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.RM
-import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.data.model.SceneLifecycle
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
@@ -64,6 +64,7 @@ import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.objects.wizard.QuickWizardMode
 import app.aaps.ui.compose.aboutDialog.AboutDialogData
+import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
@@ -71,6 +72,7 @@ import app.aaps.ui.compose.scenes.ActiveSceneManager
 import app.aaps.ui.compose.scenes.SceneChainTargetResolver
 import app.aaps.ui.compose.scenes.SceneExecutor
 import app.aaps.ui.compose.scenes.SceneRepository
+import app.aaps.ui.compose.scenes.masterReachableFlow
 import app.aaps.ui.compose.scenes.surfaceErrorDialog
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -83,6 +85,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -133,9 +136,29 @@ class MainViewModel @Inject constructor(
     // from user actions and preference observers land here.
     private val _eventState = MutableStateFlow(EventState())
 
+    /**
+     * AAPSCLIENT-only WS-reachability signal. Constantly true on master. Exposed so the screen
+     * can mirror the gating used in [app.aaps.ui.compose.scenes.SceneListViewModel] for any
+     * affordance (e.g. the active-scene chip's End button) that would hit
+     * [ClientControlSceneSender] under the hood.
+     */
+    val masterReachable: StateFlow<Boolean> = masterReachableFlow(nsClient, config, viewModelScope)
+
     /** Toolbar items as a separate StateFlow to avoid unnecessary recompositions of the main UI */
     private val _quickLaunchItems = MutableStateFlow<List<ResolvedQuickLaunchItem>>(emptyList())
-    val quickLaunchItems: StateFlow<List<ResolvedQuickLaunchItem>> = _quickLaunchItems.asStateFlow()
+
+    /**
+     * Public toolbar items, gated by [masterReachable]: scene-action items disable when WS is
+     * down on AAPSCLIENT. The resolver only sees local catalog state, so the dynamic
+     * reachability check has to layer on here. Non-scene items pass through unchanged.
+     */
+    val quickLaunchItems: StateFlow<List<ResolvedQuickLaunchItem>> =
+        combine(_quickLaunchItems, masterReachable) { items, reachable ->
+            if (reachable) items
+            else items.map { item ->
+                if (item.action is QuickLaunchAction.SceneAction) item.copy(enabled = false) else item
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** Pending confirmation dialog (automation/TT preset actions) */
     private val _actionConfirmation = MutableStateFlow<ActionConfirmation?>(null)
@@ -665,12 +688,29 @@ class MainViewModel @Inject constructor(
     /** Expose active scene state for UI (banner, etc.) */
     val activeSceneState: StateFlow<ActiveSceneState?> = activeSceneManager.activeSceneState
 
-    /** Whether the active scene has expired (duration ran out, non-duration actions reverted) */
-    val sceneExpired: StateFlow<Boolean> = activeSceneManager.expired
+    /** Whether the active scene has expired (duration ran out, non-duration actions reverted).
+     *  Derived from the lifecycle field that lives inside [ActiveSceneState] and rides NS sync. */
+    val sceneExpired: StateFlow<Boolean> = activeSceneManager.activeSceneState
+        .map { it?.lifecycle == SceneLifecycle.EXPIRED }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    /** Dismiss the expired scene banner */
+    /** Dismiss the expired scene banner.
+     *
+     *  On AAPSCLIENT: send scene_stop to master. Master's [SceneAutomationApiImpl.stopActiveScene]
+     *  routes expired scenes to [SceneExecutor.dismiss], then republishes empty `activeScene` via
+     *  NS — clients see banner gone. Local dismissal alone would be undone on the next
+     *  RunningConfiguration apply (master still has lifecycle=EXPIRED).
+     *
+     *  On master: dismiss locally as before. */
     fun dismissExpiredScene() {
-        sceneExecutor.dismiss()
+        if (config.AAPSCLIENT) {
+            viewModelScope.launch {
+                clientControlSceneSender.sendSceneStop(triggerChain = false)
+                    .surfaceErrorDialog(rxBus, rh)
+            }
+        } else {
+            sceneExecutor.dismiss()
+        }
     }
 
     /** Format milliseconds to a localized "time remaining" string (e.g., "1h 30m remaining"). */

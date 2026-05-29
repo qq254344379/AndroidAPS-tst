@@ -18,8 +18,10 @@ import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
+import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.ui.compose.scenes.SceneExecutor
 import app.aaps.ui.compose.scenes.SceneRepository
+import app.aaps.ui.compose.scenes.masterReachableFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,11 +73,15 @@ class ScenesViewModel @Inject constructor(
     private val rxBus: RxBus,
     private val sceneRepository: SceneRepository,
     private val sceneExecutor: SceneExecutor,
-    private val rh: ResourceHelper
+    private val rh: ResourceHelper,
+    private val nsClient: NsClient
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScenesUiState())
     val uiState: StateFlow<ScenesUiState> = _uiState.asStateFlow()
+
+    /** AAPSCLIENT-only WS-reachability signal — overlays "Master disconnected" on every gate. */
+    private val masterReachable: StateFlow<Boolean> = masterReachableFlow(nsClient, config, viewModelScope)
 
     init {
         setupEventListeners()
@@ -102,10 +108,18 @@ class ScenesViewModel @Inject constructor(
         // StateFlow — drop(1) since init{} already reads current scenes; only react to changes.
         sceneRepository.scenesFlow
             .drop(1).onEach { refreshState() }.launchIn(viewModelScope)
+        // Reachability flips need to re-render — same path as a scene/automation refresh.
+        masterReachable
+            .drop(1).onEach { refreshState() }.launchIn(viewModelScope)
     }
 
     fun refreshState() {
         viewModelScope.launch {
+            // On AAPSCLIENT, master-disconnected overrides every per-scene / per-automation
+            // gate — the action can't reach master regardless of what the local validator says.
+            val masterOfflineReason: String? =
+                if (!masterReachable.value) rh.gs(CoreUiR.string.scene_lock_reason_master_offline) else null
+
             // Scenes are *definitions* — show them regardless of pump/loop/profile state.
             // Per-scene activation gating is computed via the shared validator and
             // surfaced as activationReason; the UI renders disabled scenes dimmed
@@ -117,7 +131,7 @@ class ScenesViewModel @Inject constructor(
                     name = scene.name,
                     actionCount = scene.actions.size,
                     iconKey = scene.icon,
-                    activationReason = sceneExecutor.validateActivation(scene)
+                    activationReason = masterOfflineReason ?: sceneExecutor.validateActivation(scene)
                 )
             }
 
@@ -128,6 +142,7 @@ class ScenesViewModel @Inject constructor(
             val watchOnly = config.isEnabled(ExternalOptions.SHOW_USER_ACTIONS_ON_WATCH_ONLY)
             val automationReason: String? = when {
                 watchOnly                                -> null  // hidden, not disabled
+                masterOfflineReason != null              -> masterOfflineReason
                 loop.runningMode().pausesLoopExecution() -> rh.gs(CoreUiR.string.pump_disconnected)
                 !activePlugin.activePump.isInitialized() ||
                     profileFunction.getProfile() == null -> rh.gs(CoreUiR.string.pump_not_initialized_profile_not_set)

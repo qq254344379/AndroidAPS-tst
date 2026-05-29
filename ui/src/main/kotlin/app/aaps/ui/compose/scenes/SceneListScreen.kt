@@ -48,9 +48,9 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
-import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.dialogs.OkDialog
+import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
 import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.labelResId
 
@@ -67,6 +67,8 @@ fun SceneListScreen(
     val dialogState by viewModel.dialogState.collectAsStateWithLifecycle()
     val invalidSceneIds by viewModel.invalidSceneIds.collectAsStateWithLifecycle()
     val activationReasons by viewModel.activationReasons.collectAsStateWithLifecycle()
+    val editLockReasons by viewModel.editLockReasons.collectAsStateWithLifecycle()
+    val masterOfflineBanner by viewModel.masterOfflineBanner.collectAsStateWithLifecycle()
 
     // Dialog handling
     when (val state = dialogState) {
@@ -124,63 +126,84 @@ fun SceneListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNavigateToWizard) {
-                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.scene))
+            // FAB is hidden when the master is unreachable on AAPSCLIENT — same reasoning as
+            // the per-card lock: a new scene definition would need to sync to master to be
+            // useful, so don't surface the affordance when sync can't happen.
+            if (masterOfflineBanner == null) {
+                FloatingActionButton(onClick = onNavigateToWizard) {
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.scene))
+                }
             }
         }
     ) { paddingValues ->
-        if (scenes.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(AapsSpacing.xxLarge),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = stringResource(R.string.scenes),
-                    style = MaterialTheme.typography.headlineSmall
-                )
-                Text(
-                    text = stringResource(R.string.scene_desc),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = AapsSpacing.medium)
-                )
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)) {
+            masterOfflineBanner?.let { bannerText ->
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = bannerText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(AapsSpacing.medium)
+                    )
+                }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentPadding = PaddingValues(AapsSpacing.medium),
-                verticalArrangement = Arrangement.spacedBy(AapsSpacing.medium)
-            ) {
-                items(scenes, key = { it.id }) { scene ->
-                    val isActive = activeState?.scene?.id == scene.id
-                    val isInvalid = scene.id in invalidSceneIds
-                    val subtitle = stringResource(
-                        R.string.scene_summary,
-                        scene.actions.size,
-                        viewModel.formatMinutes(scene.defaultDurationMinutes)
+            if (scenes.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(AapsSpacing.xxLarge),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.scenes),
+                        style = MaterialTheme.typography.headlineSmall
                     )
-                    val chainTargetId = (scene.endAction as? SceneEndAction.ChainScene)?.sceneId
-                    val chainTargetName = chainTargetId?.let { id -> scenes.firstOrNull { it.id == id }?.name }
-                    SceneCard(
-                        scene = scene,
-                        subtitle = subtitle,
-                        isActive = isActive,
-                        isInvalid = isInvalid,
-                        chainTargetName = chainTargetName,
-                        chainMissing = chainTargetId != null && chainTargetName == null,
-                        activationReason = activationReasons[scene.id],
-                        onActivate = { viewModel.requestActivation(scene) },
-                        onDeactivate = { viewModel.requestDeactivation() },
-                        onEdit = { onNavigateToEditor(scene.id) },
-                        onDelete = { viewModel.deleteScene(scene.id) },
-                        onToggleEnabled = { viewModel.toggleEnabled(scene.id) }
+                    Text(
+                        text = stringResource(R.string.scene_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = AapsSpacing.medium)
                     )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(AapsSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(AapsSpacing.medium)
+                ) {
+                    items(scenes, key = { it.id }) { scene ->
+                        val isActive = activeState?.scene?.id == scene.id
+                        val isInvalid = scene.id in invalidSceneIds
+                        val subtitle = stringResource(
+                            R.string.scene_summary,
+                            scene.actions.size,
+                            viewModel.formatMinutes(scene.defaultDurationMinutes)
+                        )
+                        val chainTargetId = (scene.endAction as? SceneEndAction.ChainScene)?.sceneId
+                        val chainTargetName = chainTargetId?.let { id -> scenes.firstOrNull { it.id == id }?.name }
+                        SceneCard(
+                            scene = scene,
+                            subtitle = subtitle,
+                            isActive = isActive,
+                            isInvalid = isInvalid,
+                            chainTargetName = chainTargetName,
+                            chainMissing = chainTargetId != null && chainTargetName == null,
+                            activationReason = activationReasons[scene.id],
+                            editLockReason = editLockReasons[scene.id],
+                            masterReachable = masterOfflineBanner == null,
+                            onActivate = { viewModel.requestActivation(scene) },
+                            onDeactivate = { viewModel.requestDeactivation() },
+                            onEdit = { onNavigateToEditor(scene.id) },
+                            onDelete = { viewModel.deleteScene(scene.id) },
+                            onToggleEnabled = { viewModel.toggleEnabled(scene.id) }
+                        )
+                    }
                 }
             }
         }
@@ -196,12 +219,15 @@ internal fun SceneCard(
     chainTargetName: String? = null,
     chainMissing: Boolean = false,
     activationReason: String? = null,
+    editLockReason: String? = null,
+    masterReachable: Boolean = true,
     onActivate: () -> Unit,
     onDeactivate: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onToggleEnabled: () -> Unit = {}
 ) {
+    val editEnabled = editLockReason == null
     val nameColor = when {
         isInvalid -> MaterialTheme.colorScheme.error
         isActive  -> AapsTheme.elementColors.scene
@@ -223,7 +249,8 @@ internal fun SceneCard(
         ) {
             Checkbox(
                 checked = scene.isEnabled,
-                onCheckedChange = { onToggleEnabled() }
+                onCheckedChange = { onToggleEnabled() },
+                enabled = editEnabled
             )
             Icon(
                 imageVector = SceneIcons.fromKey(scene.icon).icon,
@@ -265,10 +292,19 @@ internal fun SceneCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                // Surface the edit-lock reason (running scene / master offline) so the user
+                // understands why the edit/delete/checkbox actions are disabled.
+                if (editLockReason != null) {
+                    Text(
+                        text = editLockReason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Row {
                 if (isActive) {
-                    IconButton(onClick = onDeactivate) {
+                    IconButton(onClick = onDeactivate, enabled = masterReachable) {
                         Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.scene_deactivate))
                     }
                 } else {
@@ -279,11 +315,11 @@ internal fun SceneCard(
                         Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.scene_activate))
                     }
                 }
-                IconButton(onClick = onEdit) {
+                IconButton(onClick = onEdit, enabled = editEnabled) {
                     Icon(Icons.Default.Edit, contentDescription = null)
                 }
                 if (scene.isDeletable) {
-                    IconButton(onClick = onDelete) {
+                    IconButton(onClick = onDelete, enabled = editEnabled) {
                         Icon(Icons.Default.Delete, contentDescription = null)
                     }
                 }

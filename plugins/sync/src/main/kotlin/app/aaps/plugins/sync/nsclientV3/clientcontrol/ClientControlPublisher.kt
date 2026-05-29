@@ -8,10 +8,10 @@ import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Provider
@@ -49,6 +49,13 @@ class ClientControlPublisher @Inject constructor(
         const val IDENTIFIER_HELLO_PREFIX = "${IDENTIFIER_PREFIX}hello_"
         const val IDENTIFIER_CMD_PREFIX = "${IDENTIFIER_PREFIX}cmd_"
         const val SCHEMA_VERSION = 1
+
+        // 1 ms past NS APIv3 MIN_TIMESTAMP (946684800000 = 2000-01-01 UTC). validateCommon
+        // requires `date` and the server rejects any modification on subsequent PUTs to the
+        // same identifier ("Field date cannot be modified by the client"). The real
+        // message timestamp lives in envelope.timestamp (signed); the doc-level date is
+        // a constant placeholder only.
+        const val DOC_DATE = 946684800001L
     }
 
     private val json = Json { encodeDefaults = true }
@@ -91,9 +98,10 @@ class ClientControlPublisher @Inject constructor(
             return ClientControlSendResult.PublishFailed("sign failed")
         }
         val identifier = when (message) {
-            is ClientControlMessage.Hello      -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
+            is ClientControlMessage.Hello -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
             is ClientControlMessage.SceneStart,
-            is ClientControlMessage.SceneStop  -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
+            is ClientControlMessage.SceneStop,
+            is ClientControlMessage.SceneDefinitionsUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
         return uploadEnvelope(identifier, envelope)
     }
@@ -104,6 +112,9 @@ class ClientControlPublisher @Inject constructor(
     override suspend fun sendSceneStop(triggerChain: Boolean): ClientControlSendResult =
         publish(ClientControlMessage.SceneStop(triggerChain))
 
+    override suspend fun sendScenesUpdate(scenesJson: String): ClientControlSendResult =
+        publish(ClientControlMessage.SceneDefinitionsUpdate(scenesJson))
+
     private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): ClientControlSendResult {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: NS client not initialized")
@@ -111,10 +122,11 @@ class ClientControlPublisher @Inject constructor(
         }
         val envelopeJson = json.encodeToString(SignedEnvelope.serializer(), envelope)
         val doc = JSONObject().apply {
-            // validateCommon requires these on UPDATE; sender's clock at message-mint time is the
-            // most useful "date" for the receiver to inspect. utcOffset stays zero — the timestamp
-            // in the envelope is millis-epoch and self-describing.
-            put("date", envelope.timestamp)
+            // validateCommon requires date/utcOffset/app, but `date` is immutable after first
+            // create — sending the live envelope timestamp here fails the second PUT to the same
+            // identifier with HTTP 400. The authoritative timestamp is envelope.timestamp (signed);
+            // the doc-level date is a stable placeholder, matching RunningConfigurationPublisher.
+            put("date", DOC_DATE)
             put("utcOffset", 0)
             put("app", "AAPS")
             put("schemaVersion", SCHEMA_VERSION)

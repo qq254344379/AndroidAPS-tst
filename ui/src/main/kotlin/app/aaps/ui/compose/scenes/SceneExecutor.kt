@@ -112,7 +112,7 @@ class SceneExecutor @Inject constructor(
         //   own coroutine scope, so we just clear the state. REPLACE policy on the new
         //   scheduleExpiryWorker handles any leftover work.
         if (activeSceneManager.isActive()) {
-            val previouslyExpired = activeSceneManager.expired.value
+            val previouslyExpired = activeSceneManager.isExpired()
             aapsLogger.info(LTag.UI, "XXXX activate() — winding down previous active scene '${activeSceneManager.getActiveState()?.scene?.name}' expired=$previouslyExpired")
             if (!previouslyExpired) {
                 deactivate()
@@ -258,9 +258,10 @@ class SceneExecutor @Inject constructor(
             }
         }
 
-        // Mark as expired (keep state for banner display) instead of clearing
-        aapsLogger.info(LTag.UI, "XXXX onExpiry() calling setExpired()")
-        activeSceneManager.setExpired()
+        // Mark as expired (keep state for banner display) instead of clearing.
+        // Lifecycle change rides the existing RunningConfigurationPublisher cycle to clients.
+        aapsLogger.info(LTag.UI, "XXXX onExpiry() calling markExpired()")
+        activeSceneManager.markExpired()
 
         // Log
         uel.log(

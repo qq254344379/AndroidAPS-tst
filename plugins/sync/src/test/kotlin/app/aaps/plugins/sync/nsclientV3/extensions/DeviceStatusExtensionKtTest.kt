@@ -11,6 +11,7 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.workflow.CalculationWorkflow
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.mapper.convertToRemoteAndBack
+import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.data.NSDeviceStatusHandler
 import app.aaps.plugins.sync.nsclientV3.data.ProcessedDeviceStatusDataImpl
 import app.aaps.shared.tests.TestBase
@@ -34,6 +35,7 @@ internal class DeviceStatusExtensionKtTest : TestBase() {
     @Mock lateinit var persistenceLayer: PersistenceLayer
     @Mock lateinit var overviewData: OverviewData
     @Mock lateinit var calculationWorkflow: CalculationWorkflow
+    @Mock lateinit var nsClientV3Plugin: NSClientV3Plugin
     private lateinit var processedDeviceStatusData: ProcessedDeviceStatusData
     private lateinit var nsDeviceStatusHandler: NSDeviceStatusHandler
     private val testScope = CoroutineScope(Dispatchers.Unconfined)
@@ -41,7 +43,11 @@ internal class DeviceStatusExtensionKtTest : TestBase() {
     @BeforeEach
     fun setup() {
         processedDeviceStatusData = ProcessedDeviceStatusDataImpl(apsResultProvider)
-        nsDeviceStatusHandler = NSDeviceStatusHandler(preferences, config, dateUtil, processedDeviceStatusData, aapsLogger, persistenceLayer, overviewData, calculationWorkflow, rxBus, testScope)
+        nsDeviceStatusHandler = NSDeviceStatusHandler(
+            preferences, config, dateUtil, processedDeviceStatusData, aapsLogger,
+            persistenceLayer, overviewData, calculationWorkflow, rxBus, testScope,
+            Provider { nsClientV3Plugin }
+        )
         whenever(config.AAPSCLIENT).thenReturn(true)
     }
 

@@ -12,7 +12,9 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.graph.profile.ProfileCompareData
 import app.aaps.core.graph.profile.buildProfileCompareData
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.db.compensateForClockSkew
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -77,7 +79,8 @@ class ProfileManagementViewModel @Inject constructor(
     val profileUtil: ProfileUtil,
     val decimalFormatter: DecimalFormatter,
     private val persistenceLayer: PersistenceLayer,
-    private val preferences: Preferences
+    private val preferences: Preferences,
+    private val config: Config
 ) : ViewModel() {
 
     // VM-owned selection state. The source of truth for "which profile is currently shown
@@ -108,6 +111,7 @@ class ProfileManagementViewModel @Inject constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeActiveProfileForAutoNavigation() {
         persistenceLayer.observeChanges(EPS::class.java)
+            .compensateForClockSkew(config, dateUtil)
             .onStart { emit(emptyList()) }
             .mapLatest {
                 persistenceLayer.getEffectiveProfileSwitchActiveAt(dateUtil.now())?.originalProfileName
@@ -128,7 +132,7 @@ class ProfileManagementViewModel @Inject constructor(
     val uiState: StateFlow<ProfileManagementUiState> = combine(
         profileRepository.profiles,
         _selectedIndex,
-        persistenceLayer.observeChanges(EPS::class.java).onStart { emit(emptyList()) },
+        persistenceLayer.observeChanges(EPS::class.java).compensateForClockSkew(config, dateUtil).onStart { emit(emptyList()) },
         _screenMode
     ) { profiles, requestedIdx, _, screenMode ->
         UiInputs(profiles, requestedIdx, screenMode)

@@ -226,6 +226,7 @@ fun MainScreen(
 
                 val activeSceneState by mainViewModel.activeSceneState.collectAsStateWithLifecycle()
                 val sceneExpired by mainViewModel.sceneExpired.collectAsStateWithLifecycle()
+                val masterReachable by mainViewModel.masterReachable.collectAsStateWithLifecycle()
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Main content
                     OverviewScreen(
@@ -262,6 +263,7 @@ fun MainScreen(
                         sceneExpired = sceneExpired,
                         onEndScene = { mainViewModel.requestSceneDeactivation() },
                         onDismissScene = { mainViewModel.dismissExpiredScene() },
+                        endSceneEnabled = masterReachable,
                         formatDuration = mainViewModel::formatDuration,
                         paddingValues = contentPadding,
                         fabBottomOffset = if (hasToolbar && showChrome) 56.dp else 0.dp,

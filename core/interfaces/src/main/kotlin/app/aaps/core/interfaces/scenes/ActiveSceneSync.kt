@@ -1,5 +1,7 @@
 package app.aaps.core.interfaces.scenes
 
+import app.aaps.core.data.model.SceneLifecycle
+
 /**
  * Bridge between the active-scene runtime state and the NS settings sync layer.
  *
@@ -7,10 +9,10 @@ package app.aaps.core.interfaces.scenes
  * snapshot arrives over the wire. Domain-typed (no nssdk dependency) — the consumer
  * (`RunningConfigurationImpl`) maps to/from the NS wire DTO.
  *
- * The snapshot carries the scene definition id, activation timing, and the **NS
- * identifiers** of records the scene created. Local Room IDs and master-only revert
- * state (`priorSmb`) are deliberately omitted. NS ids may be null while a record is
- * still uploading.
+ * The snapshot carries the scene definition id, activation timing, lifecycle phase, and
+ * the **NS identifiers** of records the scene created. Local Room IDs and master-only
+ * revert state (`priorSmb`) are deliberately omitted. NS ids may be null while a record
+ * is still uploading.
  */
 interface ActiveSceneSync {
 
@@ -33,6 +35,7 @@ data class ActiveSceneSnapshot(
     val sceneId: String,
     val activatedAt: Long,
     val durationMs: Long,
+    val lifecycle: SceneLifecycle = SceneLifecycle.ACTIVE,
     val ttNsId: String? = null,
     val psNsId: String? = null,
     val rmNsId: String? = null,

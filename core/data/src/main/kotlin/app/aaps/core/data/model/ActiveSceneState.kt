@@ -18,6 +18,14 @@ data class ActiveSceneState(
     val activatedAt: Long,
     /** Duration in milliseconds (0 = indefinite, manual end only) */
     val durationMs: Long,
+    /**
+     * Lifecycle phase. Owned by master, synced to client. Distinct from [isExpired]
+     * which is a clock-based predicate (duration elapsed by wall time). Lifecycle
+     * transitions to [SceneLifecycle.EXPIRED] only after master runs its expiry
+     * side-effects (revert SMB, chain scheduling) — so a client seeing EXPIRED can
+     * confidently render the "Close" affordance.
+     */
+    val lifecycle: SceneLifecycle = SceneLifecycle.ACTIVE,
     /** SMB enabled state before activation (null if scene didn't change SMB) */
     val priorSmb: Boolean? = null,
     /** Records created by this scene at activation */

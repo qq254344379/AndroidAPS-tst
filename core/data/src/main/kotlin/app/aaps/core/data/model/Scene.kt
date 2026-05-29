@@ -23,5 +23,17 @@ data class Scene(
     /** Whether this scene is enabled (disabled scenes are hidden from quick-launch/sheet and can't be activated) */
     val isEnabled: Boolean = true,
     /** Display order (lower = higher priority) */
-    val sortOrder: Int = 0
+    val sortOrder: Int = 0,
+    /**
+     * Last-edit wall clock (ms epoch). Bumped on every user save/delete. Drives per-scene
+     * last-writer-wins on the master when a client publishes a `scene_definitions_update`.
+     * Never bumped by import/republish — only by editor save paths.
+     */
+    val lastModified: Long = 0L,
+    /**
+     * Soft-delete flag. `false` is a portable tombstone: editor hides it, client publish
+     * still ships it so master can drop the entry on import, and editor-load purges any
+     * `false` entries that linger locally after master acked the delete.
+     */
+    val isValid: Boolean = true
 )

@@ -39,7 +39,7 @@ sealed class ClientControlMessage {
      * the scene's stored default; an explicit value (including 0 for indefinite) overrides.
      */
     @Serializable
-    @SerialName("scene.start")
+    @SerialName("scene_start")
     data class SceneStart(
         val sceneId: String,
         val durationMinutes: Int? = null
@@ -55,8 +55,24 @@ sealed class ClientControlMessage {
      * chain config so client-side staleness can't trigger an unintended scene.
      */
     @Serializable
-    @SerialName("scene.stop")
+    @SerialName("scene_stop")
     data class SceneStop(
         val triggerChain: Boolean = false
+    ) : ClientControlMessage()
+
+    /**
+     * Client pushes its full scene-definitions JSON to the master so a scene edit made on the
+     * client side propagates. The wire carries the same JSON shape the local pref holds (a JSON
+     * array of scene objects), unmodified — receiver does per-scene last-writer-wins by the
+     * `lastModified` field on each scene, then triggers a master republish that fans the merged
+     * result back out to every paired client via the running-config doc.
+     *
+     * `scenesJson` is opaque to the nssdk module (a String, not parsed) so the wire schema
+     * stays decoupled from the UI module's scene model. Master parses it.
+     */
+    @Serializable
+    @SerialName("scene_definitions_update")
+    data class SceneDefinitionsUpdate(
+        val scenesJson: String
     ) : ClientControlMessage()
 }

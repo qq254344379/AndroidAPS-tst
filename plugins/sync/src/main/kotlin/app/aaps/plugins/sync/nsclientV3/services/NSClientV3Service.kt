@@ -100,7 +100,15 @@ class NSClientV3Service : DaggerService() {
 
     var storageSocket: Socket? = null
     var alarmSocket: Socket? = null
-    internal var wsConnected = false
+
+    /**
+     * WS connection state. Pass-through to [NSClientV3Plugin.wsConnectedFlow] — the plugin is
+     * the singleton that survives service rebinds, so the canonical StateFlow lives there and
+     * UI subscribers don't get torn down across service lifecycles.
+     */
+    internal var wsConnected: Boolean
+        get() = nsClientV3Plugin.wsConnectedFlow.value
+        set(value) = nsClientV3Plugin.setWsConnected(value)
 
     @OpenForTesting
     fun shutdownWebsockets() {
@@ -194,7 +202,7 @@ class NSClientV3Service : DaggerService() {
                     nsClientRepository.addLog("◄ WS", "Subscribed for: ${response.optString("collections")}")                    // during disconnection updated data is not received
                     // thus run non WS load to get missing data
                     nsClientV3Plugin.initialLoadFinished = false
-                    nsClientV3Plugin.executeLoop("WS_CONNECT", forceNew = true)
+                    nsClientV3Plugin.executeLoop("WS_CONNECT")
                     true
                 } else {
                     nsClientRepository.addLog("◄ WS", "Auth failed")

@@ -7,16 +7,16 @@ specification — wire format, modules, semantics, and the roadmap.
 
 ## Roadmap at a glance
 
-| Phase | Scope                                                             | State    |
-|-------|-------------------------------------------------------------------|----------|
-| 1     | Running configuration master→client sync                          | shipped  |
-| 2a    | Active scene state (master-published, with scoped record NS ids)  | shipped  |
-| 2b    | Pairing infrastructure (master toggle + QR + client scanner)      | shipped  |
-| 2c    | Command channel + first commands (`hello`, `scene.start/stop`)    | shipped  |
-| 2d    | Orphan detection (master publishes roster; client self-checks)    | shipped  |
-| 3     | Shared editable configs (scenes / automation / TT presets)        | planned  |
-| 4     | Backup / restore                                                  | planned  |
-| 5     | Insulin configuration editing (gated)                             | optional |
+| Phase | Scope                                                            | State    |
+|-------|------------------------------------------------------------------|----------|
+| 1     | Running configuration master→client sync                         | shipped  |
+| 2a    | Active scene state (master-published, with scoped record NS ids) | shipped  |
+| 2b    | Pairing infrastructure (master toggle + QR + client scanner)     | shipped  |
+| 2c    | Command channel + first commands (`hello`, `scene_start/stop`)   | shipped  |
+| 2d    | Orphan detection (master publishes roster; client self-checks)   | shipped  |
+| 3     | Shared editable configs (scenes / automation / TT presets)       | planned  |
+| 4     | Backup / restore                                                 | planned  |
+| 5     | Insulin configuration editing (gated)                            | optional |
 
 ## Collection semantics
 
@@ -309,7 +309,7 @@ Settings doc:
     clientId:    "<paired-client uuid>",
     counter:     <number>,                // strictly monotonic per client
     timestamp:   <epoch ms>,
-    type:        "hello" | "scene.start" | "scene.stop" | ...,
+    type:        "hello" | "scene_start" | "scene_stop" | ...,
     payload:     "<JSON string of ClientControlMessage>",
     signature:   "<hex HMAC-SHA256>"
   }
@@ -320,8 +320,11 @@ Settings doc:
 object). Signature verification compares the bytes that travelled, immune to
 JSON canonicalization differences. Inside that JSON is a polymorphically
 serialized `ClientControlMessage` sealed class — every variant carries
-`@SerialName` as the wire discriminator (`"hello"`, `"scene.start"`,
-`"scene.stop"`).
+`@SerialName` as the wire discriminator (`"hello"`, `"scene_start"`,
+`"scene_stop"`). Underscore — not dot — because the discriminator is also
+embedded in the NS settings URL identifier, and NS/Express's content-
+negotiation middleware would interpret `.start` as a `start` file extension
+and reject the request with HTTP 406.
 
 `envelope.type` is derived from the polymorphic discriminator at publish
 time (single source of truth — no risk of drift between the two).
@@ -332,10 +335,10 @@ Per-type slot, one per (client, message-type) pair:
 
 - **Hello**: `aaps_clientcontrol_hello_<clientId>`
 - **Commands**: `aaps_clientcontrol_cmd_<type>_<clientId>` (e.g.
-  `aaps_clientcontrol_cmd_scene.start_<clientId>`)
+  `aaps_clientcontrol_cmd_scene_start_<clientId>`)
 
-This prevents cross-type collision (a fresh `scene.start` won't overwrite an
-unprocessed `scene.stop`). **Same-type latest-wins is intentional**:
+This prevents cross-type collision (a fresh `scene_start` won't overwrite an
+unprocessed `scene_stop`). **Same-type latest-wins is intentional**:
 re-publishing the same identifier overwrites the previous in-flight message,
 which matches user-changed-mind semantics for human-paced taps. Future
 variants needing queueing must invent a different identifier scheme.
@@ -581,13 +584,13 @@ path same as phase 3 with additional confirmation UI on commit.
 
 ## Identifier strategy
 
-| Identifier                                       | Owner                           | Phase   | Purpose                                                          |
-|--------------------------------------------------|---------------------------------|---------|------------------------------------------------------------------|
-| `aaps`                                           | master                          | 1+2a+2d | Running configuration (incl. active scene + authorized-clients)  |
-| `aaps_clientcontrol_hello_<clientId>`            | client (signed) → master DELETE | 2c      | First post-pairing handshake, promotes Pending → Active          |
-| `aaps_clientcontrol_cmd_<type>_<clientId>`       | client (signed) → master DELETE | 2c      | Per-(client, message-type) command slot, latest-wins             |
-| `aaps-cfg-<masterInstallId>`                     | master                          | 3       | Per-master config when single `aaps` is no longer enough         |
-| `aaps-backup-<installId>`                        | install (exclusive)             | 4       | Per-install backup                                               |
+| Identifier                                 | Owner                           | Phase   | Purpose                                                         |
+|--------------------------------------------|---------------------------------|---------|-----------------------------------------------------------------|
+| `aaps`                                     | master                          | 1+2a+2d | Running configuration (incl. active scene + authorized-clients) |
+| `aaps_clientcontrol_hello_<clientId>`      | client (signed) → master DELETE | 2c      | First post-pairing handshake, promotes Pending → Active         |
+| `aaps_clientcontrol_cmd_<type>_<clientId>` | client (signed) → master DELETE | 2c      | Per-(client, message-type) command slot, latest-wins            |
+| `aaps-cfg-<masterInstallId>`               | master                          | 3       | Per-master config when single `aaps` is no longer enough        |
+| `aaps-backup-<installId>`                  | install (exclusive)             | 4       | Per-install backup                                              |
 
 `<installId>` / `<masterInstallId>` is a UUID generated on first launch and
 persisted in prefs. Stable across app updates; not re-generated on restore.

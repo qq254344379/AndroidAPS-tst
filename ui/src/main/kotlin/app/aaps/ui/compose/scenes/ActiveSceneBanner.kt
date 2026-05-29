@@ -30,10 +30,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.Scene
+import app.aaps.core.objects.extensions.tickerFlow
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 
 /**
  * Banner showing the currently active scene with name, time remaining, progress, and End button.
@@ -45,6 +46,7 @@ fun ActiveSceneBanner(
     onEndClick: () -> Unit,
     onDismiss: () -> Unit = {},
     formatDuration: (Long) -> String,
+    endEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
@@ -59,6 +61,7 @@ fun ActiveSceneBanner(
                 onEndClick = onEndClick,
                 onDismiss = onDismiss,
                 formatDuration = formatDuration,
+                endEnabled = endEnabled,
                 modifier = modifier
             )
         }
@@ -72,16 +75,16 @@ internal fun ActiveSceneBannerContent(
     onEndClick: () -> Unit,
     onDismiss: () -> Unit = {},
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
+    endEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     // Ticker for countdown — 30s matches GraphViewModel.ticker30s; text is minute-grain
-    // and the progress bar stays visually smooth even on short scenes.
+    // and the progress bar stays visually smooth even on short scenes. tickerFlow's first
+    // emission is immediate, so the initial `now` reflects subscription time without the
+    // `remember { System.currentTimeMillis() }` seed.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
-        while (true) {
-            delay(30_000L)
-            now = System.currentTimeMillis()
-        }
+        tickerFlow(30_000L).collect { now = System.currentTimeMillis() }
     }
 
     val remainingMs = state.remainingMs(now)
@@ -135,7 +138,10 @@ internal fun ActiveSceneBannerContent(
                         Text(stringResource(R.string.close))
                     }
                 } else {
-                    FilledTonalButton(onClick = onEndClick) {
+                    // Active scene's End button — disabled on AAPSCLIENT while WS is down,
+                    // since the scene_stop envelope can't reach the master. Master is the
+                    // authoritative actor; locally faking "ended" would desync the chip.
+                    FilledTonalButton(onClick = onEndClick, enabled = endEnabled) {
                         Text(stringResource(R.string.scene_deactivate))
                     }
                 }

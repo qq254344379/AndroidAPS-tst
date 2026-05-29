@@ -8,6 +8,8 @@ import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.StringNonKey
+import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
@@ -15,6 +17,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.serialization.json.Json
+import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Provider
@@ -58,6 +61,7 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
     private val activeSceneSync: ActiveSceneSync,
+    private val preferences: Preferences,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
 ) {
@@ -146,13 +150,17 @@ class ClientControlReceiver @Inject constructor(
             onVerifiedUndecodablePayload(entry, envelope, now)
         } else {
             when (message) {
-                is ClientControlMessage.Hello      -> onVerifiedHello(entry, envelope, now)
-                is ClientControlMessage.SceneStart -> onVerifiedSceneStart(entry, envelope, message, now)
-                is ClientControlMessage.SceneStop  -> onVerifiedSceneStop(entry, envelope, message, now)
+                is ClientControlMessage.Hello                  -> onVerifiedHello(entry, envelope, now)
+                is ClientControlMessage.SceneStart             -> onVerifiedSceneStart(entry, envelope, message, now)
+                is ClientControlMessage.SceneStop              -> onVerifiedSceneStop(entry, envelope, message, now)
+                is ClientControlMessage.SceneDefinitionsUpdate -> onVerifiedScenesUpdate(entry, envelope, message, now)
             }
         }
-        runCatching { client.deleteSettings(identifier) }
-            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl: failed to delete $identifier after ack: ${it.message}") }
+        // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
+        // legitimate same-type command from the same client would PUT to that identifier and
+        // hit HTTP 410. Counter dedup (line above) prevents replay; the doc just lingers in
+        // the slot until the next overwrite or NS auto-prune. Error-path deletes above stay —
+        // those purge unverifiable garbage rather than acknowledged commands.
     }
 
     private fun onVerifiedHello(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long) {
@@ -199,6 +207,56 @@ class ClientControlReceiver @Inject constructor(
         }
         if (isFailure)
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.stop failed for ${entry.name}: ${result.tag()}")
+    }
+
+    /**
+     * Apply a client-pushed scenes JSON to the master's `SceneDefinitions` pref via per-scene
+     * last-writer-wins on `lastModified`. JSON-level merge — keeps this module free of a
+     * `:ui` dependency on the Scene model. Writing the merged JSON back to the pref triggers
+     * `RunningConfigurationPublisher`'s debounce, which fans the result out to all paired
+     * clients via the running-config doc.
+     *
+     * Tombstones (`isValid = false`) are merged as-is; the editor's load-time purge handles
+     * physical removal lazily — consistent with how local deletes on master behave.
+     */
+    private fun onVerifiedScenesUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneDefinitionsUpdate, now: Long) {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val incoming = runCatching { JSONArray(message.scenesJson) }.getOrNull()
+        if (incoming == null) {
+            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scenes_update from ${entry.name} has invalid JSON, ignoring")
+            nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: invalid JSON")
+            return
+        }
+        val existing = runCatching { JSONArray(preferences.get(StringNonKey.SceneDefinitions)) }.getOrNull() ?: JSONArray()
+        // Build id → (index, lastModified) over the existing array so we can apply LWW
+        // per scene without rebuilding the array structure (preserves any unknown fields).
+        val existingIndex = HashMap<String, Int>()
+        for (i in 0 until existing.length()) {
+            existing.optJSONObject(i)?.optString("id")?.takeIf { it.isNotEmpty() }?.let { existingIndex[it] = i }
+        }
+        var changed = 0
+        var dropped = 0
+        for (i in 0 until incoming.length()) {
+            val inc = incoming.optJSONObject(i) ?: continue
+            val id = inc.optString("id").takeIf { it.isNotEmpty() } ?: continue
+            val incLm = inc.optLong("lastModified", 0L)
+            val existIdx = existingIndex[id]
+            if (existIdx == null) {
+                existing.put(inc)
+                existingIndex[id] = existing.length() - 1
+                changed++
+            } else {
+                val existLm = existing.optJSONObject(existIdx)?.optLong("lastModified", 0L) ?: 0L
+                if (incLm > existLm) {
+                    existing.put(existIdx, inc)
+                    changed++
+                } else {
+                    dropped++
+                }
+            }
+        }
+        if (changed > 0) preferences.put(StringNonKey.SceneDefinitions, existing.toString())
+        nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: applied=$changed stale=$dropped")
     }
 
     private fun SceneAutomationResult.tag(): String = when (this) {

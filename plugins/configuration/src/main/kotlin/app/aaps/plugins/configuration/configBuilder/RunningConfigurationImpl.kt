@@ -1,5 +1,6 @@
 package app.aaps.plugins.configuration.configBuilder
 
+import app.aaps.core.data.model.SceneLifecycle
 import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.interfaces.aps.APS
@@ -93,6 +94,7 @@ class RunningConfigurationImpl @Inject constructor(
                     put("sceneId", snapshot.sceneId)
                     put("activatedAt", snapshot.activatedAt)
                     put("durationMs", snapshot.durationMs)
+                    put("lifecycle", snapshot.lifecycle.name)
                     snapshot.ttNsId?.let { put("ttNsId", it) }
                     snapshot.psNsId?.let { put("psNsId", it) }
                     snapshot.rmNsId?.let { put("rmNsId", it) }
@@ -217,6 +219,9 @@ class RunningConfigurationImpl @Inject constructor(
             sceneId = sceneId,
             activatedAt = activatedAt,
             durationMs = durationMs,
+            // null on the wire = pre-lifecycle master, treat as ACTIVE.
+            lifecycle = lifecycle?.let { runCatching { SceneLifecycle.valueOf(it) }.getOrNull() }
+                ?: SceneLifecycle.ACTIVE,
             ttNsId = ttNsId,
             psNsId = psNsId,
             rmNsId = rmNsId,

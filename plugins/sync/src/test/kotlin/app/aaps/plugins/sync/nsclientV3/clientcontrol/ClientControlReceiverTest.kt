@@ -62,15 +62,29 @@ internal class ClientControlReceiverTest {
     private lateinit var sut: ClientControlReceiver
 
     private var stored = "[]"
+    // Per-key backing store — the scenes-update merge writes a different StringNonKey
+    // (`SceneDefinitions`) than the authorized-clients repository, so a shared `stored`
+    // would clobber whichever was written last. Keyed by [StringNonKey.key].
+    private val storage = mutableMapOf<String, String>()
     private val now = 1_700_000_000_000L
 
     @BeforeEach
     fun setUp() {
         MockitoAnnotations.openMocks(this)
         stored = "[]"
+        storage.clear()
+        storage[StringNonKey.SceneDefinitions.key] = "[]"
         whenever(preferences.get(StringNonKey.NsClientControlAuthorizedClients)).thenAnswer { stored }
+        whenever(preferences.get(StringNonKey.SceneDefinitions)).thenAnswer {
+            storage[StringNonKey.SceneDefinitions.key] ?: "[]"
+        }
         whenever(preferences.put(any<StringNonKey>(), any<String>())).thenAnswer { invocation ->
-            stored = invocation.arguments[1] as String
+            val key = invocation.arguments[0] as StringNonKey
+            val value = invocation.arguments[1] as String
+            when (key) {
+                StringNonKey.SceneDefinitions -> storage[key.key] = value
+                else                          -> stored = value
+            }
         }
         authorizedRepository = AuthorizedClientsRepository(preferences, secureEncrypt, aapsLogger)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
@@ -81,6 +95,7 @@ internal class ClientControlReceiverTest {
             nsClientRepository,
             sceneAutomationApi,
             activeSceneSync,
+            preferences,
             dateUtil,
             aapsLogger
         )
@@ -146,27 +161,27 @@ internal class ClientControlReceiverTest {
     private val deleteOk = CreateUpdateResponse(response = 200, identifier = null, isDeduplication = false, deduplicatedIdentifier = null, lastModified = null, errorResponse = null)
 
     @Test
-    fun helloFromPendingClientPromotesToActiveAndDeletes() = runTest {
+    fun helloFromPendingClientPromotesToActive() = runTest {
         val (clientId, secret) = pair()
         val identifier = ClientControlPublisher.IDENTIFIER_HELLO_PREFIX + clientId
         val doc = wrap(envelope(clientId, secret, counter = 1L))
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
 
         sut.onSettingsDocChanged(identifier, doc)
 
         val entry = authorizedRepository.current(now).single { it.clientId == clientId }
         assertThat(entry.state).isEqualTo(ClientState.Active)
         assertThat(entry.counterReceived).isEqualTo(1L)
-        verify(nsAndroidClient).deleteSettings(identifier)
+        // Success path no longer deletes — NS would tombstone the slot and reject the next
+        // same-type command with HTTP 410. Counter dedup handles replay protection instead.
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
-    fun helloFromAlreadyActiveClientBumpsLastSeenAndDeletes() = runTest {
+    fun helloFromAlreadyActiveClientBumpsLastSeen() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         val identifier = ClientControlPublisher.IDENTIFIER_HELLO_PREFIX + clientId
         val doc = wrap(envelope(clientId, secret, counter = 2L))
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
 
         sut.onSettingsDocChanged(identifier, doc)
 
@@ -174,24 +189,23 @@ internal class ClientControlReceiverTest {
         assertThat(entry.state).isEqualTo(ClientState.Active)
         assertThat(entry.counterReceived).isEqualTo(2L)
         assertThat(entry.lastSeenAt).isEqualTo(now)
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
-    fun verifiedEnvelopeWithUndecodablePayloadAdvancesCounterAndDeletes() = runTest {
+    fun verifiedEnvelopeWithUndecodablePayloadAdvancesCounter() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         val identifier = ClientControlPublisher.IDENTIFIER_CMD_PREFIX + clientId
         // Forge a verified envelope whose payload doesn't match any ClientControlMessage variant.
         // Simulates "newer client speaks a type this older master doesn't know yet".
         val signed = signedEnvelope(clientId, secret, type = "scene.future", payload = """{"type":"scene.future","sceneId":"x"}""", counter = 5L)
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
 
         sut.onSettingsDocChanged(identifier, wrap(signed))
 
         val entry = authorizedRepository.current(now).single { it.clientId == clientId }
         assertThat(entry.counterReceived).isEqualTo(5L)
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
@@ -318,40 +332,38 @@ internal class ClientControlReceiverTest {
     }
 
     @Test
-    fun sceneStartDispatchesToAutomationApiAndDeletes() = runTest {
+    fun sceneStartDispatchesToAutomationApi() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.start_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_start_$clientId"
         val msg = ClientControlMessage.SceneStart(sceneId = "sleep", durationMinutes = 30)
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
         whenever(sceneAutomationApi.runScene("sleep", 30)).thenReturn(SceneAutomationResult.Success)
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = 5L)))
 
         verify(sceneAutomationApi).runScene("sleep", 30)
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
     fun sceneStopWithoutChainDispatchesToStopActiveScene() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         whenever(sceneAutomationApi.stopActiveScene()).thenReturn(SceneAutomationResult.Success)
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(false), counter = 5L)))
 
         verify(sceneAutomationApi).stopActiveScene()
         verify(sceneAutomationApi, never()).stopActiveSceneAndStartScene(any())
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
     fun sceneStopWithChainResolvesActiveSceneAndDispatchesAndChain() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         // Simulate master state: active scene "sleep", chained to "wakeup"
         whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
             ActiveSceneSnapshot(sceneId = "sleep", activatedAt = now - 60_000L, durationMs = 3_600_000L)
@@ -359,14 +371,13 @@ internal class ClientControlReceiverTest {
         whenever(sceneAutomationApi.getScene("sleep")).thenReturn(
             Scene(id = "sleep", name = "Sleep", endAction = SceneEndAction.ChainScene("wakeup"))
         )
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
         whenever(sceneAutomationApi.stopActiveSceneAndStartScene("wakeup")).thenReturn(SceneAutomationResult.Success)
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
 
         verify(sceneAutomationApi).stopActiveSceneAndStartScene("wakeup")
         verify(sceneAutomationApi, never()).stopActiveScene()
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     /**
@@ -378,7 +389,7 @@ internal class ClientControlReceiverTest {
     fun sceneStopWithChainCompletedSuccessfullyDoesNotWarn() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
             ActiveSceneSnapshot(sceneId = "sleep", activatedAt = now - 60_000L, durationMs = 3_600_000L)
         )
@@ -403,7 +414,7 @@ internal class ClientControlReceiverTest {
     fun sceneStopWithChainPartialFailureWarns() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
             ActiveSceneSnapshot(sceneId = "sleep", activatedAt = now - 60_000L, durationMs = 3_600_000L)
         )
@@ -424,31 +435,29 @@ internal class ClientControlReceiverTest {
     fun sceneStopWithChainFallsBackToPlainStopWhenActiveSceneHasNoChainTarget() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
             ActiveSceneSnapshot(sceneId = "exercise", activatedAt = now - 60_000L, durationMs = 3_600_000L)
         )
         whenever(sceneAutomationApi.getScene("exercise")).thenReturn(
             Scene(id = "exercise", name = "Exercise", endAction = SceneEndAction.Notification)
         )
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
         whenever(sceneAutomationApi.stopActiveScene()).thenReturn(SceneAutomationResult.Success)
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
 
         verify(sceneAutomationApi).stopActiveScene()
         verify(sceneAutomationApi, never()).stopActiveSceneAndStartScene(any())
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
     fun sceneStopWithChainFallsBackToPlainStopWhenNoActiveSceneAtAll() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         // No active scene on master at receipt time — short-circuits before getScene lookup.
         whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(null)
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
         whenever(sceneAutomationApi.stopActiveScene()).thenReturn(SceneAutomationResult.Success)
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
@@ -456,14 +465,14 @@ internal class ClientControlReceiverTest {
         verify(sceneAutomationApi).stopActiveScene()
         verify(sceneAutomationApi, never()).stopActiveSceneAndStartScene(any())
         verify(sceneAutomationApi, never()).getScene(any())
-        verify(nsAndroidClient).deleteSettings(identifier)
+        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
     fun pollingListsSettingsAndDispatchesEachClientControlDoc() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val cmdIdentifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene.stop_$clientId"
+        val cmdIdentifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
         val cmdDoc = wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(false), counter = 5L)).also {
             it.put("identifier", cmdIdentifier)
         }
@@ -475,15 +484,130 @@ internal class ClientControlReceiverTest {
         whenever(nsAndroidClient.searchSettings(limit = 100)).thenReturn(
             NSAndroidClient.ReadResponse(code = 200, lastServerModified = null, values = listOf(cmdDoc, unrelatedDoc))
         )
-        whenever(nsAndroidClient.deleteSettings(cmdIdentifier)).thenReturn(deleteOk)
         whenever(sceneAutomationApi.stopActiveScene()).thenReturn(SceneAutomationResult.Success)
 
         sut.processPending()
 
         verify(nsAndroidClient).searchSettings(limit = 100)
         verify(sceneAutomationApi).stopActiveScene()
-        verify(nsAndroidClient).deleteSettings(cmdIdentifier)
-        // Unrelated doc is ignored — never deleted, never dispatched
-        verify(nsAndroidClient, never()).deleteSettings(eq("aaps"))
+        // Success path no longer deletes — counter dedup handles replay; leaving the doc avoids
+        // tombstoning the slot. Unrelated doc is also untouched.
+        verify(nsAndroidClient, never()).deleteSettings(any())
+    }
+
+    // -- scene_definitions_update --------------------------------------------------------
+
+    /** Compact JSON of a single scene with explicit timestamps, matching `SceneSerializer`'s shape. */
+    private fun sceneJson(id: String, name: String, lastModified: Long, isValid: Boolean = true): String =
+        """{"id":"$id","name":"$name","icon":"star","defaultDurationMinutes":60,"isDeletable":true,"isEnabled":true,"sortOrder":0,"lastModified":$lastModified,"isValid":$isValid,"actions":[],"endAction":{"type":"notification"}}"""
+
+    private suspend fun sendScenesUpdate(clientId: String, secret: ByteArray, scenesJson: String, counter: Long = 5L) {
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_definitions_update_$clientId"
+        val msg = ClientControlMessage.SceneDefinitionsUpdate(scenesJson)
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
+    }
+
+    @Test
+    fun scenesUpdateAddsAbsentScene() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        // Existing pref is empty — incoming scene must land.
+        sendScenesUpdate(clientId, secret, "[${sceneJson("a", "x", lastModified = 1_000L)}]")
+
+        val merged = storage[StringNonKey.SceneDefinitions.key]!!
+        assertThat(merged).contains("\"id\":\"a\"")
+        assertThat(merged).contains("\"name\":\"x\"")
+    }
+
+    @Test
+    fun scenesUpdateAppliesWhenIncomingLastModifiedIsNewer() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        // Master starts with an older copy.
+        storage[StringNonKey.SceneDefinitions.key] = "[${sceneJson("a", "old-name", lastModified = 1_000L)}]"
+
+        sendScenesUpdate(clientId, secret, "[${sceneJson("a", "new-name", lastModified = 2_000L)}]")
+
+        val merged = storage[StringNonKey.SceneDefinitions.key]!!
+        assertThat(merged).contains("\"name\":\"new-name\"")
+        assertThat(merged).doesNotContain("\"name\":\"old-name\"")
+    }
+
+    @Test
+    fun scenesUpdateDropsStaleIncoming() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        // Master has the fresher copy.
+        storage[StringNonKey.SceneDefinitions.key] = "[${sceneJson("a", "master-name", lastModified = 5_000L)}]"
+
+        sendScenesUpdate(clientId, secret, "[${sceneJson("a", "stale-name", lastModified = 1_000L)}]")
+
+        // Stale upsert dropped → master's name survives. Critical guarantee: offline client
+        // edits don't overwrite newer master state.
+        val merged = storage[StringNonKey.SceneDefinitions.key]!!
+        assertThat(merged).contains("\"name\":\"master-name\"")
+        assertThat(merged).doesNotContain("\"name\":\"stale-name\"")
+    }
+
+    @Test
+    fun scenesUpdateEqualLastModifiedIsTreatedAsStale() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        // Equal lastModified → not strictly greater → drop. Matches the receiver's `>` rule;
+        // the no-write fast-path also avoids spurious republish round-trips.
+        storage[StringNonKey.SceneDefinitions.key] = "[${sceneJson("a", "master-name", lastModified = 5_000L)}]"
+
+        sendScenesUpdate(clientId, secret, "[${sceneJson("a", "client-name", lastModified = 5_000L)}]")
+
+        val merged = storage[StringNonKey.SceneDefinitions.key]!!
+        assertThat(merged).contains("\"name\":\"master-name\"")
+        assertThat(merged).doesNotContain("\"name\":\"client-name\"")
+    }
+
+    @Test
+    fun scenesUpdateMergesTombstoneAsRegularEntry() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        storage[StringNonKey.SceneDefinitions.key] = "[${sceneJson("a", "active", lastModified = 1_000L)}]"
+
+        // Client publishes the soft-delete with a newer lastModified — master accepts the
+        // tombstone in the merged pref (editor-load purge handles physical removal lazily).
+        sendScenesUpdate(clientId, secret, "[${sceneJson("a", "active", lastModified = 2_000L, isValid = false)}]")
+
+        val merged = storage[StringNonKey.SceneDefinitions.key]!!
+        assertThat(merged).contains("\"isValid\":false")
+        assertThat(merged).contains("\"lastModified\":2000")
+    }
+
+    @Test
+    fun scenesUpdateNonOverlappingEditsBothApply() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        // Master has scene A; client publishes the same A unchanged plus a new B. Both must
+        // survive — this is the common "I edited a different scene on my phone" case and
+        // must NOT clobber unrelated entries.
+        storage[StringNonKey.SceneDefinitions.key] = "[${sceneJson("a", "x", lastModified = 1_000L)}]"
+
+        sendScenesUpdate(
+            clientId, secret,
+            "[${sceneJson("a", "x", lastModified = 1_000L)},${sceneJson("b", "y", lastModified = 2_000L)}]"
+        )
+
+        val merged = storage[StringNonKey.SceneDefinitions.key]!!
+        assertThat(merged).contains("\"id\":\"a\"")
+        assertThat(merged).contains("\"id\":\"b\"")
+    }
+
+    @Test
+    fun scenesUpdateInvalidJsonLeavesPrefUntouched() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val before = "[${sceneJson("a", "x", lastModified = 1_000L)}]"
+        storage[StringNonKey.SceneDefinitions.key] = before
+
+        sendScenesUpdate(clientId, secret, "{not an array}")
+
+        // Garbled JSON from a verified-but-broken client must not corrupt the master's pref.
+        assertThat(storage[StringNonKey.SceneDefinitions.key]).isEqualTo(before)
     }
 }

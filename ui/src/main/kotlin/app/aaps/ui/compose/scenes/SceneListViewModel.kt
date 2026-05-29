@@ -20,6 +20,7 @@ import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
 import app.aaps.core.interfaces.scenes.ClientControlSceneSender
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
+import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.objects.extensions.profileNames
@@ -54,12 +55,13 @@ class SceneListViewModel @Inject constructor(
     private val config: Config,
     private val clientControlSceneSender: ClientControlSceneSender,
     private val sceneChainTargetResolver: SceneChainTargetResolver,
-    private val sceneAutomationApi: SceneAutomationApi
+    private val sceneAutomationApi: SceneAutomationApi,
+    private val nsClient: NsClient
 ) : ViewModel() {
 
-    /** All defined scenes */
+    /** All defined scenes (tombstones excluded — sync layer is the only consumer that needs them). */
     val scenes: StateFlow<List<Scene>> = sceneRepository.scenesFlow
-        .map { it.toScenes() }
+        .map { it.toScenes().validOnly() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), sceneRepository.getScenes())
 
     /** Currently active scene state */
@@ -72,6 +74,31 @@ class SceneListViewModel @Inject constructor(
     // Bumped on each runtime-state event so [activationReasons] recomputes.
     private val activationTick = MutableStateFlow(0)
 
+    /** "Master is reachable for scene operations" signal — see [masterReachableFlow]. */
+    private val masterReachable: StateFlow<Boolean> = masterReachableFlow(nsClient, config, viewModelScope)
+
+    /**
+     * Top-of-screen banner string when scene operations are globally locked, or null when
+     * operations are allowed. Today the only global lock is AAPSCLIENT-with-WS-disconnected.
+     */
+    val masterOfflineBanner: StateFlow<String?> = masterReachable
+        .map { reachable -> if (reachable) null else rh.gs(R.string.scene_lock_banner_master_offline) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /**
+     * Per-scene edit-lock reason. Edit/delete/toggle buttons are disabled when this is non-null
+     * for that scene. Reasons stack with WS-disconnected taking precedence over scene-active —
+     * the user sees the most actionable explanation first.
+     */
+    val editLockReasons: StateFlow<Map<String, String?>> =
+        combine(scenes, activeSceneState, masterReachable) { sceneList, active, reachable ->
+            val masterReason = if (!reachable) rh.gs(R.string.scene_lock_reason_master_offline) else null
+            val activeReason = rh.gs(R.string.scene_lock_reason_scene_active)
+            sceneList.associate { scene ->
+                scene.id to (masterReason ?: if (scene.id == active?.scene?.id) activeReason else null)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     /**
      * Per-scene activation gate: sceneId → localized reason if the scene
      * cannot be activated right now, or null if it can. Recomputes when
@@ -79,13 +106,20 @@ class SceneListViewModel @Inject constructor(
      * UI uses this to disable the play button and surface the reason.
      */
     val activationReasons: StateFlow<Map<String, String?>> =
-        combine(scenes, activationTick) { sceneList, _ -> sceneList }
-            .map { sceneList ->
-                sceneList.associate { it.id to sceneExecutor.validateActivation(it) }
+        combine(scenes, activationTick, masterReachable) { sceneList, _, reachable ->
+            sceneList.associate { scene ->
+                scene.id to when {
+                    !reachable -> rh.gs(R.string.scene_lock_reason_master_offline)
+                    else       -> sceneExecutor.validateActivation(scene)
+                }
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     init {
+        // GC any soft-deleted scenes that are still hanging around locally — by the time the
+        // editor opens, the master has had every opportunity to apply our delete and republish a
+        // clean snapshot, so any `isValid = false` entries we still hold are safe to drop.
+        sceneRepository.purgeInvalid()
         // Re-validate whenever scenes change
         viewModelScope.launch {
             scenes.collect { sceneList ->

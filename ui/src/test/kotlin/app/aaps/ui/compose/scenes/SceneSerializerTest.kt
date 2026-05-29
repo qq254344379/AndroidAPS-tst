@@ -193,6 +193,38 @@ class SceneSerializerTest : TestBase() {
     }
 
     @Test
+    fun lastModifiedAndIsValid_roundTrip() {
+        // Active scenes and tombstones both have to survive the round-trip — soft-delete
+        // mechanics rely on isValid=false propagating through serialization unchanged.
+        val active = Scene(id = "a", name = "Active", lastModified = 1_700_000_000_000L, isValid = true)
+        val tombstone = Scene(id = "t", name = "Deleted", lastModified = 1_700_000_001_234L, isValid = false)
+
+        val restored = listOf(active, tombstone).toJson().toScenes()
+        assertThat(restored[0].lastModified).isEqualTo(1_700_000_000_000L)
+        assertThat(restored[0].isValid).isTrue()
+        assertThat(restored[1].lastModified).isEqualTo(1_700_000_001_234L)
+        assertThat(restored[1].isValid).isFalse()
+    }
+
+    @Test
+    fun lastModifiedAndIsValid_missingFields_defaults() {
+        // Legacy JSON written before lastModified / isValid were added must keep parsing —
+        // defaults are `lastModified = 0L` (no edit history → treated as pristine on the
+        // master merge) and `isValid = true` (a missing flag is never a tombstone).
+        val legacyJson = JSONArray().apply {
+            put(JSONObject().apply {
+                put("id", "legacy")
+                put("name", "Legacy")
+            })
+        }.toString()
+
+        val restored = legacyJson.toScenes()
+        assertThat(restored).hasSize(1)
+        assertThat(restored[0].lastModified).isEqualTo(0L)
+        assertThat(restored[0].isValid).isTrue()
+    }
+
+    @Test
     fun loopMode_allModes_roundTrip() {
         for (mode in RM.Mode.entries) {
             val scene = Scene(

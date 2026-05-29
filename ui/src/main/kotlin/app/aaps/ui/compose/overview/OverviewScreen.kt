@@ -73,6 +73,7 @@ fun OverviewScreen(
     sceneExpired: Boolean = false,
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
+    endSceneEnabled: Boolean = true,
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
     paddingValues: PaddingValues,
     fabBottomOffset: Dp = 0.dp,
@@ -142,6 +143,7 @@ fun OverviewScreen(
                 sceneExpired = sceneExpired,
                 onEndScene = onEndScene,
                 onDismissScene = onDismissScene,
+                endSceneEnabled = endSceneEnabled,
                 formatDuration = formatDuration
             )
         } else BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -176,6 +178,7 @@ fun OverviewScreen(
                     sceneExpired = sceneExpired,
                     onEndScene = onEndScene,
                     onDismissScene = onDismissScene,
+                    endSceneEnabled = endSceneEnabled,
                     formatDuration = formatDuration
                 )
             } else {
@@ -209,6 +212,7 @@ fun OverviewScreen(
                     sceneExpired = sceneExpired,
                     onEndScene = onEndScene,
                     onDismissScene = onDismissScene,
+                    endSceneEnabled = endSceneEnabled,
                     formatDuration = formatDuration
                 )
             }

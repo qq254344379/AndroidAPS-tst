@@ -8,7 +8,9 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.db.compensateForClockSkew
 import app.aaps.core.interfaces.db.observeChanges
 import app.aaps.core.interfaces.insulin.ConcentrationType
 import app.aaps.core.interfaces.insulin.InsulinManager
@@ -53,7 +55,8 @@ class InsulinManagementViewModel @Inject constructor(
     val rh: ResourceHelper,
     private val rxBus: RxBus,
     private val persistenceLayer: PersistenceLayer,
-    private val profileRepository: ProfileRepository
+    private val profileRepository: ProfileRepository,
+    private val config: Config
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(InsulinManagementUiState())
@@ -128,6 +131,7 @@ class InsulinManagementViewModel @Inject constructor(
         profileRepository.profiles.drop(1)
             .onEach { updateRunningInsulin() }.launchIn(viewModelScope)
         persistenceLayer.observeChanges<EPS>()
+            .compensateForClockSkew(config, dateUtil)
             .onEach { updateRunningInsulin() }.launchIn(viewModelScope)
     }
 

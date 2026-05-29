@@ -4,6 +4,7 @@ import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.ActiveSceneState.ScopedRecords
 import app.aaps.core.data.model.PS
 import app.aaps.core.data.model.RM
+import app.aaps.core.data.model.SceneLifecycle
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -50,13 +51,9 @@ class ActiveSceneManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _activeSceneState = MutableStateFlow<ActiveSceneState?>(null)
-    private val _expired = MutableStateFlow(false)
 
-    /** Observable active scene state */
+    /** Observable active scene state. Lifecycle (ACTIVE / EXPIRED) lives inside the state. */
     val activeSceneState: StateFlow<ActiveSceneState?> = _activeSceneState.asStateFlow()
-
-    /** Whether the active scene has expired (duration-based actions already reverted) */
-    val expired: StateFlow<Boolean> = _expired.asStateFlow()
 
     init {
         _activeSceneState.value = loadActiveState()
@@ -74,32 +71,35 @@ class ActiveSceneManager @Inject constructor(
     fun setActive(state: ActiveSceneState) {
         aapsLogger.info(LTag.UI, "XXXX ActiveSceneManager.setActive('${state.scene.name}')")
         _activeSceneState.value = state
-        _expired.value = false
         persistActiveState(state)
     }
 
-    /** Mark scene as expired (non-duration actions reverted, banner stays for dismiss) */
-    fun setExpired() {
-        aapsLogger.info(LTag.UI, "XXXX ActiveSceneManager.setExpired() — scene='${_activeSceneState.value?.scene?.name}'")
-        _expired.value = true
+    /** Mark scene as expired (non-duration actions reverted, banner stays for dismiss).
+     *  Called by master only — clients receive the EXPIRED lifecycle via NS sync. */
+    fun markExpired() {
+        val current = _activeSceneState.value ?: return
+        if (current.lifecycle == SceneLifecycle.EXPIRED) return
+        aapsLogger.info(LTag.UI, "XXXX ActiveSceneManager.markExpired() — scene='${current.scene.name}'")
+        val updated = current.copy(lifecycle = SceneLifecycle.EXPIRED)
+        _activeSceneState.value = updated
+        persistActiveState(updated)
     }
 
     /** Clear the active scene (called by SceneExecutor on deactivation or dismiss) */
     fun clearActive() {
         aapsLogger.info(LTag.UI, "XXXX ActiveSceneManager.clearActive() — was='${_activeSceneState.value?.scene?.name}'")
         _activeSceneState.value = null
-        _expired.value = false
         preferences.put(StringNonKey.ActiveScene, "")
     }
 
     /** Check if any scene is currently active */
     fun isActive(): Boolean = _activeSceneState.value != null
 
-    /** True once [setExpired] has been called for the current active scene.
+    /** True once [markExpired] has run for the current active scene.
      *  Stays true until [clearActive]. Used by [SceneExpiryWorker] to make
      *  retried runs idempotent — onExpiry's revert + chain-activation must
      *  not happen twice. */
-    fun isExpired(): Boolean = _expired.value
+    fun isExpired(): Boolean = _activeSceneState.value?.lifecycle == SceneLifecycle.EXPIRED
 
     /** Get the current active state */
     fun getActiveState(): ActiveSceneState? = _activeSceneState.value
@@ -121,6 +121,7 @@ class ActiveSceneManager @Inject constructor(
                 sceneId = it.scene.id,
                 activatedAt = it.activatedAt,
                 durationMs = it.durationMs,
+                lifecycle = it.lifecycle,
                 ttNsId = it.scopedRecords.ttNsId,
                 psNsId = it.scopedRecords.psNsId,
                 rmNsId = it.scopedRecords.rmNsId,
@@ -146,6 +147,7 @@ class ActiveSceneManager @Inject constructor(
             scene = scene,
             activatedAt = snapshot.activatedAt,
             durationMs = snapshot.durationMs,
+            lifecycle = snapshot.lifecycle,
             priorSmb = null,                 // master-only, never on the wire
             scopedRecords = ScopedRecords(
                 ttNsId = snapshot.ttNsId,
@@ -155,9 +157,8 @@ class ActiveSceneManager @Inject constructor(
             )
         )
         if (initial == _activeSceneState.value) return
-        aapsLogger.info(LTag.UI, "ActiveSceneManager.applyActiveScene('${scene.name}')")
+        aapsLogger.info(LTag.UI, "ActiveSceneManager.applyActiveScene('${scene.name}' lifecycle=${snapshot.lifecycle})")
         _activeSceneState.value = initial
-        _expired.value = false
         persistActiveState(initial)
         scope.launch { resolveRoomIdsForCurrent() }
     }
@@ -230,6 +231,7 @@ class ActiveSceneManager @Inject constructor(
             put("sceneId", state.scene.id)
             put("activatedAt", state.activatedAt)
             put("durationMs", state.durationMs)
+            put("lifecycle", state.lifecycle.name)
             state.priorSmb?.let { put("priorSmb", it) }
             put("scopedRecords", state.scopedRecords.toJson())
         }
@@ -247,6 +249,9 @@ class ActiveSceneManager @Inject constructor(
                 scene = scene,
                 activatedAt = json.getLong("activatedAt"),
                 durationMs = json.getLong("durationMs"),
+                lifecycle = json.optStringOrNull("lifecycle")
+                    ?.let { runCatching { SceneLifecycle.valueOf(it) }.getOrNull() }
+                    ?: SceneLifecycle.ACTIVE,
                 priorSmb = if (json.has("priorSmb")) json.getBoolean("priorSmb") else null,
                 scopedRecords = json.optJSONObject("scopedRecords")?.toScopedRecords() ?: ScopedRecords()
             )

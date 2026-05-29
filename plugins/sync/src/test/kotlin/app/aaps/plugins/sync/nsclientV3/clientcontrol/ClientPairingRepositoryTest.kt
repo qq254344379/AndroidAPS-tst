@@ -122,8 +122,8 @@ internal class ClientPairingRepositoryTest {
     fun nextSignedEnvelopeMonotonicallyIncrementsCounter() {
         sut.pair(samplePayload(), now)
         val a = sut.nextSignedEnvelope("hello", "{}", 1_000L)!!
-        val b = sut.nextSignedEnvelope("scene.start", """{"id":"x"}""", 2_000L)!!
-        val c = sut.nextSignedEnvelope("scene.stop", "{}", 3_000L)!!
+        val b = sut.nextSignedEnvelope("scene_start", """{"id":"x"}""", 2_000L)!!
+        val c = sut.nextSignedEnvelope("scene_stop", "{}", 3_000L)!!
         assertThat(a.counter).isEqualTo(1L)
         assertThat(b.counter).isEqualTo(2L)
         assertThat(c.counter).isEqualTo(3L)

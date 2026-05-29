@@ -55,6 +55,7 @@ import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolus
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolusWizard
@@ -88,10 +89,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -100,6 +106,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.encodeToJsonElement
 import org.json.JSONObject
 import java.security.InvalidParameterException
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -123,6 +130,7 @@ class NSClientV3Plugin @Inject constructor(
     private val uel: UserEntryLogger,
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
+    private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
     private val profileRepository: ProfileRepository,
 ) : NsClient, Sync, PluginBaseWithPreferences(
     PluginDescription()
@@ -158,6 +166,14 @@ class NSClientV3Plugin @Inject constructor(
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var runLoop: Runnable
     private var handler: Handler? = null
+
+    // Re-run signaling. When a sync request arrives while a cycle is in flight, we set the
+    // appropriate flag instead of dropping the request (old `forceNew=false`) or busy-waiting
+    // (old `forceNew=true`). A WorkManager state observer (wired up in onStart) detects when
+    // the cycle goes idle and triggers a follow-up run. Loop subsumes upload — if both flags
+    // are set at idle, only the loop is re-run.
+    private val pendingLoop = AtomicBoolean(false)
+    private val pendingUpload = AtomicBoolean(false)
     override val dataSyncSelector: DataSyncSelector get() = dataSyncSelectorV3
     override val status
         get() =
@@ -205,6 +221,9 @@ class NSClientV3Plugin @Inject constructor(
         override fun onServiceDisconnected(name: ComponentName) {
             aapsLogger.debug(LTag.NSCLIENT, "Service is disconnected")
             nsClientV3Service = null
+            // Process-death / crash teardown skips shutdownWebsockets, so flip the flag here
+            // so UI gates don't keep showing "connected" until the service rebinds.
+            _wsConnected.value = false
         }
 
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -229,6 +248,7 @@ class NSClientV3Plugin @Inject constructor(
         receiverDelegate.grabReceiversState()
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         runningConfigurationPublisher.start(scope)
+        sceneDefinitionsClientPublisher.start(scope)
         // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
         // WS settings-collection listener in NSClientV3Service that calls into
         // [handleClientControlSettingsEvent]; this loop only catches docs that arrived while
@@ -263,11 +283,11 @@ class NSClientV3Plugin @Inject constructor(
                     val service = nsClientV3Service
                     if (service == null || service.storageSocket == null)
                         setClient() // (re)create client and WS; WS_CONNECT callback will trigger executeLoop
-                    executeLoop("CONNECTIVITY", forceNew = false)
+                    executeLoop("CONNECTIVITY")
                     // Trigger upload of data that accumulated while offline.
                     // executeLoop may skip when WS is enabled and initial load is done,
                     // but pending outbound data still needs to be pushed.
-                    executeUpload("CONNECTIVITY", forceNew = false)
+                    executeUpload("CONNECTIVITY")
                 } else if (ev.connected && !isAllowed) {
                     nsClientV3Service?.let { service ->
                         if (service.storageSocket != null) stopService()
@@ -282,6 +302,30 @@ class NSClientV3Plugin @Inject constructor(
             nsClientRepository.updateUrl(preferences.get(StringKey.NsClientUrl))
         }
         nsClientRepository.updateUrl(preferences.get(StringKey.NsClientUrl))
+
+        // Re-run watchdog: when WorkManager's unique job goes idle, fire any pending follow-up.
+        // Replaces the old `forceNew=true` Thread.sleep(5000) busy-wait. A loop subsumes an
+        // upload (DataSyncWorker is the loop's last step), so loop wins if both are pending.
+        // Gated on WorkManager.isInitialized() so unit tests that don't bootstrap WM (and call
+        // onStart only to exercise unrelated handlers) don't crash here.
+        if (WorkManager.isInitialized()) {
+            WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(JOB_NAME)
+                .map { infos -> infos.any { it.state.isActive() } }
+                .distinctUntilChanged()
+                .filter { active -> !active }
+                .onEach {
+                    when {
+                        pendingLoop.compareAndSet(true, false)   -> {
+                            pendingUpload.set(false)
+                            executeLoop("PENDING_RERUN")
+                        }
+
+                        pendingUpload.compareAndSet(true, false) -> executeUpload("PENDING_RERUN")
+                    }
+                }
+                .launchIn(scope)
+        }
+
         preferences.observe(StringKey.NsClientAccessToken).drop(1).onEach(restartOnChange).launchIn(scope)
         preferences.observe(StringKey.NsClientUrl).drop(1).onEach(restartOnChange).launchIn(scope)
         preferences.observe(BooleanKey.NsClient3UseWs).drop(1).onEach(restartOnChange).launchIn(scope)
@@ -289,13 +333,13 @@ class NSClientV3Plugin @Inject constructor(
         preferences.observe(BooleanKey.NsClientNotificationsFromAlarms).drop(1).onEach(restartOnChange).launchIn(scope)
         preferences.observe(BooleanKey.NsClientNotificationsFromAnnouncements).drop(1).onEach(restartOnChange).launchIn(scope)
         preferences.observe(LongNonKey.LocalProfileLastChange).drop(1)
-            .onEach { executeUpload("PROFILE_CHANGE", forceNew = true) }.launchIn(scope)
+            .onEach { executeUpload("PROFILE_CHANGE") }.launchIn(scope)
         persistenceLayer.observeAnyChange()
             // HR/SC writes come from the watch; this plugin doesn't upload them — skip to avoid reconnect-flush storm.
             .filter { types -> types.any { it != HR::class && it != SC::class } }
-            .onEach { types -> executeUpload("DB_CHANGED(${types.joinToString { it.simpleName ?: "?" }})", forceNew = false) }.launchIn(scope)
+            .onEach { types -> executeUpload("DB_CHANGED(${types.joinToString { it.simpleName ?: "?" }})") }.launchIn(scope)
         profileRepository.profile.drop(1)
-            .onEach { executeUpload("profileRepository.profile changed", forceNew = false) }.launchIn(scope)
+            .onEach { executeUpload("profileRepository.profile changed") }.launchIn(scope)
 
         runLoop = Runnable {
             var refreshInterval = T.mins(5).msecs()
@@ -307,7 +351,7 @@ class NSClientV3Plugin @Inject constructor(
                     }
                 }
             if (!preferences.get(BooleanKey.NsClient3UseWs))
-                executeLoop("MAIN_LOOP", forceNew = true)
+                executeLoop("MAIN_LOOP")
             else
                 nsClientRepository.addLog("● TICK", "")
             handler?.postDelayed(runLoop, refreshInterval)
@@ -330,19 +374,17 @@ class NSClientV3Plugin @Inject constructor(
 
     fun scheduleIrregularExecution(refreshToken: Boolean = false) {
         if (refreshToken) {
-            handler?.post { executeLoop("REFRESH TOKEN", forceNew = true) }
+            handler?.post { executeLoop("REFRESH TOKEN") }
             return
         }
         if (config.AAPSCLIENT || nsClientSource.isEnabled()) {
             var origin = "5_MIN_AFTER_BG"
-            var forceNew = true
             var toTime = lastLoadedSrvModified.collections.entries + T.mins(5).plus(T.secs(10)).msecs()
             if (toTime < dateUtil.now()) {
                 toTime = dateUtil.now() + T.mins(1).plus(T.secs(0)).msecs()
                 origin = "1_MIN_OLD_DATA"
-                forceNew = false
             }
-            handler?.postDelayed({ executeLoop(origin, forceNew = forceNew) }, toTime - dateUtil.now())
+            handler?.postDelayed({ executeLoop(origin) }, toTime - dateUtil.now())
             nsClientRepository.addLog("● NEXT", dateUtil.dateAndTimeAndSecondsString(toTime))
         }
     }
@@ -352,6 +394,7 @@ class NSClientV3Plugin @Inject constructor(
         handler?.looper?.quit()
         handler = null
         runningConfigurationPublisher.stop()
+        sceneDefinitionsClientPublisher.stop()
         scope.cancel()
         stopService()
         WorkManager.getInstance(context).cancelUniqueWork(JOB_NAME)
@@ -360,6 +403,23 @@ class NSClientV3Plugin @Inject constructor(
 
     override val hasWritePermission: Boolean get() = nsAndroidClient?.lastStatus?.apiPermissions?.isFull() == true
     override val connected: Boolean get() = nsAndroidClient?.lastStatus != null
+
+    // Canonical WS-state holder. Lives on the plugin (singleton) so UI subscribers persist
+    // across service rebinds — the service writes here via [setWsConnected] / reads via
+    // its `wsConnected` pass-through property.
+    private val _wsConnected = MutableStateFlow(false)
+    override val wsConnectedFlow: StateFlow<Boolean> = _wsConnected.asStateFlow()
+    internal fun setWsConnected(value: Boolean) {
+        _wsConnected.value = value
+    }
+
+    // Heartbeat from master's devicestatus stream. Stays 0L until the first batch arrives so
+    // a freshly-paired AAPSCLIENT isn't false-locked before master has had a chance to publish.
+    // On AAPSCLIENT, NSDeviceStatusHandler bumps this for every non-empty batch — both the WS
+    // push and the catch-up worker land in the same handler, so a single update site suffices.
+    private val _lastDevicestatusReceivedAt = MutableStateFlow(0L)
+    override val lastDevicestatusReceivedAt: StateFlow<Long> = _lastDevicestatusReceivedAt.asStateFlow()
+    internal fun bumpDevicestatusHeartbeat(now: Long) { _lastDevicestatusReceivedAt.value = now }
 
     private fun setClient() {
         if (nsAndroidClient == null)
@@ -399,9 +459,9 @@ class NSClientV3Plugin @Inject constructor(
         // Exception is after reset to full sync (initialLoadFinished == false), where
         // older data must be loaded directly and then continue over WS
         if (preferences.get(BooleanKey.NsClient3UseWs) && initialLoadFinished)
-            executeUpload("START $reason", forceNew = true)
+            executeUpload("START $reason")
         else
-            executeLoop("START $reason", forceNew = true)
+            executeLoop("START $reason")
     }
 
     override fun pause(newState: Boolean) {
@@ -756,7 +816,7 @@ class NSClientV3Plugin @Inject constructor(
         preferences.put(NsclientStringKey.V3LastModified, Json.encodeToString(LastModified.serializer(), lastLoadedSrvModified))
     }
 
-    internal fun executeLoop(origin: String, forceNew: Boolean) {
+    internal fun executeLoop(origin: String) {
         if (preferences.get(BooleanKey.NsClient3UseWs) && initialLoadFinished) return
         if (preferences.get(NsclientBooleanKey.NsPaused)) {
             nsClientRepository.addLog("● RUN", "paused  $origin")
@@ -767,10 +827,10 @@ class NSClientV3Plugin @Inject constructor(
             return
         }
         if (workIsRunning()) {
-            nsClientRepository.addLog("● RUN", "Already running $origin")
-            if (!forceNew) return
-            // Wait for end and start new cycle
-            while (workIsRunning()) Thread.sleep(5000)
+            // Don't drop: queue a follow-up. Observer in onStart fires it on idle.
+            pendingLoop.set(true)
+            nsClientRepository.addLog("● RUN", "Already running $origin (queued loop)")
+            return
         }
         nsClientRepository.addLog("● RUN", "Starting next round $origin")
         synchronized(fullSyncSemaphore) {
@@ -806,7 +866,7 @@ class NSClientV3Plugin @Inject constructor(
         }
     }
 
-    private fun executeUpload(origin: String, forceNew: Boolean) {
+    private fun executeUpload(origin: String) {
         if (preferences.get(NsclientBooleanKey.NsPaused)) {
             nsClientRepository.addLog("● RUN", "paused")
             return
@@ -816,10 +876,10 @@ class NSClientV3Plugin @Inject constructor(
             return
         }
         if (workIsRunning()) {
-            nsClientRepository.addLog("● RUN", "Already running $origin")
-            if (!forceNew) return
-            // Wait for end and start new cycle
-            while (workIsRunning()) Thread.sleep(5000)
+            // Don't drop: queue a follow-up. Observer in onStart fires it on idle.
+            pendingUpload.set(true)
+            nsClientRepository.addLog("● RUN", "Already running $origin (queued upload)")
+            return
         }
         nsClientRepository.addLog("● RUN", "Starting upload $origin")
         WorkManager.getInstance(context)
@@ -832,10 +892,14 @@ class NSClientV3Plugin @Inject constructor(
 
     private fun workIsRunning(workName: String = JOB_NAME): Boolean {
         for (workInfo in WorkManager.getInstance(context).getWorkInfosForUniqueWork(workName).get())
-            if (workInfo.state == WorkInfo.State.BLOCKED || workInfo.state == WorkInfo.State.ENQUEUED || workInfo.state == WorkInfo.State.RUNNING)
+            if (workInfo.state.isActive())
                 return true
         return false
     }
+
+    /** Shared with the re-run observer in onStart so both sides agree on "active". */
+    private fun WorkInfo.State.isActive(): Boolean =
+        this == WorkInfo.State.BLOCKED || this == WorkInfo.State.ENQUEUED || this == WorkInfo.State.RUNNING
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "ns_client_v3_settings",
