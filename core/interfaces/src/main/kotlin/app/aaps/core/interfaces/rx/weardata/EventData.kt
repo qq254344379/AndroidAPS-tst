@@ -135,10 +135,10 @@ sealed class EventData : Event() {
     ) : EventData()
 
     @Serializable
-    data class ActionUserActionPreCheck(val id: Int, val title: String) : EventData()
+    data class ActionUserActionPreCheck(val id: String, val title: String) : EventData()
 
     @Serializable
-    data class ActionUserActionConfirmed(val id: Int, val title: String) : EventData()
+    data class ActionUserActionConfirmed(val id: String, val title: String) : EventData()
 
     @Serializable
     data class ActionScenePreCheck(val id: String, val title: String) : EventData()
@@ -426,7 +426,10 @@ sealed class EventData : Event() {
         @Serializable
         data class UserActionEntry(
             val timeStamp: Long,
-            val id: Int,
+            // Stable UUID of the AutomationEvent — survives reload / NS sync, unlike the prior
+            // identity-hashCode-as-Int which lost the binding whenever the master reconstructed
+            // its event list and silently broke wear taps.
+            val id: String,
             val title: String
         ) : EventData()
     }

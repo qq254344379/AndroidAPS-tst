@@ -29,9 +29,9 @@ import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
-import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
@@ -952,8 +952,9 @@ class DataHandlerMobile @Inject constructor(
         val pump = activePlugin.activePump
         val profile = profileFunction.getProfile()
         if (loop.runningMode().isLoopRunning() && pump.isInitialized() && profile != null) {
-            val events = automation.userEvents()
-            events.find { it.hashCode() == command.id }?.let { event ->
+            // Stable UUID lookup. findEventById finds any event regardless of userAction flag;
+            // we re-check isEnabled/canRun below as the gating policy.
+            automation.findEventById(command.id)?.takeIf { it.userAction }?.let { event ->
                 if (event.isEnabled && event.canRun()) {
                     rxBus.send(
                         EventMobileToWear(
@@ -974,16 +975,28 @@ class DataHandlerMobile @Inject constructor(
         }
     }
 
-    private suspend fun handleUserActionConfirmed(command: EventData.ActionUserActionConfirmed) {
+    internal suspend fun handleUserActionConfirmed(command: EventData.ActionUserActionConfirmed) {
         val pump = activePlugin.activePump
         val profile = profileFunction.getProfile()
         if (loop.runningMode().isLoopRunning() && pump.isInitialized() && profile != null) {
-            val events = automation.userEvents()
-            events.find { it.hashCode() == command.id }?.let { event ->
-                if (event.isEnabled && event.canRun()) {
-                    automation.processEvent(event)
-                }
+            // Symmetric with handleUserActionPreCheck: surface sendError on every failure path so a
+            // race between PreCheck and Confirmed (event deleted, userAction flag cleared, canRun
+            // flipped) doesn't silently drop the user's tap — the watch UI would otherwise dismiss
+            // the dialog as if the action ran.
+            val event = automation.findEventById(command.id)?.takeIf { it.userAction }
+            val ok = event != null && event.isEnabled && event.canRun() &&
+                // canRun() is suspend and can yield; re-verify the same event instance is still in
+                // the cache afterward so a concurrent autoRemove / user delete / NS-synced removal
+                // during the suspension doesn't let us run an orphan that no longer exists in the
+                // plugin's list.
+                automation.findEventById(command.id) === event
+            if (ok) {
+                automation.processEvent(event)
+            } else {
+                sendError(rh.gs(R.string.user_action_not_available, command.title))
             }
+        } else {
+            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
         }
     }
 
@@ -1625,16 +1638,15 @@ class DataHandlerMobile @Inject constructor(
     private fun AutomationEvent.toWear(now: Long): EventData.UserAction.UserActionEntry =
         EventData.UserAction.UserActionEntry(
             timeStamp = now,
-            id = hashCode(),
+            id = id,
             title = title
         )
 
     suspend fun sendUserActions() {
         val now = System.currentTimeMillis()
-        val events = automation.userEvents()
         val filtered = mutableListOf<AutomationEvent>()
-        for (event in events) {
-            if (event.isEnabled && event.canRun()) filtered.add(event)
+        for (event in automation.events.value) {
+            if (event.userAction && event.isEnabled && event.canRun()) filtered.add(event)
         }
         rxBus.send(
             EventMobileToWear(

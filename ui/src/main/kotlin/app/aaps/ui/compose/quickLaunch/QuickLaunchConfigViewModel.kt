@@ -75,8 +75,10 @@ class QuickLaunchConfigViewModel @Inject constructor(
             .filter { actionKey(it) !in selectedSet }
             .map { resolver.resolveItem(it) }
 
-        // Available Automation items (user actions only)
-        val availableAuto = automation.userEvents()
+        // Available Automation items (user actions only). Reads the flow snapshot directly so the
+        // filter set is explicit at the call site instead of hidden behind userEvents().
+        val availableAuto = automation.events.value
+            .filter { it.userAction && it.isEnabled }
             .map { QuickLaunchAction.AutomationAction(it.id) }
             .filter { actionKey(it) !in selectedSet }
             .map { resolver.resolveItem(it) }

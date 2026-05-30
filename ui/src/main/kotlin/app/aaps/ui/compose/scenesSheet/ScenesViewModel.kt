@@ -13,7 +13,6 @@ import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
-import app.aaps.core.interfaces.rx.events.EventAutomationDataChanged
 import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
@@ -93,7 +92,8 @@ class ScenesViewModel @Inject constructor(
         // init { refreshState() } below covers the cold start.
         rxBus.toFlow(EventRefreshOverview::class.java)
             .onEach { refreshState() }.launchIn(viewModelScope)
-        rxBus.toFlow(EventAutomationDataChanged::class.java)
+        // StateFlow — drop(1) since init{} already reads current automation events; only react to changes.
+        automation.events.drop(1)
             .onEach { refreshState() }.launchIn(viewModelScope)
         // Pump init / loop mode / profile load can flip the automation gate.
         // Without these, transient "no profile / pump disconnected" windows
@@ -150,8 +150,12 @@ class ScenesViewModel @Inject constructor(
                 else                                     -> null
             }
 
+            // Read directly from the flow's current snapshot — same source we already collect for
+            // refresh triggers, so the displayed list matches the value that caused the refresh.
+            // (Previously called automation.userEvents() which re-snapshots independently and was
+            // also pre-filtering isEnabled — making the inline filter partly redundant.)
             val items = if (watchOnly) emptyList()
-            else automation.userEvents().filter { it.isEnabled && it.canRun() }.map { event ->
+            else automation.events.value.filter { it.userAction && it.isEnabled && it.canRun() }.map { event ->
                 AutomationActionItem(
                     eventId = event.id,
                     title = event.title,

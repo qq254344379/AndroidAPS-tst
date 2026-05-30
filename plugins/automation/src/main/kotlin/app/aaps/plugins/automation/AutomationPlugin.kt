@@ -24,8 +24,8 @@ import app.aaps.core.interfaces.receivers.ReceiverStatusStore
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
 import app.aaps.core.interfaces.rx.bus.RxBus
-import app.aaps.core.interfaces.rx.events.EventAutomationDataChanged
 import app.aaps.core.interfaces.rx.events.EventBTChange
+import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
@@ -93,6 +93,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.launchIn
@@ -155,8 +159,7 @@ class AutomationPlugin @Inject constructor(
     override val syncedKeys: List<NonPreferenceKey> = listOf(AutomationStringKey.AutomationEvents)
 
     override fun reloadInternalState() {
-        loadFromSP()
-        rxBus.send(EventAutomationDataChanged())
+        loadFromSP() // emits via notifyChanged() — both internal storeToSP debounce and external collectors see it.
     }
 
     private var disposable: CompositeDisposable = CompositeDisposable()
@@ -166,6 +169,41 @@ class AutomationPlugin @Inject constructor(
     private val automationEvents = ArrayList<AutomationEventObject>()
     var executionLog: MutableList<String> = ArrayList()
     var btConnects: MutableList<EventBTChange> = ArrayList()
+
+    /**
+     * Snapshot stream of [automationEvents]. Replaces the old `EventAutomationDataChanged` RxBus
+     * broadcast — collectors get the latest list, and the internal storeToSP subscribe reads this
+     * so persistence stays driven by the same source of truth.
+     *
+     * Mutations route through [notifyChanged] (or one of the wrapped add/remove/set/swap methods).
+     * Each emission wraps the snapshot in [IdentityList], whose `equals` is identity-only so
+     * `MutableStateFlow.value =` *always* publishes — without this, in-place mutations to event
+     * fields (e.g. `event.isEnabled = ...`) would silently dedupe because the underlying list
+     * contains the same `AutomationEventObject` references and `AutomationEventObject` has no
+     * equals override.
+     */
+    private val _events = MutableStateFlow<List<AutomationEventObject>>(IdentityList(emptyList()))
+    override val events: StateFlow<List<AutomationEvent>> = _events.asStateFlow()
+
+    /** Emit a fresh snapshot. Called by every mutation and by external in-place editors. */
+    @Synchronized
+    fun notifyChanged() {
+        _events.value = IdentityList(automationEvents.toList())
+    }
+
+    /**
+     * List wrapper whose equals/hashCode use object identity. Bypasses [MutableStateFlow]'s default
+     * structural dedup so emissions fire for every mutation — including in-place edits to mutable
+     * `AutomationEventObject` fields that don't change list structure (toggleEnabled is the common
+     * case). The List API itself is delegated, so consumers using `events.value.filter { ... }`
+     * see no difference. Private — leaks only via `events` which exposes the `List<AutomationEvent>`
+     * interface.
+     */
+    private class IdentityList<T>(private val delegate: List<T>) : List<T> by delegate {
+
+        override fun equals(other: Any?): Boolean = this === other
+        override fun hashCode(): Int = System.identityHashCode(this)
+    }
 
     companion object {
 
@@ -218,10 +256,17 @@ class AutomationPlugin @Inject constructor(
             locationServiceHelper.stopService(context)
             locationServiceHelper.startService(context)
         }.launchIn(newScope)
-        disposable += rxBus
-            .toObservable(EventAutomationDataChanged::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({ storeToSP() }, fabricPrivacy::logException)
+        // Persist on any config change. drop(1) skips the seed empty value; debounce coalesces
+        // rapid edit-flow mutations (toggle/move/save all back-to-back) into a single write.
+        @Suppress("OPT_IN_USAGE")
+        _events.drop(1).debounce(300).onEach { storeToSP() }.launchIn(newScope)
+        // Refresh the wear UserAction tile on any cache change — bound to the plugin scope so it
+        // fires for NS-synced edits too, not only when the in-app Automation screen is open (which
+        // is what previously gated the broadcast — and silently dropped tile refreshes on remote
+        // edits while the user was on a different screen). debounce(300) prevents per-drag-tick
+        // tile storms during reorder.
+        @Suppress("OPT_IN_USAGE")
+        _events.drop(1).debounce(300).onEach { rxBus.send(EventWearUpdateTiles()) }.launchIn(newScope)
         disposable += rxBus
             .toObservable(EventLocationChange::class.java)
             .observeOn(aapsSchedulers.io)
@@ -285,6 +330,9 @@ class AutomationPlugin @Inject constructor(
             automationEvents.add(AutomationEventObject(injector).fromJSON(EMPTY_EVENT))
         // Persist generated IDs for events that didn't have one
         if (needsResave) storeToSP()
+        // Always emit after loading — initial cold start and reloadInternalState (NS sync) both
+        // need to fan out to UI collectors. notifyChanged() is the single emit channel.
+        notifyChanged()
     }
 
     internal suspend fun processActions() {
@@ -381,7 +429,7 @@ class AutomationPlugin @Inject constructor(
     @Synchronized
     fun add(event: AutomationEventObject) {
         automationEvents.add(event)
-        rxBus.send(EventAutomationDataChanged())
+        notifyChanged()
     }
 
     @Synchronized
@@ -390,7 +438,7 @@ class AutomationPlugin @Inject constructor(
             if (event.title == e.title) return
         }
         automationEvents.add(event)
-        rxBus.send(EventAutomationDataChanged())
+        notifyChanged()
     }
 
     @Synchronized
@@ -398,7 +446,7 @@ class AutomationPlugin @Inject constructor(
         for (e in automationEvents.reversed()) {
             if (event.title == e.title) {
                 automationEvents.remove(e)
-                rxBus.send(EventAutomationDataChanged())
+                notifyChanged()
             }
         }
     }
@@ -406,12 +454,12 @@ class AutomationPlugin @Inject constructor(
     @Synchronized
     fun set(event: AutomationEventObject, index: Int) {
         automationEvents[index] = event
-        rxBus.send(EventAutomationDataChanged())
+        notifyChanged()
     }
 
     @Synchronized
     fun remove(event: AutomationEvent) {
-        automationEvents.remove(event)
+        if (automationEvents.remove(event)) notifyChanged()
     }
 
     fun at(index: Int) = automationEvents[index]
@@ -421,16 +469,9 @@ class AutomationPlugin @Inject constructor(
     @Synchronized
     fun swap(fromPosition: Int, toPosition: Int) {
         Collections.swap(automationEvents, fromPosition, toPosition)
-    }
-
-    override fun userEvents(): List<AutomationEvent> {
-        val list = mutableListOf<AutomationEvent>()
-        val iterator = synchronized(this) { automationEvents.toMutableList().iterator() }
-        while (iterator.hasNext()) {
-            val event = iterator.next()
-            if (event.userAction && event.isEnabled) list.add(event)
-        }
-        return list
+        // Reorder is a config change — persisted ordering decides processing order in
+        // processActions, so collectors and storeToSP both need to see it.
+        notifyChanged()
     }
 
     override fun findEventById(id: String): AutomationEvent? {
