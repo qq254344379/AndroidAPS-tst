@@ -48,6 +48,10 @@ class ClientControlPublisher @Inject constructor(
         const val IDENTIFIER_PREFIX = "aaps_clientcontrol_"
         const val IDENTIFIER_HELLO_PREFIX = "${IDENTIFIER_PREFIX}hello_"
         const val IDENTIFIER_CMD_PREFIX = "${IDENTIFIER_PREFIX}cmd_"
+
+        // Master-published pairing offers (PIN-wrapped PairingPayload). Not envelopes — the
+        // receiver must skip these so it does not try to verify its own offer as a hello/cmd.
+        const val IDENTIFIER_OFFER_PREFIX = "${IDENTIFIER_PREFIX}offer_"
         const val SCHEMA_VERSION = 1
 
         // 1 ms past NS APIv3 MIN_TIMESTAMP (946684800000 = 2000-01-01 UTC). validateCommon

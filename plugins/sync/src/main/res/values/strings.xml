@@ -21,35 +21,41 @@
     <string name="authorized_clients_state_pending">Pending</string>
     <string name="authorized_clients_last_seen">Last seen %1$s</string>
     <string name="authorized_clients_never_seen">Never used</string>
-    <string name="authorized_clients_pending_expires_in">QR expires in %1$ss</string>
+    <string name="authorized_clients_pending_expires_in">Pairing expires in %1$ss</string>
     <string name="authorized_clients_empty_title">No authorized clients</string>
     <string name="authorized_clients_empty_subtitle">Pair a client device to let it send signed commands to this master.</string>
     <string name="authorized_clients_name_dialog_title">New client</string>
     <string name="authorized_clients_name_placeholder">Device name</string>
     <string name="authorized_clients_delete_dialog_title">Revoke access?</string>
     <string name="authorized_clients_delete_dialog_message">%1$s will no longer be able to send commands.</string>
-    <string name="authorized_clients_qr_dialog_title">Pair client</string>
-    <string name="authorized_clients_qr_instructions">Scan this QR with the client device. The code is valid for one pairing only.</string>
-    <string name="authorized_clients_qr_tap_to_reveal">Tap to reveal</string>
-    <string name="authorized_clients_qr_expires_in">Expires in %1$ss</string>
-    <string name="authorized_clients_qr_done">Done</string>
+    <string name="authorized_clients_pin_dialog_title">Pair client</string>
+    <string name="authorized_clients_pin_instructions">Enter this PIN on the client device. The code is valid for one pairing only.</string>
+    <string name="authorized_clients_pin_expires_in">Expires in %1$ss</string>
+    <string name="authorized_clients_pin_done">Done</string>
+    <string name="authorized_clients_pin_publishing">Sending pairing offer to Nightscout…</string>
+    <string name="authorized_clients_pin_published">Pairing offer ready on Nightscout.</string>
+    <string name="authorized_clients_pin_publish_failed">Could not upload pairing offer to Nightscout.</string>
+    <string name="authorized_clients_pin_retry">Retry</string>
 
-    <!-- Pair with master (client side QR scanner) -->
+    <!-- Pair with master (client side PIN entry) -->
     <string name="pair_with_master_title">Pair with master</string>
-    <string name="pair_with_master_point_camera">Point the camera at the master\'s pairing QR.</string>
-    <string name="pair_with_master_camera_required_title">Camera permission required</string>
-    <string name="pair_with_master_camera_required_message">The camera is needed to scan the pairing QR code shown by the master device.</string>
-    <string name="pair_with_master_grant_camera">Grant access</string>
+    <string name="pair_with_master_pin_entry_title">Enter pairing PIN</string>
+    <string name="pair_with_master_pin_entry_message">Open Authorized clients on the master device and add this client. Type the 8-digit PIN shown there.</string>
+    <string name="pair_with_master_pin_entry_label">8-digit PIN</string>
+    <string name="pair_with_master_pin_entry_submit">Pair</string>
+    <string name="pair_with_master_fetching">Looking up pairing…</string>
     <string name="pair_with_master_confirm_title">Pair with this master?</string>
     <string name="pair_with_master_confirm_master">Master: %1$s</string>
     <string name="pair_with_master_confirm_warning">After pairing, this master will be able to send signed commands to this device.</string>
     <string name="pair_with_master_confirm_pair">Pair</string>
     <string name="pair_with_master_error_title">Cannot pair</string>
-    <string name="pair_with_master_error_malformed">QR is not a valid pairing code.</string>
-    <string name="pair_with_master_error_expired">This pairing QR has expired. Generate a new one on the master.</string>
+    <string name="pair_with_master_error_wrong_pin">No pairing found for that PIN. Check the PIN on the master and try again.</string>
+    <string name="pair_with_master_error_ambiguous_pin">Multiple pairings matched that PIN. Ask the master to generate a new one and retry.</string>
+    <string name="pair_with_master_error_expired">This pairing has expired. Generate a new PIN on the master.</string>
+    <string name="pair_with_master_error_network">Cannot reach Nightscout. Check the connection and try again.</string>
     <string name="pair_with_master_retry">Try again</string>
     <string name="pair_with_master_already_paired_title">Already paired</string>
-    <string name="pair_with_master_already_paired_master">Currently paired with master %1$s. Unpair first to scan a new QR.</string>
+    <string name="pair_with_master_already_paired_master">Currently paired with master %1$s. Unpair first to enter a new PIN.</string>
     <string name="pair_with_master_unpair">Unpair</string>
     <string name="pair_with_master_sending">Sending pairing message…</string>
 

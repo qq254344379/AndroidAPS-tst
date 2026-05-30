@@ -48,7 +48,7 @@ internal class AuthorizedClientsRepositoryTest {
 
     @Test
     fun addPendingPersistsEncryptedSecretOnly() {
-        val (entry, secretHex) = sut.addPending("phone", qrTtlMs = 60_000L, now = 1_000L)
+        val (entry, secretHex) = sut.addPending("phone", pairTtlMs = 60_000L, now = 1_000L)
         assertThat(secretHex).hasLength(64)
         assertThat(entry.encryptedSecret).startsWith("ENC:NsClientControlSecret:")
         assertThat(stored).contains(entry.clientId)
@@ -57,7 +57,7 @@ internal class AuthorizedClientsRepositoryTest {
 
     @Test
     fun secretLookupRoundtripsAddedSecret() {
-        val (entry, secretHex) = sut.addPending("phone", qrTtlMs = 60_000L, now = 1_000L)
+        val (entry, secretHex) = sut.addPending("phone", pairTtlMs = 60_000L, now = 1_000L)
         val lookup = sut.secretLookup(entry.clientId)!!
         assertThat(lookup.secretBytes).hasLength(32)
         assertThat(lookup.counterReceived).isEqualTo(0L) // pending entry, no counter accepted yet
@@ -129,8 +129,8 @@ internal class AuthorizedClientsRepositoryTest {
 
     @Test
     fun currentPrunesExpiredPending() {
-        sut.addPending("a", qrTtlMs = 60_000L, now = 1_000L)
-        sut.addPending("b", qrTtlMs = 60_000L, now = 1_000L)
+        sut.addPending("a", pairTtlMs = 60_000L, now = 1_000L)
+        sut.addPending("b", pairTtlMs = 60_000L, now = 1_000L)
         // Both expire at 61_000
         val list = sut.current(now = 200_000L)
         assertThat(list).isEmpty()
@@ -140,20 +140,26 @@ internal class AuthorizedClientsRepositoryTest {
     fun currentDoesNotPruneActive() {
         val (entry, _) = sut.addPending("a", 60_000L, 1_000L)
         sut.markActive(entry.clientId, 1L, 5_000L)
-        // Pretend qrExpiresAt is in the past — Active state must keep the entry
+        // Pretend pairExpiresAt is in the past — Active state must keep the entry
         val list = sut.current(now = 200_000L)
         assertThat(list).hasSize(1)
     }
 
     @Test
-    fun pruneExpiredReturnsCountRemoved() {
-        sut.addPending("a", 60_000L, 1_000L)
-        sut.addPending("b", 60_000L, 1_000L)
-        val (entry, _) = sut.addPending("c", 60_000L, 1_000L)
-        sut.markActive(entry.clientId, 1L, 5_000L)
+    fun pruneExpiredReturnsRemovedClientIds() {
+        val (a, _) = sut.addPending("a", 60_000L, 1_000L)
+        val (b, _) = sut.addPending("b", 60_000L, 1_000L)
+        val (c, _) = sut.addPending("c", 60_000L, 1_000L)
+        sut.markActive(c.clientId, 1L, 5_000L)
         val removed = sut.pruneExpired(now = 200_000L)
-        assertThat(removed).isEqualTo(2)
+        assertThat(removed).containsExactly(a.clientId, b.clientId)
         assertThat(sut.current(200_000L)).hasSize(1)
+    }
+
+    @Test
+    fun pruneExpiredReturnsEmptyWhenNothingRemoved() {
+        sut.addPending("a", 60_000L, 1_000L)
+        assertThat(sut.pruneExpired(now = 5_000L)).isEmpty()
     }
 
     @Test

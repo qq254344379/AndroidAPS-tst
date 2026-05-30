@@ -8,23 +8,30 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
+import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.nssdk.utils.ClientControlCrypto
+import app.aaps.core.nssdk.utils.ClientControlPairingCrypto
 import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.AuthorizedClientsRepository
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.PairingOfferPublisher
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 @Stable
 class AuthorizedClientsViewModel @Inject constructor(
     private val repository: AuthorizedClientsRepository,
+    private val offerPublisher: PairingOfferPublisher,
     private val dateUtil: DateUtil,
     private val rh: ResourceHelper,
     private val preferences: Preferences
@@ -32,7 +39,7 @@ class AuthorizedClientsViewModel @Inject constructor(
 
     companion object {
 
-        const val QR_TTL_MS = 2L * 60L * 1000L
+        const val PAIR_TTL_MS = 2L * 60L * 1000L
     }
 
     val clients: StateFlow<List<AuthorizedClient>> = repository.observe()
@@ -43,33 +50,115 @@ class AuthorizedClientsViewModel @Inject constructor(
     val dialogState: StateFlow<DialogState?> = _dialogState.asStateFlow()
 
     /**
-     * Active pairing payload: non-null while the QR for a freshly-added client is on screen.
-     * Holds the **plaintext secret hex**, intentionally not persisted — process death drops it,
-     * and the user has to delete + re-add the pending entry to get a new QR.
+     * Active pairing offer: non-null while the PIN for a freshly-added client is on screen.
+     * Holds the **plaintext PIN** in `pin` (toString masks it — see [PendingPairingOffer.toString]).
+     * Intentionally not persisted — process death drops it, user must re-add to get a new PIN.
      */
-    private val _pairingPayload = MutableStateFlow<PairingPayload?>(null)
-    val pairingPayload: StateFlow<PairingPayload?> = _pairingPayload.asStateFlow()
+    private val _pairingOffer = MutableStateFlow<PendingPairingOffer?>(null)
+    val pairingOffer: StateFlow<PendingPairingOffer?> = _pairingOffer.asStateFlow()
+
+    /**
+     * Outstanding publishOffer job for the live pairing. dismissPairing awaits it before
+     * deleteOffer fires, so a fast "Add then immediately Done" cannot let the delete arrive
+     * before the publish — which would leave the offer doc orphaned on NS for the full TTL.
+     */
+    private var publishJob: Job? = null
+
+    init {
+        // Auto-dismiss the PIN dialog when the matching client flips Pending → Active. The receiver
+        // already drops the offer doc on the same transition; here we just close the UI so the user
+        // sees "paired" without having to tap Done.
+        viewModelScope.launch {
+            repository.observe().collect { list ->
+                val offer = _pairingOffer.value ?: return@collect
+                val matched = list.firstOrNull { it.clientId == offer.clientId } ?: return@collect
+                if (matched.state == ClientState.Active) {
+                    _pairingOffer.value = null
+                    publishJob = null
+                }
+            }
+        }
+    }
 
     fun requestAdd() {
         _dialogState.value = DialogState.EnterName
     }
 
-    /** Adds a Pending entry to the repository AND seeds [pairingPayload] for the QR display. */
+    /**
+     * Adds a Pending entry, generates the PIN, publishes the wrapped offer to NS, and seeds
+     * [pairingOffer] for the PIN dialog. The dialog renders the PIN immediately so the user
+     * sees something while the publish runs; status flips to Published / Failed when the
+     * publish completes so the UI can offer a retry instead of silently showing a non-working PIN.
+     */
     fun confirmAdd(name: String) {
         _dialogState.value = null
         val now = dateUtil.now()
-        val result = repository.addPending(name.trim(), QR_TTL_MS, now)
-        _pairingPayload.value = PairingPayload(
+        val result = repository.addPending(name.trim(), PAIR_TTL_MS, now)
+        val payload = PairingPayload(
             masterInstallId = ownInstallId(),
             clientId = result.entry.clientId,
             secretHex = result.secretHex,
-            expiresAt = result.entry.qrExpiresAt
+            expiresAt = result.entry.pairExpiresAt
         )
+        val pin = ClientControlPairingCrypto.newPin()
+        _pairingOffer.value = PendingPairingOffer(
+            pin = pin,
+            expiresAt = result.entry.pairExpiresAt,
+            clientId = result.entry.clientId,
+            publishStatus = PublishStatus.Loading
+        )
+        publishJob = viewModelScope.launch {
+            val ok = offerPublisher.publishOffer(payload, pin)
+            // Only update if the dialog is still showing this offer — user may have dismissed already.
+            _pairingOffer.update { current ->
+                if (current?.clientId == payload.clientId)
+                    current.copy(publishStatus = if (ok) PublishStatus.Published else PublishStatus.Failed)
+                else current
+            }
+        }
     }
 
-    /** Called when the QR dialog dismisses (user taps Done, presses back, or expiry hits). */
+    /**
+     * User explicitly retried after a failed publish — re-runs the wrap+upload with the same PIN
+     * so the user doesn't have to dictate a new code to the client.
+     */
+    fun retryPublish() {
+        val offer = _pairingOffer.value ?: return
+        if (offer.publishStatus != PublishStatus.Failed) return
+        val entry = repository.findRaw(offer.clientId) ?: return
+        val secretHex = repository.secretLookup(entry.clientId)?.secretBytes
+            ?.let { ClientControlCrypto.bytesToHex(it) } ?: return
+        val payload = PairingPayload(
+            masterInstallId = ownInstallId(),
+            clientId = entry.clientId,
+            secretHex = secretHex,
+            expiresAt = entry.pairExpiresAt
+        )
+        _pairingOffer.update { it?.copy(publishStatus = PublishStatus.Loading) }
+        publishJob = viewModelScope.launch {
+            val ok = offerPublisher.publishOffer(payload, offer.pin)
+            _pairingOffer.update { current ->
+                if (current?.clientId == entry.clientId)
+                    current.copy(publishStatus = if (ok) PublishStatus.Published else PublishStatus.Failed)
+                else current
+            }
+        }
+    }
+
+    /**
+     * Called when the PIN dialog dismisses (user taps Done, presses back, or expiry hits).
+     * Awaits the publish job so the delete cannot race ahead and leave an orphan offer on NS.
+     */
     fun dismissPairing() {
-        _pairingPayload.value = null
+        val offer = _pairingOffer.value
+        _pairingOffer.value = null
+        if (offer == null) return
+        val pendingPublish = publishJob
+        publishJob = null
+        viewModelScope.launch {
+            pendingPublish?.join()
+            offerPublisher.deleteOffer(offer.clientId)
+        }
     }
 
     fun requestDelete(client: AuthorizedClient) {
@@ -79,6 +168,10 @@ class AuthorizedClientsViewModel @Inject constructor(
     fun confirmDelete() {
         val state = _dialogState.value as? DialogState.ConfirmDelete ?: return
         repository.delete(state.client.clientId)
+        // Re-check the current state from the repository, not the snapshot in DialogState — between
+        // requestDelete and confirmDelete the entry may have flipped Pending → Active (offer doc
+        // already deleted by the receiver) or already pruned.
+        viewModelScope.launch { offerPublisher.deleteOffer(state.client.clientId) }
         _dialogState.value = null
     }
 
@@ -86,8 +179,17 @@ class AuthorizedClientsViewModel @Inject constructor(
         _dialogState.value = null
     }
 
+    /**
+     * Drop pending entries past their pairExpiresAt and delete the matching offer docs from NS.
+     * Drives delete off the actual repository-prune result instead of a `clients.value` snapshot
+     * (which can lag the prefs due to `WhileSubscribed(5_000)` collector pauses).
+     */
     fun pruneExpired() {
-        repository.pruneExpired(dateUtil.now())
+        val droppedIds = repository.pruneExpired(dateUtil.now())
+        if (droppedIds.isEmpty()) return
+        viewModelScope.launch {
+            droppedIds.forEach { offerPublisher.deleteOffer(it) }
+        }
     }
 
     /** "Last seen 5m ago" / "Never used" — formatted from the entry's lastSeenAt. */
@@ -95,9 +197,9 @@ class AuthorizedClientsViewModel @Inject constructor(
         if (client.lastSeenAt > 0L) rh.gs(R.string.authorized_clients_last_seen, dateUtil.minAgo(rh, client.lastSeenAt))
         else rh.gs(R.string.authorized_clients_never_seen)
 
-    /** "QR expires in 95s" — re-evaluated on each composition while a Pending tick is running. */
+    /** "Pairing expires in 95s" — re-evaluated on each composition while a Pending tick is running. */
     fun pendingExpiresLabel(client: AuthorizedClient): String {
-        val secondsLeft = ((client.qrExpiresAt - dateUtil.now()) / 1000L).coerceAtLeast(0L)
+        val secondsLeft = ((client.pairExpiresAt - dateUtil.now()) / 1000L).coerceAtLeast(0L)
         return rh.gs(R.string.authorized_clients_pending_expires_in, secondsLeft.toString())
     }
 
@@ -113,5 +215,23 @@ class AuthorizedClientsViewModel @Inject constructor(
     sealed class DialogState {
         data object EnterName : DialogState()
         data class ConfirmDelete(val client: AuthorizedClient) : DialogState()
+    }
+
+    enum class PublishStatus { Loading, Published, Failed }
+
+    /**
+     * UI-facing pairing offer: the PIN to read out + when it expires + which client it belongs to.
+     * Custom toString masks the pin so a future debug log that interpolates this object cannot leak
+     * the secret — data-class auto-toString would print `pin=12345678` verbatim.
+     */
+    data class PendingPairingOffer(
+        val pin: String,
+        val expiresAt: Long,
+        val clientId: String,
+        val publishStatus: PublishStatus = PublishStatus.Loading
+    ) {
+
+        override fun toString(): String =
+            "PendingPairingOffer(pin=****, expiresAt=$expiresAt, clientId=$clientId, publishStatus=$publishStatus)"
     }
 }

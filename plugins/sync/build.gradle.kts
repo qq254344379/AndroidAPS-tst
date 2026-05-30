@@ -61,12 +61,8 @@ dependencies {
     // SMS Communicator (OTP + QR code)
     implementation(libs.com.eatthepath.java.otp)
     implementation(libs.com.github.kenglxn.qrgen.android)
-
-    // Client-control pairing scanner — CameraX preview + ZXing decode
-    implementation(libs.androidx.camera.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
+    // ZXing is pulled transitively by qrgen but SmsCommunicatorOtpScreen imports ErrorCorrectionLevel
+    // directly — declare it explicitly so a future qrgen upgrade can't silently drop the symbol.
     implementation(libs.com.google.zxing.core)
 
     // Garmin

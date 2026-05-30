@@ -1,5 +1,6 @@
 package app.aaps.core.nssdk.localmodel.clientcontrol
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -11,7 +12,7 @@ import kotlinx.serialization.Serializable
  * leaked prefs file is useless without TEE access.
  *
  * Lifecycle:
- * - `Pending` from QR generation; auto-pruned after `qrExpiresAt`.
+ * - `Pending` from PIN generation; auto-pruned after `pairExpiresAt`.
  * - `Active` after first signed `hello` verifies; `lastSeenAt` updated on
  *   every accepted command.
  *
@@ -27,7 +28,9 @@ data class AuthorizedClient(
     val createdAt: Long,
     val lastSeenAt: Long = 0L,
     val counterReceived: Long = 0L,
-    val qrExpiresAt: Long = 0L
+
+    @SerialName("pairExpiresAt")
+    val pairExpiresAt: Long = 0L
 )
 
 @Serializable

@@ -47,6 +47,7 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var nsAndroidClient: NSAndroidClient
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
+    @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
 
     // Same deterministic fake as the repository tests — encrypt/decrypt round-trip via reverse,
@@ -62,6 +63,7 @@ internal class ClientControlReceiverTest {
     private lateinit var sut: ClientControlReceiver
 
     private var stored = "[]"
+
     // Per-key backing store — the scenes-update merge writes a different StringNonKey
     // (`SceneDefinitions`) than the authorized-clients repository, so a shared `stored`
     // would clobber whichever was written last. Keyed by [StringNonKey.key].
@@ -95,6 +97,7 @@ internal class ClientControlReceiverTest {
             nsClientRepository,
             sceneAutomationApi,
             activeSceneSync,
+            offerPublisher,
             preferences,
             dateUtil,
             aapsLogger
@@ -103,17 +106,17 @@ internal class ClientControlReceiverTest {
 
     /** Adds a pending client and returns (clientId, secretBytes). */
     private fun pair(name: String = "phone"): Pair<String, ByteArray> {
-        val (entry, secretHex) = authorizedRepository.addPending(name, qrTtlMs = 60_000L, now = now - 10_000L)
+        val (entry, secretHex) = authorizedRepository.addPending(name, pairTtlMs = 60_000L, now = now - 10_000L)
         val secretBytes = secretHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         return entry.clientId to secretBytes
     }
 
     /**
-     * Adds a pending client whose QR window already expired relative to `now`.
-     * Created 2h ago with a 5-min TTL, so qrExpiresAt is well in the past.
+     * Adds a pending client whose pairing window already expired relative to `now`.
+     * Created 2h ago with a 5-min TTL, so pairExpiresAt is well in the past.
      */
     private fun pairExpired(name: String = "phone"): Pair<String, ByteArray> {
-        val (entry, secretHex) = authorizedRepository.addPending(name, qrTtlMs = 5 * 60_000L, now = now - 2 * 60 * 60 * 1000L)
+        val (entry, secretHex) = authorizedRepository.addPending(name, pairTtlMs = 5 * 60_000L, now = now - 2 * 60 * 60 * 1000L)
         val secretBytes = secretHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         return entry.clientId to secretBytes
     }
@@ -171,9 +174,25 @@ internal class ClientControlReceiverTest {
         val entry = authorizedRepository.current(now).single { it.clientId == clientId }
         assertThat(entry.state).isEqualTo(ClientState.Active)
         assertThat(entry.counterReceived).isEqualTo(1L)
-        // Success path no longer deletes — NS would tombstone the slot and reject the next
-        // same-type command with HTTP 410. Counter dedup handles replay protection instead.
+        // Success path no longer deletes the hello doc — NS would tombstone the slot and reject
+        // the next same-type command with HTTP 410. Counter dedup handles replay protection.
         verify(nsAndroidClient, never()).deleteSettings(identifier)
+        // …but the offer doc IS dropped on the Pending → Active transition so the wrapped secret
+        // does not linger on NS past pairing-complete.
+        verify(offerPublisher).deleteOffer(clientId)
+    }
+
+    @Test
+    fun helloFromAlreadyActiveClientDoesNotDeleteOfferAgain() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val identifier = ClientControlPublisher.IDENTIFIER_HELLO_PREFIX + clientId
+        val doc = wrap(envelope(clientId, secret, counter = 2L))
+
+        sut.onSettingsDocChanged(identifier, doc)
+
+        // Active hellos only bump lastSeen — no redundant offer-delete.
+        verify(offerPublisher, never()).deleteOffer(clientId)
     }
 
     @Test
@@ -492,6 +511,33 @@ internal class ClientControlReceiverTest {
         verify(sceneAutomationApi).stopActiveScene()
         // Success path no longer deletes — counter dedup handles replay; leaving the doc avoids
         // tombstoning the slot. Unrelated doc is also untouched.
+        verify(nsAndroidClient, never()).deleteSettings(any())
+    }
+
+    @Test
+    fun pollingSkipsOfferDocsWithoutDeleting() = runTest {
+        // Master writes its own pairing-offer docs under IDENTIFIER_OFFER_PREFIX. Without an
+        // explicit skip, verifyAndAck would treat them as envelopes, find no `envelope` field,
+        // and delete a still-live offer mid-pairing — leaving the client unable to fetch it.
+        val offerDoc = JSONObject().apply {
+            put("identifier", "${ClientControlPublisher.IDENTIFIER_OFFER_PREFIX}any-client-id")
+            put("date", now)
+            put("offer", JSONObject().apply { put("clientId", "any-client-id") })
+        }
+        whenever(nsAndroidClient.searchSettings(limit = 100)).thenReturn(
+            NSAndroidClient.ReadResponse(code = 200, lastServerModified = null, values = listOf(offerDoc))
+        )
+
+        sut.processPending()
+
+        verify(nsAndroidClient, never()).deleteSettings(any())
+    }
+
+    @Test
+    fun wsPushSkipsOfferDocs() = runTest {
+        val identifier = "${ClientControlPublisher.IDENTIFIER_OFFER_PREFIX}any-client-id"
+        val doc = JSONObject().apply { put("identifier", identifier); put("date", now) }
+        sut.onSettingsDocChanged(identifier, doc)
         verify(nsAndroidClient, never()).deleteSettings(any())
     }
 

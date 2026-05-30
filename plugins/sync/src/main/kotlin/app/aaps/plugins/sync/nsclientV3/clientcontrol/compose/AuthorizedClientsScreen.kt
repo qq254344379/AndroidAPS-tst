@@ -2,10 +2,7 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol.compose
 
 import android.app.Activity
 import android.view.WindowManager
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -43,9 +40,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -55,15 +49,10 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
-import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.plugins.sync.R
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.delay
-import kotlinx.serialization.json.Json
-import net.glxn.qrgen.android.QRCode
-import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,7 +62,7 @@ fun AuthorizedClientsScreen(
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogState.collectAsStateWithLifecycle()
-    val pairingPayload by viewModel.pairingPayload.collectAsStateWithLifecycle()
+    val pairingOffer by viewModel.pairingOffer.collectAsStateWithLifecycle()
 
     // Re-prune expired pending entries every second while any are pending,
     // so the countdown ticks down and expired ones drop without a manual refresh.
@@ -100,9 +89,10 @@ fun AuthorizedClientsScreen(
         null                                                    -> Unit
     }
 
-    pairingPayload?.let { payload ->
-        PairingQrDialog(
-            payload = payload,
+    pairingOffer?.let { offer ->
+        PairingPinDialog(
+            offer = offer,
+            onRetry = viewModel::retryPublish,
             onDismiss = viewModel::dismissPairing
         )
     }
@@ -125,9 +115,11 @@ fun AuthorizedClientsScreen(
         }
     ) { paddingValues ->
         if (clients.isEmpty()) {
-            EmptyState(modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues))
+            EmptyState(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            )
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -280,26 +272,26 @@ private fun ConfirmDeleteDialog(
     )
 }
 
-private val pairingJson = Json { encodeDefaults = true }
-
 @Composable
-private fun PairingQrDialog(
-    payload: PairingPayload,
+private fun PairingPinDialog(
+    offer: AuthorizedClientsViewModel.PendingPairingOffer,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Sensitive content — block screenshots/recents previews while the QR is on screen.
+    // Sensitive content — block screenshots/recents previews while the PIN is on screen.
     val activity = LocalContext.current as? Activity
     DisposableEffect(Unit) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
 
-    var revealed by remember { mutableStateOf(false) }
-    var msLeft by remember { mutableLongStateOf(0L) }
+    // Keyed on expiresAt so the initial msLeft snapshot tracks the (rarely-changing) offer; if a
+    // future code path emits a new offer with a different expiresAt, the remember resets.
+    var msLeft by remember(offer.expiresAt) { mutableLongStateOf(offer.expiresAt - System.currentTimeMillis()) }
 
-    LaunchedEffect(payload.expiresAt) {
+    LaunchedEffect(offer.expiresAt) {
         while (true) {
-            msLeft = payload.expiresAt - System.currentTimeMillis()
+            msLeft = offer.expiresAt - System.currentTimeMillis()
             if (msLeft <= 0L) {
                 onDismiss()
                 break
@@ -308,13 +300,7 @@ private fun PairingQrDialog(
         }
     }
 
-    val qrBitmap = remember(payload) {
-        QRCode.from(pairingJson.encodeToString(PairingPayload.serializer(), payload))
-            .withErrorCorrection(ErrorCorrectionLevel.H)
-            .withSize(512, 512)
-            .bitmap()
-    }
-    val qrSizeDp = with(LocalConfiguration.current) { min(screenWidthDp, screenHeightDp) * 0.7 }.toInt().dp
+    val formattedPin = remember(offer.pin) { offer.pin.chunked(4).joinToString("-") }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -332,47 +318,67 @@ private fun PairingQrDialog(
                 verticalArrangement = Arrangement.spacedBy(AapsSpacing.medium)
             ) {
                 Text(
-                    text = stringResource(R.string.authorized_clients_qr_dialog_title),
+                    text = stringResource(R.string.authorized_clients_pin_dialog_title),
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = stringResource(R.string.authorized_clients_qr_instructions),
+                    text = stringResource(R.string.authorized_clients_pin_instructions),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Box(
-                    modifier = Modifier
-                        .size(qrSizeDp)
-                        .clickable(enabled = !revealed) { revealed = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        bitmap = qrBitmap.asImageBitmap(),
-                        contentDescription = stringResource(R.string.authorized_clients_qr_dialog_title),
-                        modifier = Modifier.fillMaxSize().run {
-                            if (revealed) this else blur(28.dp)
-                        }
-                    )
-                    if (!revealed) {
-                        Text(
-                            text = stringResource(R.string.authorized_clients_qr_tap_to_reveal),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
+                Text(
+                    text = formattedPin,
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = AapsSpacing.large)
+                )
+                PublishStatusBanner(status = offer.publishStatus, onRetry = onRetry)
                 Text(
                     text = stringResource(
-                        R.string.authorized_clients_qr_expires_in,
+                        R.string.authorized_clients_pin_expires_in,
                         (msLeft / 1000L).coerceAtLeast(0L).toString()
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.authorized_clients_qr_done))
+                    Text(stringResource(R.string.authorized_clients_pin_done))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PublishStatusBanner(
+    status: AuthorizedClientsViewModel.PublishStatus,
+    onRetry: () -> Unit
+) {
+    when (status) {
+        AuthorizedClientsViewModel.PublishStatus.Loading   -> Text(
+            text = stringResource(R.string.authorized_clients_pin_publishing),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        AuthorizedClientsViewModel.PublishStatus.Published -> Text(
+            text = stringResource(R.string.authorized_clients_pin_published),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        AuthorizedClientsViewModel.PublishStatus.Failed    -> Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(AapsSpacing.small)
+        ) {
+            Text(
+                text = stringResource(R.string.authorized_clients_pin_publish_failed),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+            TextButton(onClick = onRetry) {
+                Text(stringResource(R.string.authorized_clients_pin_retry))
             }
         }
     }

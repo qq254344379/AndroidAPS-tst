@@ -61,6 +61,7 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
     private val activeSceneSync: ActiveSceneSync,
+    private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
@@ -84,6 +85,10 @@ class ClientControlReceiver @Inject constructor(
         for (doc in resp.values) {
             val identifier = doc.optString("identifier")
             if (!identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX)) continue
+            // Skip our own pairing offers — they share the prefix but are not signed envelopes,
+            // so verifyAndAck would log them as "malformed envelope, deleting" and wipe a still-
+            // valid offer out from under the client mid-pairing.
+            if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_OFFER_PREFIX)) continue
             verifyAndAck(identifier, doc, now)
         }
     }
@@ -94,6 +99,7 @@ class ClientControlReceiver @Inject constructor(
      */
     suspend fun onSettingsDocChanged(identifier: String, doc: JSONObject) {
         if (!identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX)) return
+        if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_OFFER_PREFIX)) return
         verifyAndAck(identifier, doc, dateUtil.now())
     }
 
@@ -118,7 +124,7 @@ class ClientControlReceiver @Inject constructor(
         val raw = authorizedRepository.findRaw(envelope.clientId)
         val entry = authorizedRepository.current(now).firstOrNull { it.clientId == envelope.clientId }
         if (entry == null) {
-            if (raw != null && raw.state == ClientState.Pending && raw.qrExpiresAt <= now)
+            if (raw != null && raw.state == ClientState.Pending && raw.pairExpiresAt <= now)
                 aapsLogger.error(LTag.NSCLIENT, "ClientControl: $identifier pairing window expired for clientId=${envelope.clientId}, deleting")
             else
                 aapsLogger.error(LTag.NSCLIENT, "ClientControl: $identifier unknown clientId=${envelope.clientId}, deleting")
@@ -151,6 +157,8 @@ class ClientControlReceiver @Inject constructor(
         } else {
             when (message) {
                 is ClientControlMessage.Hello                  -> onVerifiedHello(entry, envelope, now)
+                // Hello handling already includes the Pending → Active transition; offer doc
+                // cleanup is inside onVerifiedHello so it can suspend on deleteOffer.
                 is ClientControlMessage.SceneStart             -> onVerifiedSceneStart(entry, envelope, message, now)
                 is ClientControlMessage.SceneStop              -> onVerifiedSceneStop(entry, envelope, message, now)
                 is ClientControlMessage.SceneDefinitionsUpdate -> onVerifiedScenesUpdate(entry, envelope, message, now)
@@ -163,9 +171,17 @@ class ClientControlReceiver @Inject constructor(
         // those purge unverifiable garbage rather than acknowledged commands.
     }
 
-    private fun onVerifiedHello(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long) {
+    private suspend fun onVerifiedHello(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long) {
         when (entry.state) {
-            ClientState.Pending -> authorizedRepository.markActive(entry.clientId, envelope.counter, now)
+            ClientState.Pending -> {
+                authorizedRepository.markActive(entry.clientId, envelope.counter, now)
+                // Pair-complete: drop the wrapped offer doc so the brute-force window closes the moment
+                // the secret is no longer needed for fetching. Without this, the offer would linger up
+                // to pairExpiresAt giving an attacker the full window even though pairing already
+                // succeeded — directly contradicting the security model in ClientControlPairingCrypto.
+                offerPublisher.deleteOffer(entry.clientId)
+            }
+
             ClientState.Active  -> authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         }
         nsClientRepository.addLog("◄ CLIENTCTL", "hello accepted for ${entry.name} (${entry.clientId})")

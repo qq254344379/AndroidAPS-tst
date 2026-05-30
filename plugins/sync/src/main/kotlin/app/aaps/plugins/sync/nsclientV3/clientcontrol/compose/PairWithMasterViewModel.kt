@@ -9,13 +9,12 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.MasterPairing
 import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientPairingRepository
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.PairingOfferFetcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 @HiltViewModel
@@ -23,34 +22,44 @@ import javax.inject.Inject
 class PairWithMasterViewModel @Inject constructor(
     private val repository: ClientPairingRepository,
     private val publisher: ClientControlPublisher,
+    private val fetcher: PairingOfferFetcher,
     private val dateUtil: DateUtil
 ) : ViewModel() {
-
-    private val json = Json { ignoreUnknownKeys = true }
 
     private val _state = MutableStateFlow<UiState>(initialState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private fun initialState(): UiState =
-        repository.currentPairing()?.let { UiState.AlreadyPaired(it) } ?: UiState.Scanning
+        repository.currentPairing()?.let { UiState.AlreadyPaired(it) } ?: UiState.PinEntry
 
     /**
-     * Called from the camera analyzer. Idempotent: ignored unless the screen is in [UiState.Scanning].
-     * Successful parse advances to [UiState.Confirming]; bad payloads advance to [UiState.Error]
-     * which the UI can offer to retry.
+     * User submitted a PIN from the entry screen. Looks up matching offers on NS, attempts to
+     * unwrap each with the typed PIN, and advances to [UiState.Confirming] on first success.
+     *
+     * Idempotent: ignored unless the screen is in [UiState.PinEntry] (re-tap on a slow network).
+     * Distinguishes WrongPin / OfferExpired / NetworkUnavailable so the UI can offer a useful
+     * retry path instead of a generic failure.
      */
-    fun onQrDecoded(raw: String) {
-        if (_state.value !is UiState.Scanning) return
-        val payload = parsePayload(raw)
-        if (payload == null) {
-            _state.value = UiState.Error(ErrorReason.MalformedQr)
-            return
+    fun onPinEntered(pin: String) {
+        if (_state.value !is UiState.PinEntry) return
+        _state.value = UiState.Fetching
+        viewModelScope.launch {
+            when (val result = fetcher.findOfferForPin(pin)) {
+                is PairingOfferFetcher.Result.Success   -> {
+                    val payload = result.payload
+                    if (payload.expiresAt > 0L && payload.expiresAt < dateUtil.now())
+                        _state.value = UiState.Error(ErrorReason.OfferExpired)
+                    else
+                        _state.value = UiState.Confirming(payload)
+                }
+
+                PairingOfferFetcher.Result.NoMatch      -> _state.value = UiState.Error(ErrorReason.WrongPin)
+                // Multiple offers decrypted with the same PIN — refuse to pick one; the user must
+                // ask the master to regenerate. Pairing to the first one would be a silent attack.
+                PairingOfferFetcher.Result.Ambiguous    -> _state.value = UiState.Error(ErrorReason.AmbiguousPin)
+                PairingOfferFetcher.Result.NotAvailable -> _state.value = UiState.Error(ErrorReason.NetworkUnavailable)
+            }
         }
-        if (payload.expiresAt > 0L && payload.expiresAt < dateUtil.now()) {
-            _state.value = UiState.Error(ErrorReason.QrExpired)
-            return
-        }
-        _state.value = UiState.Confirming(payload)
     }
 
     /**
@@ -74,32 +83,23 @@ class PairWithMasterViewModel @Inject constructor(
 
     /** User cancelled the confirmation dialog. */
     fun cancelConfirmation() {
-        if (_state.value is UiState.Confirming) _state.value = UiState.Scanning
+        if (_state.value is UiState.Confirming) _state.value = UiState.PinEntry
     }
 
     /** User taps "Try again" on an error state. */
-    fun resumeScanning() {
-        _state.value = UiState.Scanning
+    fun resumePinEntry() {
+        _state.value = UiState.PinEntry
     }
 
-    /** Wipes the existing pairing and returns the user to the scanner. */
+    /** Wipes the existing pairing and returns the user to the entry screen. */
     fun unpair() {
         repository.unpair()
-        _state.value = UiState.Scanning
-    }
-
-    private fun parsePayload(raw: String): PairingPayload? = try {
-        val decoded = json.decodeFromString<PairingPayload>(raw)
-        if (decoded.masterInstallId.isBlank() || decoded.clientId.isBlank() || decoded.secretHex.isBlank()) null
-        else decoded
-    } catch (_: SerializationException) {
-        null
-    } catch (_: IllegalArgumentException) {
-        null
+        _state.value = UiState.PinEntry
     }
 
     sealed class UiState {
-        data object Scanning : UiState()
+        data object PinEntry : UiState()
+        data object Fetching : UiState()
         data class Confirming(val payload: PairingPayload) : UiState()
         data object Sending : UiState()
         data object Success : UiState()
@@ -107,5 +107,5 @@ class PairWithMasterViewModel @Inject constructor(
         data class AlreadyPaired(val pairing: MasterPairing) : UiState()
     }
 
-    enum class ErrorReason { MalformedQr, QrExpired }
+    enum class ErrorReason { WrongPin, AmbiguousPin, OfferExpired, NetworkUnavailable }
 }

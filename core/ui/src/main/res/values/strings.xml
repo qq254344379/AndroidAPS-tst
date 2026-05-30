@@ -5,7 +5,7 @@
     <string name="authorized_clients_manage_label">Authorized clients</string>
     <string name="authorized_clients_manage_desc">Manage paired client devices controlling this master.</string>
     <string name="pair_with_master_manage_label">Pair with master</string>
-    <string name="pair_with_master_manage_desc">Scan a master\'s QR to let this client send signed commands.</string>
+    <string name="pair_with_master_manage_desc">Enter a master\'s pairing PIN to let this client send signed commands.</string>
     <!--    General-->
     <string name="treatments">Treatments</string>
     <string name="treatments_history">Treatments history</string>

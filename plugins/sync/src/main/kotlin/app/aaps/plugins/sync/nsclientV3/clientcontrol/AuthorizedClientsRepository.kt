@@ -46,7 +46,7 @@ class AuthorizedClientsRepository @Inject constructor(
     /** Current list with expired pending entries pruned. Side-effects prefs if any were pruned. */
     fun current(now: Long): List<AuthorizedClient> = synchronized(lock) {
         val list = decode()
-        val kept = list.filter { it.state != ClientState.Pending || it.qrExpiresAt > now }
+        val kept = list.filter { it.state != ClientState.Pending || it.pairExpiresAt > now }
         if (kept.size != list.size) write(kept)
         kept
     }
@@ -66,9 +66,10 @@ class AuthorizedClientsRepository @Inject constructor(
 
     /**
      * Create a new pending pairing. Returns the freshly-generated secret in **plaintext hex**
-     * for QR rendering — caller must not persist it. The encrypted form is stored on the entry.
+     * for caller-side wrapping (PIN-based pairing offer) — caller must not persist it. The
+     * encrypted form is stored on the entry.
      */
-    fun addPending(name: String, qrTtlMs: Long, now: Long): PendingResult = synchronized(lock) {
+    fun addPending(name: String, pairTtlMs: Long, now: Long): PendingResult = synchronized(lock) {
         val secretBytes = ClientControlCrypto.newSecretBytes()
         val secretHex = ClientControlCrypto.bytesToHex(secretBytes)
         val entry = AuthorizedClient(
@@ -77,7 +78,7 @@ class AuthorizedClientsRepository @Inject constructor(
             encryptedSecret = secureEncrypt.encrypt(secretHex, SECURE_ENCRYPT_ALIAS),
             state = ClientState.Pending,
             createdAt = now,
-            qrExpiresAt = now + qrTtlMs
+            pairExpiresAt = now + pairTtlMs
         )
         write(decode() + entry)
         PendingResult(entry, secretHex)
@@ -107,13 +108,18 @@ class AuthorizedClientsRepository @Inject constructor(
         if (updated != list) write(updated)
     }
 
-    /** Drop pending entries past their qrExpiresAt. Returns number removed. */
-    fun pruneExpired(now: Long): Int = synchronized(lock) {
+    /**
+     * Drop pending entries past their pairExpiresAt. Returns the clientIds that were removed so
+     * the caller can drive the matching offer-doc cleanup without an inconsistent re-snapshot of
+     * `clients` (which is a [SharingStarted.WhileSubscribed] StateFlow and can lag the prefs).
+     */
+    fun pruneExpired(now: Long): List<String> = synchronized(lock) {
         val list = decode()
-        val kept = list.filter { it.state != ClientState.Pending || it.qrExpiresAt > now }
-        if (kept.size != list.size) {
-            write(kept); list.size - kept.size
-        } else 0
+        val kept = list.filter { it.state != ClientState.Pending || it.pairExpiresAt > now }
+        if (kept.size == list.size) return@synchronized emptyList()
+        write(kept)
+        val keptIds = kept.mapTo(HashSet(kept.size)) { it.clientId }
+        list.mapNotNull { if (it.clientId !in keptIds) it.clientId else null }
     }
 
     /**
