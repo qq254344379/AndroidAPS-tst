@@ -20,6 +20,7 @@
     <string name="refresh">Refresh</string>
     <string name="no_history_records">No records found</string>
     <string name="error">Error</string>
+    <string name="navigation_error_screen_not_found">Screen could not be opened (not available in this configuration)</string>
     <string name="profile_set_ok">Basal profile in pump updated</string>
     <string name="invalid_input">Invalid input data</string>
     <string name="invalid_number">Invalid number</string>

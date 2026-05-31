@@ -9,7 +9,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -23,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +45,7 @@ import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowSnackbar
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntKey
@@ -485,16 +489,22 @@ fun NavGraphBuilder.appNavGraph(
         route = AppRoute.PluginContent.route,
         arguments = listOf(navArgument("pluginIndex") { type = NavType.IntType })
     ) { backStackEntry ->
-        val pluginIndex = backStackEntry.arguments?.getInt("pluginIndex") ?: return@composable
-        val plugin = activePlugin.getPluginsList().getOrNull(pluginIndex) ?: return@composable
-        val composeContent = plugin.getComposeContent()
-        if (composeContent is ComposablePluginContent) {
+        val pluginIndex = backStackEntry.arguments?.getInt("pluginIndex") ?: -1
+        val plugin = activePlugin.getPluginsList().getOrNull(pluginIndex)
+        val composeContent = plugin?.getComposeContent()
+        if (plugin != null && composeContent is ComposablePluginContent) {
             PluginContentRoute(
                 navController = navController,
                 plugin = plugin,
                 composeContent = composeContent,
                 onNavigationRequest = onNavigationRequest,
                 withProtection = withProtection,
+            )
+        } else {
+            NavigationErrorFallback(
+                rxBus = rxBus,
+                message = stringResource(app.aaps.core.ui.R.string.navigation_error_screen_not_found),
+                onDismiss = { navController.safePopBackStack() }
             )
         }
     }
@@ -600,6 +610,12 @@ fun NavGraphBuilder.appNavGraph(
                 visibilityContext = visibilityContext,
                 onBackClick = { navController.safePopBackStack() }
             )
+        } else {
+            NavigationErrorFallback(
+                rxBus = rxBus,
+                message = stringResource(app.aaps.core.ui.R.string.navigation_error_screen_not_found),
+                onDismiss = { navController.safePopBackStack() }
+            )
         }
     }
 
@@ -612,6 +628,12 @@ fun NavGraphBuilder.appNavGraph(
                 screenDef = screenDef,
                 highlightKey = highlightKey,
                 onBackClick = { navController.safePopBackStack() }
+            )
+        } else {
+            NavigationErrorFallback(
+                rxBus = rxBus,
+                message = stringResource(app.aaps.core.ui.R.string.navigation_error_screen_not_found),
+                onDismiss = { navController.safePopBackStack() }
             )
         }
     }
@@ -782,6 +804,23 @@ private fun PluginContentRoute(
     }
 }
 
+/**
+ * Fallback for routes whose navigation target cannot be resolved (unknown preference key, missing
+ * plugin index, …). Replaces the previous behaviour where such routes rendered nothing, leaving the
+ * user on a blank, stuck screen: posts an error snackbar via [rxBus] and immediately pops back so
+ * the dead route never stays on screen.
+ */
+@Composable
+private fun NavigationErrorFallback(
+    rxBus: RxBus,
+    message: String,
+    onDismiss: () -> Unit
+) {
+    LaunchedEffect(Unit) {
+        rxBus.send(EventShowSnackbar(message, EventShowSnackbar.Type.Error))
+        onDismiss()
+    }
+}
 /**
  * Host for the standalone Automation screen — mirrors [PluginContentRoute] but sources its content
  * from [AutomationRuntime.composeContent] instead of a plugin, and opens the settings subscreen via

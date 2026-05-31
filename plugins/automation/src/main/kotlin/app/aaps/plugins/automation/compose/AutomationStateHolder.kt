@@ -41,7 +41,6 @@ class AutomationStateHolder(
     private val _editState = MutableStateFlow(AutomationEditUiState())
     val editState: StateFlow<AutomationEditUiState> = _editState.asStateFlow()
 
-    private val selectedPositions = mutableSetOf<Int>()
     private var disposable: CompositeDisposable? = null
     private var scope: CoroutineScope? = null
 
@@ -96,36 +95,12 @@ class AutomationStateHolder(
         // Kept as a no-op so the existing caller in the drag handler doesn't break.
     }
 
-    fun enterRemoveMode() {
-        selectedPositions.clear()
-        _state.value = _state.value.copy(selectionMode = AutomationSelectionMode.Remove)
-        refresh()
-    }
+    fun eventAt(position: Int): AutomationEventObject? =
+        runCatching { plugin.at(position) }.getOrNull()
 
-    fun enterSortMode() {
-        _state.value = _state.value.copy(selectionMode = AutomationSelectionMode.Sort)
-        refresh()
-    }
-
-    fun exitSelection() {
-        selectedPositions.clear()
-        _state.value = _state.value.copy(selectionMode = AutomationSelectionMode.None)
-        refresh()
-    }
-
-    fun toggleSelection(position: Int, checked: Boolean) {
-        if (checked) selectedPositions.add(position) else selectedPositions.remove(position)
-        refresh()
-    }
-
-    fun selectedEvents(): List<AutomationEventObject> =
-        selectedPositions.sorted().mapNotNull { runCatching { plugin.at(it) }.getOrNull() }
-
-    fun removeSelected() {
-        selectedEvents().forEach { plugin.remove(it) }
-        // plugin.remove() now emits per call; collector picks it up. No manual broadcast needed.
-        selectedPositions.clear()
-        _state.value = _state.value.copy(selectionMode = AutomationSelectionMode.None)
+    fun remove(position: Int) {
+        eventAt(position)?.let { plugin.remove(it) }
+        // plugin.remove() emits; the collector picks it up and rebuilds the list.
     }
 
     private var eventSnapshotJson: String? = null
@@ -301,6 +276,9 @@ class AutomationStateHolder(
             val actionIcons = mutableListOf<AutomationIcon>()
             for (act in a.actions) act.composeIcon()?.let { actionIcons.add(AutomationIcon(it, act.composeIconTint())) }
             AutomationEventUi(
+                // Identity of the persistent event object — stable across in-place swaps so the
+                // reorder key doesn't change mid-drag (position does).
+                key = System.identityHashCode(a).toLong(),
                 position = i,
                 title = a.title,
                 isEnabled = a.isEnabled,
@@ -309,8 +287,7 @@ class AutomationStateHolder(
                 systemAction = a.systemAction,
                 actionsValid = a.areActionsValid(),
                 triggerIcons = triggerIcons.distinct(),
-                actionIcons = actionIcons.distinct(),
-                isSelected = i in selectedPositions
+                actionIcons = actionIcons.distinct()
             )
         }
         val sb = StringBuilder()

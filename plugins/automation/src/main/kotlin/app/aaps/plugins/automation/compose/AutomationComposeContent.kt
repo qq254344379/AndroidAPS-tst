@@ -4,9 +4,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -122,29 +119,23 @@ class AutomationComposeContent(
         activity: FragmentActivity?
     ) {
         val state by holder.state.collectAsStateWithLifecycle()
-        var showRemoveConfirm by remember { mutableStateOf(false) }
+        var deleteTarget by remember { mutableStateOf<Int?>(null) }
 
         val title = stringResource(R.string.automation)
         val backDesc = stringResource(app.aaps.core.ui.R.string.back)
         val settingsDesc = stringResource(app.aaps.core.ui.R.string.nav_plugin_preferences)
-        val selectionMode = state.selectionMode
-        val selectedCount = state.events.count { it.isSelected }
 
-        LaunchedEffect(selectionMode, selectedCount) {
+        LaunchedEffect(Unit) {
             setToolbarConfig(
                 buildListToolbar(
                     title = title,
                     backDesc = backDesc,
                     settingsDesc = settingsDesc,
-                    selectionMode = selectionMode,
-                    selectedCount = selectedCount,
                     onBack = onNavigateBack,
-                    onExitSelection = { holder.exitSelection() },
                     onRun = onRun,
-                    onStartRemove = { holder.enterRemoveMode() },
-                    onStartSort = { holder.enterSortMode() },
-                    onConfirmRemove = { if (selectedCount > 0) showRemoveConfirm = true else holder.exitSelection() },
-                    onSettings = onSettings,
+                    // Settings + Run are master-only: automation does not execute on a client, so its
+                    // preferences are irrelevant there (and the preference screen hangs on a client).
+                    onSettings = onSettings?.takeIf { plugin.executionEnabled },
                     showRun = plugin.executionEnabled
                 )
             )
@@ -153,46 +144,30 @@ class AutomationComposeContent(
         AutomationScreen(
             state = state,
             onToggleEnabled = holder::toggleEnabled,
-            onClickEvent = { pos ->
-                when (selectionMode) {
-                    AutomationSelectionMode.None   -> holder.openEdit(pos)
-
-                    AutomationSelectionMode.Remove -> {
-                        val current = state.events.firstOrNull { it.position == pos }?.isSelected == true
-                        holder.toggleSelection(pos, !current)
-                    }
-
-                    AutomationSelectionMode.Sort   -> Unit
-                }
-            },
-            onLongClickEvent = {
-                if (selectionMode == AutomationSelectionMode.None) holder.enterRemoveMode()
-            },
-            onToggleSelect = holder::toggleSelection,
+            onEditEvent = { pos -> holder.openEdit(pos) },
+            onDeleteEvent = { pos -> deleteTarget = pos },
             onMove = holder::move,
             onMoveFinished = holder::commitMove,
             onAddClick = { holder.openNew() }
         )
 
-        if (showRemoveConfirm) {
-            val targets = holder.selectedEvents()
-            val message = if (targets.size == 1)
-                stringResource(app.aaps.core.ui.R.string.removerecord) + " " + targets.first().title
-            else
-                stringResource(app.aaps.core.ui.R.string.confirm_remove_multiple_items, targets.size)
+        deleteTarget?.let { pos ->
+            val target = holder.eventAt(pos)
+            val message = stringResource(app.aaps.core.ui.R.string.removerecord) +
+                (target?.let { " " + it.title } ?: "")
             AlertDialog(
-                onDismissRequest = { showRemoveConfirm = false },
+                onDismissRequest = { deleteTarget = null },
                 title = { Text(stringResource(app.aaps.core.ui.R.string.removerecord)) },
                 text = { Text(message) },
                 confirmButton = {
                     TextButton(onClick = {
-                        targets.forEach { uel.log(Action.AUTOMATION_REMOVED, Sources.Automation, it.title) }
-                        holder.removeSelected()
-                        showRemoveConfirm = false
+                        target?.let { uel.log(Action.AUTOMATION_REMOVED, Sources.Automation, it.title) }
+                        holder.remove(pos)
+                        deleteTarget = null
                     }) { Text(stringResource(android.R.string.ok)) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showRemoveConfirm = false }) {
+                    TextButton(onClick = { deleteTarget = null }) {
                         Text(stringResource(android.R.string.cancel))
                     }
                 }
@@ -468,85 +443,38 @@ private fun buildListToolbar(
     title: String,
     backDesc: String,
     settingsDesc: String,
-    selectionMode: AutomationSelectionMode,
-    selectedCount: Int,
     onBack: () -> Unit,
-    onExitSelection: () -> Unit,
     onRun: () -> Unit,
-    onStartRemove: () -> Unit,
-    onStartSort: () -> Unit,
-    onConfirmRemove: () -> Unit,
     onSettings: (() -> Unit)?,
     showRun: Boolean
-): ToolbarConfig = when (selectionMode) {
-    AutomationSelectionMode.Remove -> ToolbarConfig(
-        title = "$selectedCount",
-        navigationIcon = {
-            IconButton(onClick = onExitSelection) {
-                Icon(Icons.Default.Close, contentDescription = backDesc)
-            }
-        },
-        actions = {
-            IconButton(onClick = onConfirmRemove) {
-                Icon(Icons.Default.Delete, contentDescription = null)
+): ToolbarConfig = ToolbarConfig(
+    title = title,
+    navigationIcon = {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDesc)
+        }
+    },
+    actions = {
+        if (onSettings != null) {
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Default.Settings, contentDescription = settingsDesc)
             }
         }
-    )
-
-    AutomationSelectionMode.Sort   -> ToolbarConfig(
-        title = title,
-        navigationIcon = {
-            IconButton(onClick = onExitSelection) {
-                Icon(Icons.Default.Close, contentDescription = backDesc)
-            }
-        },
-        actions = {
-            Icon(Icons.Default.DragHandle, contentDescription = null)
-        }
-    )
-
-    AutomationSelectionMode.None   -> ToolbarConfig(
-        title = title,
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDesc)
-            }
-        },
-        actions = {
-            if (onSettings != null) {
-                IconButton(onClick = onSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = settingsDesc)
-                }
-            }
-            AutomationOverflow(showRun, onRun, onStartRemove, onStartSort)
-        }
-    )
-}
+        // "Run now" is master-only — automation does not execute on a client.
+        if (showRun) AutomationOverflow(onRun)
+    }
+)
 
 @Composable
-private fun AutomationOverflow(
-    showRun: Boolean,
-    onRun: () -> Unit,
-    onStartRemove: () -> Unit,
-    onStartSort: () -> Unit
-) {
+private fun AutomationOverflow(onRun: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     IconButton(onClick = { expanded = true }) {
         Icon(Icons.Default.MoreVert, contentDescription = null)
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        // "Run now" is master-only — automation does not execute on a client.
-        if (showRun) DropdownMenuItem(
+        DropdownMenuItem(
             text = { Text(stringResource(R.string.run_automations)) },
             onClick = { expanded = false; onRun() }
-        )
-        DropdownMenuItem(
-            text = { Text(stringResource(app.aaps.core.ui.R.string.remove_items)) },
-            onClick = { expanded = false; onStartRemove() }
-        )
-        DropdownMenuItem(
-            text = { Text(stringResource(app.aaps.core.ui.R.string.sort_items)) },
-            onClick = { expanded = false; onStartSort() }
         )
     }
 }
