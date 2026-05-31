@@ -2,6 +2,7 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -11,6 +12,7 @@ import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
@@ -47,6 +49,7 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var nsAndroidClient: NSAndroidClient
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
+    @Mock private lateinit var automation: Automation
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
 
@@ -63,6 +66,7 @@ internal class ClientControlReceiverTest {
     private lateinit var sut: ClientControlReceiver
 
     private var stored = "[]"
+    private var automationVersion = 0L
 
     // Per-key backing store — the scenes-update merge writes a different StringNonKey
     // (`SceneDefinitions`) than the authorized-clients repository, so a shared `stored`
@@ -84,9 +88,16 @@ internal class ClientControlReceiverTest {
             val key = invocation.arguments[0] as StringNonKey
             val value = invocation.arguments[1] as String
             when (key) {
-                StringNonKey.SceneDefinitions -> storage[key.key] = value
+                StringNonKey.SceneDefinitions,
+                StringNonKey.AutomationEvents -> storage[key.key] = value
                 else                          -> stored = value
             }
+        }
+        // Automation whole-list version (LongNonKey). Receiver reads it for the LWW compare and
+        // writes it on apply.
+        whenever(preferences.get(LongNonKey.AutomationEventsModified)).thenAnswer { automationVersion }
+        whenever(preferences.put(any<LongNonKey>(), any<Long>())).thenAnswer { invocation ->
+            if (invocation.arguments[0] == LongNonKey.AutomationEventsModified) automationVersion = invocation.arguments[1] as Long
         }
         authorizedRepository = AuthorizedClientsRepository(preferences, secureEncrypt, aapsLogger)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
@@ -97,6 +108,7 @@ internal class ClientControlReceiverTest {
             nsClientRepository,
             sceneAutomationApi,
             activeSceneSync,
+            automation,
             offerPublisher,
             preferences,
             dateUtil,
@@ -655,5 +667,72 @@ internal class ClientControlReceiverTest {
 
         // Garbled JSON from a verified-but-broken client must not corrupt the master's pref.
         assertThat(storage[StringNonKey.SceneDefinitions.key]).isEqualTo(before)
+    }
+
+    // -- automation_definitions_update ---------------------------------------------------
+
+    private fun automationJson(id: String, title: String): String =
+        """[{"id":"$id","title":"$title","enabled":true,"systemAction":false,"readOnly":false,"autoRemove":false,"userAction":false,"trigger":"{}","actions":[]}]"""
+
+    private suspend fun sendAutomationUpdate(clientId: String, secret: ByteArray, json: String, version: Long, counter: Long = 5L) {
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}automation_definitions_update_$clientId"
+        val msg = ClientControlMessage.AutomationDefinitionsUpdate(json, version)
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
+    }
+
+    @Test
+    fun automationUpdateAppliesWhenIncomingVersionIsNewer() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        automationVersion = 1_000L
+        storage[StringNonKey.AutomationEvents.key] = automationJson("a", "old")
+
+        sendAutomationUpdate(clientId, secret, automationJson("a", "new"), version = 2_000L)
+
+        assertThat(storage[StringNonKey.AutomationEvents.key]).contains("\"title\":\"new\"")
+        assertThat(automationVersion).isEqualTo(2_000L)
+        verify(automation).reloadInternalState()
+    }
+
+    @Test
+    fun automationUpdateDropsStaleIncoming() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        automationVersion = 5_000L
+        storage[StringNonKey.AutomationEvents.key] = automationJson("a", "master")
+
+        sendAutomationUpdate(clientId, secret, automationJson("a", "stale"), version = 1_000L)
+
+        // Offline client edit must not overwrite newer master state.
+        assertThat(storage[StringNonKey.AutomationEvents.key]).contains("\"title\":\"master\"")
+        assertThat(automationVersion).isEqualTo(5_000L)
+        verify(automation, never()).reloadInternalState()
+    }
+
+    @Test
+    fun automationUpdateEqualVersionIsTreatedAsStale() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        automationVersion = 3_000L
+        storage[StringNonKey.AutomationEvents.key] = automationJson("a", "master")
+
+        sendAutomationUpdate(clientId, secret, automationJson("a", "incoming"), version = 3_000L)
+
+        assertThat(storage[StringNonKey.AutomationEvents.key]).contains("\"title\":\"master\"")
+        verify(automation, never()).reloadInternalState()
+    }
+
+    @Test
+    fun automationUpdateInvalidJsonLeavesPrefUntouched() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        automationVersion = 1_000L
+        val before = automationJson("a", "x")
+        storage[StringNonKey.AutomationEvents.key] = before
+
+        sendAutomationUpdate(clientId, secret, "{not an array}", version = 9_000L)
+
+        assertThat(storage[StringNonKey.AutomationEvents.key]).isEqualTo(before)
+        verify(automation, never()).reloadInternalState()
     }
 }

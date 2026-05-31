@@ -27,7 +27,9 @@ import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.ComposablePluginContent
@@ -53,7 +55,6 @@ import app.aaps.plugins.automation.elements.Comparator
 import app.aaps.plugins.automation.elements.InputDelta
 import app.aaps.plugins.automation.events.EventAutomationUpdateGui
 import app.aaps.plugins.automation.events.EventLocationChange
-import app.aaps.plugins.automation.keys.AutomationStringKey
 import app.aaps.plugins.automation.services.LocationServiceHelper
 import app.aaps.plugins.automation.triggers.Trigger
 import app.aaps.plugins.automation.triggers.TriggerAutosensValue
@@ -143,12 +144,7 @@ class AutomationRuntime @Inject constructor(
     private val sceneApi: SceneAutomationApi
 ) : Automation, PermissionProvider, BtConnectionSource {
 
-    init {
-        // Register own preference keys (previously done by PluginBaseWithPreferences).
-        preferences.registerPreferences(AutomationStringKey::class.java)
-    }
-
-    override val syncedKeys: List<NonPreferenceKey> = listOf(AutomationStringKey.AutomationEvents)
+    override val syncedKeys: List<NonPreferenceKey> = listOf(StringNonKey.AutomationEvents)
 
     override val executionEnabled: Boolean get() = config.APS
 
@@ -211,6 +207,21 @@ class AutomationRuntime @Inject constructor(
     @Synchronized
     fun notifyChanged() {
         _events.value = IdentityList(automationEvents.toList())
+    }
+
+    /**
+     * Bump the whole-list sync version to now(). Drives whole-list last-writer-wins for client→master
+     * sync: the publisher ships this value, the master applies a strictly-newer list and drops a
+     * stale one. Bumped only on real definition edits — NOT by loadFromSP (reload) or the
+     * processActions last-run persistence, so the version doesn't climb on reloads/execution.
+     */
+    private fun bumpModified() = preferences.put(LongNonKey.AutomationEventsModified, dateUtil.now())
+
+    /** Definition edit from an in-place external editor (e.g. toggleEnabled): bump version + emit. */
+    @Synchronized
+    fun markEdited() {
+        bumpModified()
+        notifyChanged()
     }
 
     /**
@@ -379,13 +390,13 @@ class AutomationRuntime @Inject constructor(
             e.printStackTrace()
         }
 
-        preferences.put(AutomationStringKey.AutomationEvents, array.toString())
+        preferences.put(StringNonKey.AutomationEvents, array.toString())
     }
 
     @Synchronized
     private fun loadFromSP() {
         automationEvents.clear()
-        val data = preferences.get(AutomationStringKey.AutomationEvents)
+        val data = preferences.get(StringNonKey.AutomationEvents)
         var needsResave = false
         if (data != "")
             try {
@@ -508,7 +519,7 @@ class AutomationRuntime @Inject constructor(
     @Synchronized
     fun add(event: AutomationEventObject) {
         automationEvents.add(event)
-        notifyChanged()
+        markEdited()
     }
 
     @Synchronized
@@ -517,7 +528,7 @@ class AutomationRuntime @Inject constructor(
             if (event.title == e.title) return
         }
         automationEvents.add(event)
-        notifyChanged()
+        markEdited()
     }
 
     @Synchronized
@@ -525,7 +536,7 @@ class AutomationRuntime @Inject constructor(
         for (e in automationEvents.reversed()) {
             if (event.title == e.title) {
                 automationEvents.remove(e)
-                notifyChanged()
+                markEdited()
             }
         }
     }
@@ -533,12 +544,12 @@ class AutomationRuntime @Inject constructor(
     @Synchronized
     fun set(event: AutomationEventObject, index: Int) {
         automationEvents[index] = event
-        notifyChanged()
+        markEdited()
     }
 
     @Synchronized
     fun remove(event: AutomationEvent) {
-        if (automationEvents.remove(event)) notifyChanged()
+        if (automationEvents.remove(event)) markEdited()
     }
 
     fun at(index: Int) = automationEvents[index]
@@ -550,7 +561,7 @@ class AutomationRuntime @Inject constructor(
         Collections.swap(automationEvents, fromPosition, toPosition)
         // Reorder is a config change — persisted ordering decides processing order in
         // processActions, so collectors and storeToSP both need to see it.
-        notifyChanged()
+        markEdited()
     }
 
     override fun findEventById(id: String): AutomationEvent? {

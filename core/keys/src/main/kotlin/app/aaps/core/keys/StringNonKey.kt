@@ -22,6 +22,9 @@ enum class StringNonKey(
     TempTargetPresets(key = "temp_target_presets", defaultValue = "[]"),
     SceneDefinitions(key = "scene_definitions", defaultValue = "[]"),
     ActiveScene(key = "active_scene", defaultValue = ""),
+    // Standalone Automation runtime. In core/keys (not the automation module) so the client→master
+    // sync publisher/receiver in :plugins:sync can observe it without an inter-module dependency.
+    AutomationEvents(key = "AUTOMATION_EVENTS", defaultValue = ""),
     QuickLaunchActions(key = "quick_launch_actions", defaultValue = "[{\"type\":\"wizard\"},{\"type\":\"quick_launch_config\"}]"),
     InsulinConfiguration("insulin_configuration", "{}"),
     ComposeGraphConfig("compose_graphconfig", ""),

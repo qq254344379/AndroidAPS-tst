@@ -1,5 +1,6 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.interfaces.automation.ClientControlAutomationSender
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -41,7 +42,7 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) : ClientControlSceneSender {
+) : ClientControlSceneSender, ClientControlAutomationSender {
 
     companion object {
 
@@ -105,7 +106,8 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.Hello -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
-            is ClientControlMessage.SceneDefinitionsUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
+            is ClientControlMessage.SceneDefinitionsUpdate,
+            is ClientControlMessage.AutomationDefinitionsUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
         return uploadEnvelope(identifier, envelope)
     }
@@ -118,6 +120,9 @@ class ClientControlPublisher @Inject constructor(
 
     override suspend fun sendScenesUpdate(scenesJson: String): ClientControlSendResult =
         publish(ClientControlMessage.SceneDefinitionsUpdate(scenesJson))
+
+    override suspend fun sendAutomationUpdate(automationJson: String, version: Long): ClientControlSendResult =
+        publish(ClientControlMessage.AutomationDefinitionsUpdate(automationJson, version))
 
     private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): ClientControlSendResult {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: run {

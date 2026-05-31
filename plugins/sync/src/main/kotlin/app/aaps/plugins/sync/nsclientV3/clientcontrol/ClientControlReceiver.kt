@@ -1,6 +1,7 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -8,6 +9,7 @@ import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
@@ -61,6 +63,7 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
     private val activeSceneSync: ActiveSceneSync,
+    private val automation: Automation,
     private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
@@ -162,6 +165,7 @@ class ClientControlReceiver @Inject constructor(
                 is ClientControlMessage.SceneStart             -> onVerifiedSceneStart(entry, envelope, message, now)
                 is ClientControlMessage.SceneStop              -> onVerifiedSceneStop(entry, envelope, message, now)
                 is ClientControlMessage.SceneDefinitionsUpdate -> onVerifiedScenesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.AutomationDefinitionsUpdate -> onVerifiedAutomationUpdate(entry, envelope, message, now)
             }
         }
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -273,6 +277,33 @@ class ClientControlReceiver @Inject constructor(
         }
         if (changed > 0) preferences.put(StringNonKey.SceneDefinitions, existing.toString())
         nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: applied=$changed stale=$dropped")
+    }
+
+    /**
+     * Apply a client-pushed automation-events JSON via whole-list last-writer-wins by version
+     * (the client's last local-edit wall clock). A strictly-newer push replaces the master's list
+     * and adopts its version; a stale one is dropped. The write to [StringNonKey.AutomationEvents]
+     * triggers `RunningConfigurationPublisher`'s debounce (events are in `automation.syncedKeys`),
+     * fanning the merged result out to every paired client; the master runtime is reloaded directly
+     * since it caches the list in memory rather than reading the pref live.
+     */
+    private fun onVerifiedAutomationUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.AutomationDefinitionsUpdate, now: Long) {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val localVersion = preferences.get(LongNonKey.AutomationEventsModified)
+        if (message.version <= localVersion) {
+            nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: stale (v=${message.version} <= local=$localVersion)")
+            return
+        }
+        val incoming = runCatching { JSONArray(message.automationJson) }.getOrNull()
+        if (incoming == null) {
+            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: automation.update from ${entry.name} has invalid JSON, ignoring")
+            nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: invalid JSON")
+            return
+        }
+        preferences.put(StringNonKey.AutomationEvents, message.automationJson)
+        preferences.put(LongNonKey.AutomationEventsModified, message.version)
+        automation.reloadInternalState()
+        nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: applied v=${message.version} (${incoming.length()} events)")
     }
 
     private fun SceneAutomationResult.tag(): String = when (this) {

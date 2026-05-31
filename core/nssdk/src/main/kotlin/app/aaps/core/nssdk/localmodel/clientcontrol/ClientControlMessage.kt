@@ -75,4 +75,19 @@ sealed class ClientControlMessage {
     data class SceneDefinitionsUpdate(
         val scenesJson: String
     ) : ClientControlMessage()
+
+    /**
+     * Client pushes its full automation-events JSON to the master after a local edit. The master
+     * applies whole-list last-writer-wins by [version] (this device's last-edit wall clock) —
+     * strictly-newer replaces, stale is dropped — then republishes via the running-config doc.
+     *
+     * `automationJson` is opaque to the nssdk module (a String, the same array shape the local pref
+     * holds) so the wire schema stays decoupled from the automation model. Master parses it.
+     */
+    @Serializable
+    @SerialName("automation_definitions_update")
+    data class AutomationDefinitionsUpdate(
+        val automationJson: String,
+        val version: Long
+    ) : ClientControlMessage()
 }

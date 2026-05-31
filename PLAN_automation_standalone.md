@@ -268,7 +268,21 @@ Risk: low.
 
 ---
 
-## Phase 8 — Client editing + client→master sync (scenes parity). LAST PHASE, separate follow-up PR (PR 3). Deferred until PRs 1–2 land + verified.
+## Phase 8 — Client editing + client→master sync (scenes parity). DONE ✅ (whole-list LWW by version; verified assembleFullDebug + tests).
+Done: moved `AutomationEvents` to `core/keys StringNonKey` + added `LongNonKey.AutomationEventsModified`
+(version; exportable=false); deleted `AutomationStringKey`. `AutomationRuntime` bumps the version on
+every definition edit (add/set/remove/swap/addIfNotExists/removeIfExists + `markEdited` for the holder
+toggle) — NOT on loadFromSP/processActions. Wire: `ClientControlMessage.AutomationDefinitionsUpdate
+(automationJson, version)`. Sender: `ClientControlAutomationSender` (core/interfaces) impl by
+`ClientControlPublisher` (+ identifier `when`). Client publisher:
+`AutomationDefinitionsClientPublisher` (AAPSCLIENT-guarded, observes `AutomationEvents`, debounce 2s,
+ships json+version) started/stopped in `NSClientV3Plugin`. Master receiver:
+`ClientControlReceiver.onVerifiedAutomationUpdate` — whole-list LWW (`incoming.version > local`),
+writes events+version, `automation.reloadInternalState()` (injected `Automation`); running-config
+fans the result back to clients (events stay in `syncedKeys`). DI bound in `SyncModule`. Tests:
+4 receiver merge tests (newer applies+reload, stale dropped, equal=stale, invalid JSON); 8 worker
+test constructions updated. Verified: `:app:assembleFullDebug`, full `:plugins:sync` suite,
+`:plugins:automation` 7/7.
 
 1. New `ClientControlMessage.AutomationDefinitionsUpdate` (wire type).
 2. `AutomationDefinitionsClientPublisher` (`config.AAPSCLIENT`-guarded) observing

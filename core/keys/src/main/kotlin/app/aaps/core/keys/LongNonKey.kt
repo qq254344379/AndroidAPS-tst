@@ -9,6 +9,10 @@ enum class LongNonKey(
 ) : LongNonPreferenceKey {
 
     LocalProfileLastChange("local_profile_last_change", 0L),
+    // Wall-clock ms of this device's last local automation-definitions edit. Whole-list
+    // last-writer-wins version for client→master sync. Not exported — a restored stale value could
+    // let an old client wrongly win the merge.
+    AutomationEventsModified("automation_events_modified", 0L, exportable = false),
     BtWatchdogLastBark("bt_watchdog_last", 0L),
     ActivePumpChangeTimestamp("active_pump_change_timestamp", 0L),
     LastCleanupRun("last_cleanup_run", 0L),

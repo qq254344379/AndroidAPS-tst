@@ -81,7 +81,8 @@ class AutomationStateHolder(
     fun toggleEnabled(position: Int, checked: Boolean) {
         plugin.at(position).isEnabled = checked
         // In-place mutation — list reference unchanged, so we have to kick the flow manually.
-        plugin.notifyChanged()
+        // markEdited bumps the sync version so the toggle propagates client→master.
+        plugin.markEdited()
     }
 
     fun move(from: Int, to: Int) {

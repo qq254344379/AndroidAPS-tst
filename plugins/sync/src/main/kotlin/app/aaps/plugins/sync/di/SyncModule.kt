@@ -6,6 +6,7 @@ import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.nsclient.StoreDataForDb
+import app.aaps.core.interfaces.automation.ClientControlAutomationSender
 import app.aaps.core.interfaces.scenes.ClientControlSceneSender
 import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.interfaces.sync.DataSyncSelectorXdrip
@@ -97,6 +98,8 @@ abstract class SyncModule {
         @Binds fun bindNSClientRepository(nsClientRepositoryImpl: NSClientRepositoryImpl): NSClientRepository
 
         @Binds fun bindClientControlSceneSender(publisher: ClientControlPublisher): ClientControlSceneSender
+
+        @Binds fun bindClientControlAutomationSender(publisher: ClientControlPublisher): ClientControlAutomationSender
     }
 
 }

@@ -55,6 +55,7 @@ import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.AutomationDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolus
@@ -131,6 +132,7 @@ class NSClientV3Plugin @Inject constructor(
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
     private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
+    private val automationDefinitionsClientPublisher: AutomationDefinitionsClientPublisher,
     private val profileRepository: ProfileRepository,
 ) : NsClient, Sync, PluginBaseWithPreferences(
     PluginDescription()
@@ -249,6 +251,7 @@ class NSClientV3Plugin @Inject constructor(
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         runningConfigurationPublisher.start(scope)
         sceneDefinitionsClientPublisher.start(scope)
+        automationDefinitionsClientPublisher.start(scope)
         // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
         // WS settings-collection listener in NSClientV3Service that calls into
         // [handleClientControlSettingsEvent]; this loop only catches docs that arrived while
@@ -395,6 +398,7 @@ class NSClientV3Plugin @Inject constructor(
         handler = null
         runningConfigurationPublisher.stop()
         sceneDefinitionsClientPublisher.stop()
+        automationDefinitionsClientPublisher.stop()
         scope.cancel()
         stopService()
         WorkManager.getInstance(context).cancelUniqueWork(JOB_NAME)
