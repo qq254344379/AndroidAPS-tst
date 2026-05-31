@@ -13,7 +13,10 @@ import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.objects.extensions.observeChange
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.SettingsIdentifiers
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.AuthorizedClientsRepository
+import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher.Companion.COLD_DEBOUNCE_MS
+import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher.Companion.HOT_DEBOUNCE_MS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -29,13 +32,16 @@ import javax.inject.Provider
 import javax.inject.Singleton
 
 /**
- * Master-side publisher for the NS `settings/aaps` document.
+ * Master-side publisher for the NS running-config `settings` documents.
  *
- * Observes every preference key in [RunningConfigurationKeys.observableKeys] plus
- * [EventConfigBuilderChange] (plugin switches), debounces 5s, and PATCHes the
- * running configuration JSON to the NS settings collection under identifier `"aaps"`.
+ * Splits the config across two docs by write-frequency (see [SettingsIdentifiers]):
+ *  - Cold ([SettingsIdentifiers.COLD]): plugin config + overview + definitions + authorized
+ *    clients. Triggered by [RunningConfigurationKeys.observableKeys] changes, plugin switches
+ *    ([EventConfigBuilderChange]) and authorized-client changes; debounced [COLD_DEBOUNCE_MS].
+ *  - Hot ([SettingsIdentifiers.STATE]): active scene + computed runtime flags. Triggered by
+ *    [RunningConfigurationKeys.hotKeys] (scene lifecycle); debounced [HOT_DEBOUNCE_MS].
  *
- * Document shape: `{ schemaVersion: 1, runningConfig: <RunningConfiguration.configuration()> }`
+ * Document shape (both): `{ schemaVersion: 1, runningConfig: <…> }`, upserted via `updateSettings`.
  *
  * Started by [NSClientV3Plugin.onStart] and stopped by `onStop`.
  * Only active when `config.APS` is true (master role); no-op on aapsclient.
@@ -61,19 +67,31 @@ class RunningConfigurationPublisher @Inject constructor(
         if (!config.APS) return
         if (job != null) return
         job = scope.launch {
-            // initial publish on plugin start so the doc is fresh
-            publish()
+            // initial publish on plugin start so both docs are fresh
+            publishCold()
+            publishHot()
 
-            val keyTriggers: List<Flow<Unit>> = runningConfigurationKeys.observableKeys()
-                .map { preferences.observeChange(it) }
             val switchTrigger: Flow<Unit> = rxBus.toFlow(EventConfigBuilderChange::class.java).map { }
             // Authorized-clients changes (pair / unpair / revoke / markActive) republish so paired
             // clients can read the current roster and detect when they've been orphaned.
             val authorizedClientsTrigger: Flow<Unit> = authorizedRepository.observe().map { }
+            val coldKeyTriggers: List<Flow<Unit>> = runningConfigurationKeys.observableKeys()
+                .map { preferences.observeChange(it) }
+            val hotKeyTriggers: List<Flow<Unit>> = runningConfigurationKeys.hotKeys()
+                .map { preferences.observeChange(it) }
 
-            (keyTriggers + switchTrigger + authorizedClientsTrigger).merge()
-                .debounce(DEBOUNCE_MS)
-                .collect { publish() }
+            // Cold doc: rarely-changing config. Longer debounce collapses bulk edits.
+            launch {
+                (coldKeyTriggers + switchTrigger + authorizedClientsTrigger).merge()
+                    .debounce(COLD_DEBOUNCE_MS)
+                    .collect { publishCold() }
+            }
+            // Hot doc: scene lifecycle. Short debounce so a scene shows on clients quickly.
+            launch {
+                hotKeyTriggers.merge()
+                    .debounce(HOT_DEBOUNCE_MS)
+                    .collect { publishHot() }
+            }
         }
     }
 
@@ -82,8 +100,8 @@ class RunningConfigurationPublisher @Inject constructor(
         job = null
     }
 
-    private suspend fun publish() {
-        val client = nsClientV3Plugin.get().nsAndroidClient ?: return
+    // Cold doc: full plugin/overview/definition config + the authorized-clients roster.
+    private suspend fun publishCold() {
         val payload = runningConfiguration.configuration()
         if (payload.length() == 0) return // pump not initialized yet
         // Append the authorized-clients roster directly on the runningConfig JSONObject — the
@@ -94,6 +112,16 @@ class RunningConfigurationPublisher @Inject constructor(
             .filter { it.state == ClientState.Active }
             .map { it.clientId }
         payload.put("authorizedClients", JSONObject().put("clientIds", JSONArray(activeClientIds)))
+        putSettings(SettingsIdentifiers.COLD, payload)
+    }
+
+    // Hot doc: active scene + computed runtime flags. Small and frequently republished.
+    private suspend fun publishHot() {
+        putSettings(SettingsIdentifiers.STATE, runningConfiguration.activeSceneConfiguration())
+    }
+
+    private suspend fun putSettings(identifier: String, runningConfig: JSONObject) {
+        val client = nsClientV3Plugin.get().nsAndroidClient ?: return
         val doc = JSONObject().apply {
             // NS APIv3 validateCommon requires date / utcOffset / app on UPDATE; all three are
             // immutable after first create, so pick stable constants — the doc represents a
@@ -102,29 +130,29 @@ class RunningConfigurationPublisher @Inject constructor(
             put("utcOffset", 0)
             put("app", "AAPS")
             put("schemaVersion", SCHEMA_VERSION)
-            put("runningConfig", payload)
+            put("runningConfig", runningConfig)
         }
-        runCatching { client.updateSettings(IDENTIFIER, doc) }
+        runCatching { client.updateSettings(identifier, doc) }
             .onSuccess { resp ->
                 if (resp.response in 200..299) {
                     val ts = resp.lastModified?.let { dateUtil.dateAndTimeAndSecondsString(it) } ?: "?"
-                    nsClientRepository.addLog("► SETTINGS", "$IDENTIFIER srvModified=$ts")
+                    nsClientRepository.addLog("► SETTINGS", "$identifier srvModified=$ts")
                 } else {
-                    aapsLogger.error(LTag.NSCLIENT, "updateSettings($IDENTIFIER) HTTP ${resp.response}: ${resp.errorResponse}")
-                    nsClientRepository.addLog("✕ SETTINGS", "$IDENTIFIER HTTP ${resp.response} ${resp.errorResponse ?: ""}")
+                    aapsLogger.error(LTag.NSCLIENT, "updateSettings($identifier) HTTP ${resp.response}: ${resp.errorResponse}")
+                    nsClientRepository.addLog("✕ SETTINGS", "$identifier HTTP ${resp.response} ${resp.errorResponse ?: ""}")
                 }
             }
             .onFailure { e ->
-                aapsLogger.error(LTag.NSCLIENT, "updateSettings($IDENTIFIER) failed", e)
-                nsClientRepository.addLog("✕ SETTINGS", "$IDENTIFIER ${e.message}")
+                aapsLogger.error(LTag.NSCLIENT, "updateSettings($identifier) failed", e)
+                nsClientRepository.addLog("✕ SETTINGS", "$identifier ${e.message}")
             }
     }
 
     companion object {
 
-        private const val IDENTIFIER = "aaps"
         private const val SCHEMA_VERSION = 1
-        private const val DEBOUNCE_MS = 5_000L
+        private const val COLD_DEBOUNCE_MS = 5_000L
+        private const val HOT_DEBOUNCE_MS = 1_000L
 
         // 1 ms past NS APIv3 MIN_TIMESTAMP (946684800000 = 2000-01-01 UTC). Required by
         // validateCommon and immutable after create — kept constant so every update matches.

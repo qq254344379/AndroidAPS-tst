@@ -31,6 +31,7 @@ import app.aaps.core.nssdk.mapper.toNSTreatment
 import app.aaps.plugins.sync.nsclientV3.NSAlarmObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.NsIncomingDataProcessor
+import app.aaps.plugins.sync.nsclientV3.SettingsIdentifiers
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.data.NSDeviceStatusHandler
@@ -280,16 +281,23 @@ class NSClientV3Service : DaggerService() {
             }
 
             "settings"     -> {
-                if (config.AAPSCLIENT) docString.toRunningConfiguration()?.let {
-                    runningConfiguration.apply(it)
-                    orphanDetector.onSettingsDoc(it, docJson.optLong("srvModified", 0L))
-                }
-                // Master-side: route client-control envelopes (paired-client → master commands)
-                // to the receiver. The plugin gates on the master toggle and on the identifier
-                // prefix internally, so it's safe to forward every settings doc here.
                 val identifier = docJson.optString("identifier")
-                if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX))
-                    nsClientV3Plugin.handleClientControlSettingsEvent(identifier, docJson)
+                when {
+                    // Client-side: cold config doc — apply everything except the active scene.
+                    config.AAPSCLIENT && identifier == SettingsIdentifiers.COLD     ->
+                        docString.toRunningConfiguration()?.let {
+                            runningConfiguration.applyCold(it)
+                            orphanDetector.onSettingsDoc(it, docJson.optLong("srvModified", 0L))
+                        }
+                    // Client-side: hot state doc — apply only the active scene + runtime flags.
+                    // Kept distinct from the cold branch so this never clears a running scene.
+                    config.AAPSCLIENT && identifier == SettingsIdentifiers.STATE    ->
+                        docString.toRunningConfiguration()?.let { runningConfiguration.applyHot(it) }
+                    // Master-side: route client-control envelopes (paired-client → master commands)
+                    // to the receiver. The plugin gates on the master toggle internally.
+                    identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX) ->
+                        nsClientV3Plugin.handleClientControlSettingsEvent(identifier, docJson)
+                }
             }
         }
     }

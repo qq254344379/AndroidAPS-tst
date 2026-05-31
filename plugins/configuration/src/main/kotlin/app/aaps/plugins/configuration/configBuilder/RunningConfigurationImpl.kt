@@ -39,6 +39,7 @@ import app.aaps.core.objects.extensions.store
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.plugins.configuration.R
 import dagger.Reusable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.json.JSONException
 import org.json.JSONObject
@@ -61,6 +62,9 @@ class RunningConfigurationImpl @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val constraintsChecker: ConstraintsChecker
 ) : RunningConfiguration, RunningConfigurationKeys {
+
+    // Omit null fields so the frequently-published hot doc stays small.
+    private val wireJson = Json { explicitNulls = false }
 
     // called in AAPS mode only
     override fun configuration(): JSONObject {
@@ -89,20 +93,35 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("quickWizardConfiguration", JSONObject(buildFromPlugin(quickWizard).toString()))
             json.put("scenesConfiguration", JSONObject(buildFromPlugin(scenes).toString()))
             json.put("automationConfiguration", JSONObject(buildFromPlugin(automation).toString()))
-            activeSceneSync.activeSceneSnapshot()?.let { snapshot ->
-                json.put("activeScene", JSONObject().apply {
-                    put("sceneId", snapshot.sceneId)
-                    put("activatedAt", snapshot.activatedAt)
-                    put("durationMs", snapshot.durationMs)
-                    put("lifecycle", snapshot.lifecycle.name)
-                    snapshot.ttNsId?.let { put("ttNsId", it) }
-                    snapshot.psNsId?.let { put("psNsId", it) }
-                    snapshot.rmNsId?.let { put("rmNsId", it) }
-                    snapshot.teNsId?.let { put("teNsId", it) }
-                })
-            }
             json.put("pump", pumpInterface.model().description)
             json.put("version", config.VERSION_NAME)
+        } catch (e: JSONException) {
+            aapsLogger.error("Unhandled exception", e)
+        }
+        return json
+    }
+
+    // called in AAPS mode only — the small "hot" doc: active scene (if any) + computed runtime flags.
+    override fun activeSceneConfiguration(): JSONObject {
+        val json = JSONObject()
+        try {
+            activeSceneSync.activeSceneSnapshot()?.let { snapshot ->
+                // Serialize from the wire DTO so the field set stays in lockstep with
+                // [NSActiveScene] (no hand-maintained put() list to drift). explicitNulls=false
+                // keeps the doc small by omitting not-yet-resolved NS ids.
+                val wire = NSActiveScene(
+                    sceneId = snapshot.sceneId,
+                    activatedAt = snapshot.activatedAt,
+                    durationMs = snapshot.durationMs,
+                    lifecycle = snapshot.lifecycle.name,
+                    ttNsId = snapshot.ttNsId,
+                    psNsId = snapshot.psNsId,
+                    rmNsId = snapshot.rmNsId,
+                    teNsId = snapshot.teNsId
+                )
+                json.put("activeScene", JSONObject(wireJson.encodeToString(NSActiveScene.serializer(), wire)))
+            }
+            json.put("usedAutosensOnMainPhone", constraintsChecker.isAutosensModeEnabled().value())
         } catch (e: JSONException) {
             aapsLogger.error("Unhandled exception", e)
         }
@@ -125,12 +144,14 @@ class RunningConfigurationImpl @Inject constructor(
         keys += scenes.syncedKeys
         keys += automation.syncedKeys
         keys += SyncedConfigSchema.overviewKeys
-        keys += StringNonKey.ActiveScene
         return keys.distinctBy { it.key }
     }
 
-    // called in NSClient mode only
-    override fun apply(configuration: NSRunningConfiguration) {
+    // Runtime state — published to the separate "hot" doc, not the cold config doc.
+    override fun hotKeys(): List<NonPreferenceKey> = listOf(StringNonKey.ActiveScene)
+
+    // called in NSClient mode only — apply the cold config doc (everything except the active scene).
+    override fun applyCold(configuration: NSRunningConfiguration) {
         assert(config.AAPSCLIENT)
 
         configuration.version?.let {
@@ -208,10 +229,17 @@ class RunningConfigurationImpl @Inject constructor(
         configuration.automationConfiguration?.let { ac ->
             applyToPlugin(automation, ac)
         }
+    }
 
+    // called in NSClient mode only — apply the hot doc (active scene + computed runtime flags).
+    // Kept separate from [applyCold] so a cold-doc apply (which carries no activeScene) never
+    // clears a running scene.
+    override fun applyHot(configuration: NSRunningConfiguration) {
+        assert(config.AAPSCLIENT)
         // activeScene: null on the wire means "no scene active" — clear locally.
         // Always pass through (even null) so master-side dismissal propagates.
         activeSceneSync.applyActiveScene(configuration.activeScene?.toSnapshot())
+        configuration.usedAutosensOnMainPhone?.let { preferences.put(BooleanNonKey.AutosensUsedOnMainPhone, it) }
     }
 
     private fun NSActiveScene.toSnapshot() =
@@ -236,15 +264,12 @@ class RunningConfigurationImpl @Inject constructor(
         plugin.reloadInternalState()
     }
 
-    private fun buildOverviewConfiguration(): JsonObject {
-        val base = SyncedConfigSchema.overviewKeys.fold(JsonObject(emptyMap())) { acc, k ->
+    private fun buildOverviewConfiguration(): JsonObject =
+        SyncedConfigSchema.overviewKeys.fold(JsonObject(emptyMap())) { acc, k ->
             acc.put(k, preferences)
         }
-        return base.put(BooleanNonKey.AutosensUsedOnMainPhone, constraintsChecker.isAutosensModeEnabled().value())
-    }
 
     private fun applyOverviewConfiguration(configuration: JsonObject) {
         SyncedConfigSchema.overviewKeys.forEach { configuration.store(it, preferences) }
-        configuration.store(BooleanNonKey.AutosensUsedOnMainPhone, preferences)
     }
 }

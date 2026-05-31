@@ -7,9 +7,12 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
+import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
 import app.aaps.core.objects.workflow.LoggingWorker
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.SettingsIdentifiers
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.extensions.toRunningConfiguration
 import kotlinx.coroutines.Dispatchers
@@ -42,24 +45,21 @@ class LoadSettingsWorker(
         if (!config.AAPSCLIENT) return Result.success() // master skips reading
 
         try {
-            val response = client.getSettings(IDENTIFIER)
-            val doc = response.values
-            if (doc == null) {
-                nsClientRepository.addLog("◄ RCV SETTINGS", "no doc yet")
-            } else {
-                // ETag isn't set for settings GETs, but srvModified is in the doc body
-                val srvModified = doc.optLong("srvModified", 0L).takeIf { it > 0 }
-                    ?: response.lastServerModified
-                doc.toString().toRunningConfiguration()?.let { configuration ->
-                    runningConfiguration.apply(configuration)
-                    orphanDetector.onSettingsDoc(configuration, srvModified ?: 0L)
-                    val ts = srvModified?.let { dateUtil.dateAndTimeAndSecondsString(it) } ?: "?"
-                    nsClientRepository.addLog("◄ SETTINGS", "applied srvModified=$ts")
-                } ?: nsClientRepository.addLog("◄ SETTINGS", "doc present but missing/invalid runningConfig")
+            // Cold doc first: scene definitions (in the cold doc) must exist before the hot doc's
+            // activeScene — which references a sceneId — is applied.
+            load(client, SettingsIdentifiers.COLD) { cfg, srvModified ->
+                runningConfiguration.applyCold(cfg)
+                orphanDetector.onSettingsDoc(cfg, srvModified ?: 0L)
+                // The LastModified model has a single `settings` slot — the cold doc owns it.
+                // (Also satisfies isFirstLoad(SETTINGS), which checks collections.settings != 0.)
+                // The hot doc is fetched unconditionally below, so it needs no pointer of its own.
                 srvModified?.let {
                     nsClientV3Plugin.lastLoadedSrvModified.set("settings", it)
                     nsClientV3Plugin.storeLastLoadedSrvModified()
                 }
+            }
+            load(client, SettingsIdentifiers.STATE) { cfg, _ ->
+                runningConfiguration.applyHot(cfg)
             }
         } catch (e: Exception) {
             aapsLogger.error(LTag.NSCLIENT, "LoadSettingsWorker failed", e)
@@ -71,8 +71,23 @@ class LoadSettingsWorker(
         return Result.success()
     }
 
-    private companion object {
-
-        const val IDENTIFIER = "aaps"
+    private suspend fun load(
+        client: NSAndroidClient,
+        identifier: String,
+        apply: (NSRunningConfiguration, Long?) -> Unit
+    ) {
+        val response = client.getSettings(identifier)
+        val doc = response.values
+        if (doc == null) {
+            nsClientRepository.addLog("◄ RCV SETTINGS", "$identifier: no doc yet")
+            return
+        }
+        // ETag isn't set for settings GETs, but srvModified is in the doc body
+        val srvModified = doc.optLong("srvModified", 0L).takeIf { it > 0 } ?: response.lastServerModified
+        doc.toString().toRunningConfiguration()?.let { configuration ->
+            apply(configuration, srvModified)
+            val ts = srvModified?.let { dateUtil.dateAndTimeAndSecondsString(it) } ?: "?"
+            nsClientRepository.addLog("◄ SETTINGS", "$identifier applied srvModified=$ts")
+        } ?: nsClientRepository.addLog("◄ SETTINGS", "$identifier present but missing/invalid runningConfig")
     }
 }

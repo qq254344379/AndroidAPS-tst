@@ -12,10 +12,17 @@ import app.aaps.core.keys.interfaces.NonPreferenceKey
 interface RunningConfigurationKeys {
 
     /**
-     * All preference keys whose values are part of the published running configuration.
+     * "Cold" preference keys — values published in the rarely-changing config doc.
      * Combines plugin-owned keys (via `ConfigExportImport.syncedKeys` of all installed
      * Insulin / APS / Sensitivity / Safety / QuickWizard sources) with free-floating
-     * overview keys.
+     * overview keys. Excludes runtime state (see [hotKeys]).
      */
     fun observableKeys(): List<NonPreferenceKey>
+
+    /**
+     * "Hot" preference keys — runtime state that changes frequently (active scene
+     * start/stop/expire). Published to a separate, small settings doc so a scene
+     * lifecycle event does not re-upload the whole cold config.
+     */
+    fun hotKeys(): List<NonPreferenceKey>
 }

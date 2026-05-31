@@ -29,6 +29,10 @@ data class NSRunningConfiguration(
     val scenesConfiguration: JsonObject? = null,
     val automationConfiguration: JsonObject? = null,
     val activeScene: NSActiveScene? = null,
+    // Computed runtime flag carried in the "hot" doc alongside [activeScene] — whether autosens
+    // is actually in use on the master. Top-level (not nested in overviewConfiguration) so it can
+    // ride the small hot doc and refresh on scene lifecycle events.
+    val usedAutosensOnMainPhone: Boolean? = null,
     val authorizedClients: NSAuthorizedClients? = null
 )
 
