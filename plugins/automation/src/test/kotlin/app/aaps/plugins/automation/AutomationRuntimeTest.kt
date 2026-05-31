@@ -22,6 +22,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
 
@@ -102,6 +104,15 @@ class AutomationRuntimeTest : TestBaseWithProfile() {
         val event = AutomationEventObject(injector).apply { actions.add(action) }
         automationRuntime.processEvent(event)
         verifyNoInteractions(action) // guard returned before the actions loop
+    }
+
+    @Test
+    fun `processActions does not run on a client`() = runTest {
+        whenever(config.appInitialized).thenReturn(true)
+        whenever(config.APS).thenReturn(false)
+        automationRuntime.processActions()
+        // Master-only guard returns before the loop-state / constraint checks are even consulted.
+        verify(loop, never()).runningMode()
     }
 
     /**

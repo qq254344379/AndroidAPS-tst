@@ -4,6 +4,7 @@ import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.plugin.PermissionProvider
 import app.aaps.plugins.automation.AutomationEventObject
 import app.aaps.plugins.automation.AutomationRuntime
+import app.aaps.plugins.automation.BtConnectionSource
 import app.aaps.plugins.automation.actions.Action
 import app.aaps.plugins.automation.actions.ActionAlarm
 import app.aaps.plugins.automation.actions.ActionCarePortalEvent
@@ -125,5 +126,7 @@ abstract class AutomationModule {
         @Binds fun bindAutomation(automationRuntime: AutomationRuntime): Automation
 
         @Binds @IntoSet fun bindAutomationPermissionProvider(automationRuntime: AutomationRuntime): PermissionProvider
+
+        @Binds fun bindBtConnectionSource(automationRuntime: AutomationRuntime): BtConnectionSource
     }
 }

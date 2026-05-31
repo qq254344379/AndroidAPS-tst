@@ -141,7 +141,7 @@ class AutomationRuntime @Inject constructor(
     private val uel: UserEntryLogger,
     private val profileRepository: ProfileRepository,
     private val sceneApi: SceneAutomationApi
-) : Automation, PermissionProvider {
+) : Automation, PermissionProvider, BtConnectionSource {
 
     init {
         // Register own preference keys (previously done by PluginBaseWithPreferences).
@@ -185,7 +185,12 @@ class AutomationRuntime @Inject constructor(
 
     private val automationEvents = ArrayList<AutomationEventObject>()
     var executionLog: MutableList<String> = ArrayList()
-    var btConnects: MutableList<EventBTChange> = ArrayList()
+
+    /** BT connect/disconnect events accumulated between processActions() runs (master only). The
+     *  single external reader is TriggerBTDevice, via [recentBtConnects]. */
+    private val btConnects: MutableList<EventBTChange> = ArrayList()
+
+    override fun recentBtConnects(): List<EventBTChange> = ArrayList(btConnects)
 
     /**
      * Snapshot stream of [automationEvents]. Replaces the old `EventAutomationDataChanged` RxBus
