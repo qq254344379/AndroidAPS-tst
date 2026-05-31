@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TipsAndUpdates
 import androidx.compose.material.icons.outlined.Palette
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -18,6 +19,7 @@ import app.aaps.core.keys.interfaces.withChangeGuard
 import app.aaps.core.ui.compose.icons.IcBolus
 import app.aaps.core.ui.compose.icons.IcCalculator
 import app.aaps.core.ui.compose.icons.IcCarbs
+import app.aaps.core.ui.compose.icons.IcPluginAutomation
 import app.aaps.core.ui.compose.icons.IcPluginMaintenance
 import app.aaps.core.ui.compose.icons.IcPumpCartridge
 import app.aaps.core.ui.compose.icons.Pump
@@ -40,7 +42,8 @@ import javax.inject.Singleton
 class BuiltInSearchables @Inject constructor(
     private val rh: ResourceHelper,
     private val insulinManager: InsulinManager,
-    private val insulin: Insulin
+    private val insulin: Insulin,
+    private val config: Config
 ) : SearchableProvider {
 
     private fun hasNonU100Insulin(): Boolean =
@@ -280,21 +283,37 @@ class BuiltInSearchables @Inject constructor(
         icon = IcCalculator
     )
 
-    override fun getSearchableItems(): List<SearchableItem> = listOf(
-        // Main preference screens (shown in AllPreferencesScreen)
-        SearchableItem.Category(general),
-        SearchableItem.Category(appearance),
-        SearchableItem.Category(protection),
-        SearchableItem.Category(pump),
-        SearchableItem.Category(alerts),
-        SearchableItem.Category(maintenance),
-        // Dialog settings (only for search, not in AllPreferencesScreen)
-        SearchableItem.Category(fillButtons),
-        SearchableItem.Category(insulinButtons),
-        SearchableItem.Category(carbsButtons),
-        SearchableItem.Category(statusLights),
-        SearchableItem.Category(treatmentButtons),
-        SearchableItem.Category(wizardSettings)
+    /**
+     * Automation settings — the standalone Automation feature's preference subscreen (location
+     * service provider mode). Automation is no longer a plugin, so it is registered here.
+     */
+    val automation = PreferenceSubScreenDef(
+        key = "automation_settings",
+        titleResId = app.aaps.core.ui.R.string.automation,
+        items = listOf(
+            StringKey.AutomationLocation
+        ),
+        icon = IcPluginAutomation
     )
+
+    override fun getSearchableItems(): List<SearchableItem> = buildList {
+        // Main preference screens (shown in AllPreferencesScreen)
+        add(SearchableItem.Category(general))
+        add(SearchableItem.Category(appearance))
+        add(SearchableItem.Category(protection))
+        add(SearchableItem.Category(pump))
+        add(SearchableItem.Category(alerts))
+        add(SearchableItem.Category(maintenance))
+        // Automation location setting only has effect on a master device — keep it out of search on
+        // a client too, matching AllPreferencesScreen's `if (config.APS)` gating.
+        if (config.APS) add(SearchableItem.Category(automation))
+        // Dialog settings (only for search, not in AllPreferencesScreen)
+        add(SearchableItem.Category(fillButtons))
+        add(SearchableItem.Category(insulinButtons))
+        add(SearchableItem.Category(carbsButtons))
+        add(SearchableItem.Category(statusLights))
+        add(SearchableItem.Category(treatmentButtons))
+        add(SearchableItem.Category(wizardSettings))
+    }
 }
 

@@ -88,7 +88,9 @@ fun ElementType.color(): Color = when (this) {
     ElementType.SITE_ROTATION           -> AapsTheme.elementColors.siteRotation
     ElementType.TEMP_BASAL              -> AapsTheme.elementColors.tempBasal
     ElementType.EXTENDED_BOLUS          -> AapsTheme.elementColors.extendedBolus
-    ElementType.AUTOMATION              -> AapsTheme.elementColors.automation
+    ElementType.AUTOMATION,
+    ElementType.AUTOMATION_MANAGEMENT   -> AapsTheme.elementColors.automation
+
     ElementType.PUMP                    -> AapsTheme.elementColors.pump
     ElementType.SETTINGS,
     ElementType.QUICK_LAUNCH_CONFIG     -> AapsTheme.elementColors.settings
@@ -151,7 +153,9 @@ fun ElementType.icon(): ImageVector = when (this) {
     ElementType.SITE_ROTATION           -> IcSiteRotation
     ElementType.TEMP_BASAL              -> IcTbrHigh
     ElementType.EXTENDED_BOLUS          -> IcExtendedBolus
-    ElementType.AUTOMATION              -> IcPluginAutomation
+    ElementType.AUTOMATION,
+    ElementType.AUTOMATION_MANAGEMENT   -> IcPluginAutomation
+
     ElementType.PUMP                    -> Pump
     ElementType.SETTINGS                -> Icons.Default.Settings
     ElementType.QUICK_LAUNCH_CONFIG     -> Icons.Default.Settings
@@ -206,6 +210,7 @@ fun ElementType.labelResId(): Int = when (this) {
     ElementType.TEMP_BASAL              -> R.string.temp_basal
     ElementType.EXTENDED_BOLUS          -> R.string.extended_bolus
     ElementType.AUTOMATION              -> 0 // dynamic label
+    ElementType.AUTOMATION_MANAGEMENT   -> R.string.automation
     ElementType.PUMP                    -> R.string.pump
     ElementType.SETTINGS                -> R.string.settings
     ElementType.QUICK_LAUNCH_CONFIG     -> R.string.quick_launch_configure
@@ -270,6 +275,7 @@ fun ElementType.descriptionResId(): Int = when (this) {
     ElementType.QUICK_LAUNCH_CONFIG     -> R.string.quick_launch_configure_desc
     ElementType.SCENE                   -> R.string.scene_desc
     ElementType.SCENE_MANAGEMENT        -> R.string.scene_management_desc
+    ElementType.AUTOMATION_MANAGEMENT   -> R.string.automation_management_desc
     ElementType.AUTHORIZED_CLIENTS      -> R.string.authorized_clients_manage_desc
     ElementType.PAIR_WITH_MASTER        -> R.string.pair_with_master_manage_desc
     ElementType.QUICK_WIZARD,

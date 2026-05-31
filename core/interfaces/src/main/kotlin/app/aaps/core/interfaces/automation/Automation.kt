@@ -11,6 +11,13 @@ interface Automation : ConfigExportImport {
      */
     val events: StateFlow<List<AutomationEvent>>
 
+    /**
+     * Single source of truth for "automation executes here". True only on a master device; clients
+     * (AAPSCLIENT) edit + sync definitions but never run them. UI surfaces that offer to run/execute
+     * a user action must hide it when this is false. Execution itself is also hard-gated internally.
+     */
+    val executionEnabled: Boolean
+
     fun findEventById(id: String): AutomationEvent?
     suspend fun processEvent(someEvent: AutomationEvent)
 

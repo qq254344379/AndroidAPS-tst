@@ -154,7 +154,8 @@ class ScenesViewModel @Inject constructor(
             // refresh triggers, so the displayed list matches the value that caused the refresh.
             // (Previously called automation.userEvents() which re-snapshots independently and was
             // also pre-filtering isEnabled — making the inline filter partly redundant.)
-            val items = if (watchOnly) emptyList()
+            // Automation executes on master only — a client never lists runnable user actions.
+            val items = if (watchOnly || !automation.executionEnabled) emptyList()
             else automation.events.value.filter { it.userAction && it.isEnabled && it.canRun() }.map { event ->
                 AutomationActionItem(
                     eventId = event.id,

@@ -5,7 +5,7 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.ui.compose.icons.IcUserOptions
 import app.aaps.plugins.automation.AutomationEventObject
-import app.aaps.plugins.automation.AutomationPlugin
+import app.aaps.plugins.automation.AutomationRuntime
 import app.aaps.plugins.automation.actions.Action
 import app.aaps.plugins.automation.events.EventAutomationUpdateGui
 import app.aaps.plugins.automation.triggers.TriggerConnector
@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
 class AutomationStateHolder(
-    private val plugin: AutomationPlugin,
+    private val plugin: AutomationRuntime,
     private val rxBus: RxBus,
     private val aapsSchedulers: AapsSchedulers,
     private val fabricPrivacy: FabricPrivacy,

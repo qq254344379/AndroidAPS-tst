@@ -76,8 +76,9 @@ class QuickLaunchResolver @Inject constructor(
         is QuickLaunchAction.QuickWizardAction -> quickWizard.get(action.guid) != null
 
         is QuickLaunchAction.AutomationAction  -> {
+            // Automation executes on master only — invalid (hidden) on a client.
             val event = automation.findEventById(action.automationId)
-            event != null && event.isEnabled
+            automation.executionEnabled && event != null && event.isEnabled
         }
 
         is QuickLaunchAction.TempTargetPreset  -> {

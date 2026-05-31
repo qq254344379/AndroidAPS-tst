@@ -1645,9 +1645,12 @@ class DataHandlerMobile @Inject constructor(
     suspend fun sendUserActions() {
         val now = System.currentTimeMillis()
         val filtered = mutableListOf<AutomationEvent>()
-        for (event in automation.events.value) {
-            if (event.userAction && event.isEnabled && event.canRun()) filtered.add(event)
-        }
+        // Automation executes on master only — clients show no user-action tiles (tapping one would
+        // run nothing). Send an empty list so the watch clears any stale tiles.
+        if (automation.executionEnabled)
+            for (event in automation.events.value) {
+                if (event.userAction && event.isEnabled && event.canRun()) filtered.add(event)
+            }
         rxBus.send(
             EventMobileToWear(
                 EventData.UserAction(

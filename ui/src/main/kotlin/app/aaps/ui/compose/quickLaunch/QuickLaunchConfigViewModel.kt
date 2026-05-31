@@ -77,7 +77,9 @@ class QuickLaunchConfigViewModel @Inject constructor(
 
         // Available Automation items (user actions only). Reads the flow snapshot directly so the
         // filter set is explicit at the call site instead of hidden behind userEvents().
-        val availableAuto = automation.events.value
+        // Master-only: automation executes on master, so a client cannot add automation quick launches.
+        val availableAuto = if (!automation.executionEnabled) emptyList()
+        else automation.events.value
             .filter { it.userAction && it.isEnabled }
             .map { QuickLaunchAction.AutomationAction(it.id) }
             .filter { actionKey(it) !in selectedSet }

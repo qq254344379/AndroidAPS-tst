@@ -78,6 +78,7 @@ import app.aaps.implementation.plugin.PluginStore
 import app.aaps.implementation.receivers.NetworkChangeReceiver
 import app.aaps.plugins.aps.loop.runningMode.RunningModeExpiryScheduler
 import app.aaps.plugins.aps.loop.runningMode.RunningModeReconciler
+import app.aaps.plugins.automation.AutomationRuntime
 import app.aaps.plugins.constraints.objectives.keys.ObjectivesLongComposedKey
 import app.aaps.plugins.constraints.signatureVerifier.SignatureVerifierPlugin
 import app.aaps.receivers.BTReceiver
@@ -152,6 +153,7 @@ class MainApp : Application(), HasAndroidInjector {
     @Inject lateinit var widgetUpdater: WidgetUpdater
     @Inject lateinit var runningModeReconciler: RunningModeReconciler
     @Inject lateinit var runningModeExpiryScheduler: RunningModeExpiryScheduler
+    @Inject lateinit var automationRuntime: AutomationRuntime
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private lateinit var insulinLabel: String
@@ -220,6 +222,10 @@ class MainApp : Application(), HasAndroidInjector {
                 // pluginStore.plugins to be populated. Both internally gated by config.APS.
                 runningModeReconciler.start()
                 runningModeExpiryScheduler.start()
+
+                // Standalone automation runtime (no longer a plugin). Loads definitions on all
+                // flavors; the processing loop + location service are master-only (gated internally).
+                automationRuntime.start()
 
                 // Data migrations (DB I/O)
                 dataMigrations()

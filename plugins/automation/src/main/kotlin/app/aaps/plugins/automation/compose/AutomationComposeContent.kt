@@ -42,7 +42,7 @@ import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.ui.compose.ComposablePluginContent
 import app.aaps.core.ui.compose.ToolbarConfig
-import app.aaps.plugins.automation.AutomationPlugin
+import app.aaps.plugins.automation.AutomationRuntime
 import app.aaps.plugins.automation.R
 import app.aaps.plugins.automation.compose.actions.ActionOption
 import app.aaps.plugins.automation.compose.actions.ChooseActionSheet
@@ -54,7 +54,7 @@ import kotlinx.coroutines.launch
 import kotlin.reflect.full.primaryConstructor
 
 class AutomationComposeContent(
-    private val plugin: AutomationPlugin,
+    private val plugin: AutomationRuntime,
     private val rxBus: RxBus,
     private val aapsSchedulers: AapsSchedulers,
     private val fabricPrivacy: FabricPrivacy,
@@ -144,7 +144,8 @@ class AutomationComposeContent(
                     onStartRemove = { holder.enterRemoveMode() },
                     onStartSort = { holder.enterSortMode() },
                     onConfirmRemove = { if (selectedCount > 0) showRemoveConfirm = true else holder.exitSelection() },
-                    onSettings = onSettings
+                    onSettings = onSettings,
+                    showRun = plugin.executionEnabled
                 )
             )
         }
@@ -475,7 +476,8 @@ private fun buildListToolbar(
     onStartRemove: () -> Unit,
     onStartSort: () -> Unit,
     onConfirmRemove: () -> Unit,
-    onSettings: (() -> Unit)?
+    onSettings: (() -> Unit)?,
+    showRun: Boolean
 ): ToolbarConfig = when (selectionMode) {
     AutomationSelectionMode.Remove -> ToolbarConfig(
         title = "$selectedCount",
@@ -516,13 +518,14 @@ private fun buildListToolbar(
                     Icon(Icons.Default.Settings, contentDescription = settingsDesc)
                 }
             }
-            AutomationOverflow(onRun, onStartRemove, onStartSort)
+            AutomationOverflow(showRun, onRun, onStartRemove, onStartSort)
         }
     )
 }
 
 @Composable
 private fun AutomationOverflow(
+    showRun: Boolean,
     onRun: () -> Unit,
     onStartRemove: () -> Unit,
     onStartSort: () -> Unit
@@ -532,7 +535,8 @@ private fun AutomationOverflow(
         Icon(Icons.Default.MoreVert, contentDescription = null)
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        DropdownMenuItem(
+        // "Run now" is master-only — automation does not execute on a client.
+        if (showRun) DropdownMenuItem(
             text = { Text(stringResource(R.string.run_automations)) },
             onClick = { expanded = false; onRun() }
         )

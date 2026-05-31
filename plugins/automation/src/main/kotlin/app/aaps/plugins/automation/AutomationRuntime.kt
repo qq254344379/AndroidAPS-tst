@@ -3,7 +3,6 @@ package app.aaps.plugins.automation
 import android.Manifest
 import android.content.Context
 import app.aaps.core.data.model.GlucoseUnit
-import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.aps.Loop
@@ -16,9 +15,8 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PermissionGroup
+import app.aaps.core.interfaces.plugin.PermissionProvider
 import app.aaps.core.interfaces.plugin.PluginBase
-import app.aaps.core.interfaces.plugin.PluginBaseWithPreferences
-import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.receivers.ReceiverStatusStore
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -32,8 +30,7 @@ import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
-import app.aaps.core.ui.compose.icons.IcPluginAutomation
-import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
+import app.aaps.core.ui.compose.ComposablePluginContent
 import app.aaps.core.utils.DeferredForegroundStart
 import app.aaps.plugins.automation.actions.Action
 import app.aaps.plugins.automation.actions.ActionAlarm
@@ -111,12 +108,23 @@ import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Standalone automation runtime — no longer a [PluginBase].
+ *
+ * Lifecycle: started once at app boot via [start] (from MainApp). Execution is master-only: the
+ * processing loop, location service and event processing run only when [Config.APS]. On a client
+ * (AAPSCLIENT) the runtime still loads/edits/persists/syncs definitions, but never executes.
+ *
+ * Permissions are surfaced through [PermissionProvider] (the non-plugin parallel to
+ * `PluginBase.requiredPermissions`) and are reported dynamically — only while an enabled event
+ * actually uses a location trigger.
+ */
 @Singleton
-class AutomationPlugin @Inject constructor(
+class AutomationRuntime @Inject constructor(
     private val injector: HasAndroidInjector,
-    aapsLogger: AAPSLogger,
-    rh: ResourceHelper,
-    preferences: Preferences,
+    private val aapsLogger: AAPSLogger,
+    private val rh: ResourceHelper,
+    private val preferences: Preferences,
     private val context: Context,
     private val fabricPrivacy: FabricPrivacy,
     private val loop: Loop,
@@ -129,42 +137,51 @@ class AutomationPlugin @Inject constructor(
     private val activePlugin: ActivePlugin,
     private val timerUtil: TimerUtil,
     private val receiverStatusStore: ReceiverStatusStore,
+    // UI-only dependencies, forwarded to the Compose screen via [composeContent].
     private val uel: UserEntryLogger,
     private val profileRepository: ProfileRepository,
     private val sceneApi: SceneAutomationApi
-) : PluginBaseWithPreferences(
-    pluginDescription = PluginDescription()
-        .mainType(PluginType.GENERAL)
-        .composeContent { plugin ->
-            AutomationComposeContent(
-                plugin = plugin as AutomationPlugin,
-                rxBus = rxBus,
-                aapsSchedulers = aapsSchedulers,
-                fabricPrivacy = fabricPrivacy,
-                injector = injector,
-                uel = uel,
-                profileRepository = profileRepository,
-                sceneApi = sceneApi
-            )
-        }
-        .icon(IcPluginAutomation)
-        .pluginName(R.string.automation)
-        .shortName(R.string.automation_short)
-        .showInList { config.APS }
-        .description(R.string.automation_description),
-    ownPreferences = listOf(AutomationStringKey::class.java),
-    aapsLogger, rh, preferences
-), Automation {
+) : Automation, PermissionProvider {
+
+    init {
+        // Register own preference keys (previously done by PluginBaseWithPreferences).
+        preferences.registerPreferences(AutomationStringKey::class.java)
+    }
 
     override val syncedKeys: List<NonPreferenceKey> = listOf(AutomationStringKey.AutomationEvents)
+
+    override val executionEnabled: Boolean get() = config.APS
 
     override fun reloadInternalState() {
         loadFromSP() // emits via notifyChanged() — both internal storeToSP debounce and external collectors see it.
     }
 
+    /**
+     * Build the Compose screen content. Replaces the old plugin-descriptor `composeContent` lambda;
+     * called from the standalone `AutomationList` nav route.
+     */
+    fun composeContent(): ComposablePluginContent =
+        AutomationComposeContent(
+            plugin = this,
+            rxBus = rxBus,
+            aapsSchedulers = aapsSchedulers,
+            fabricPrivacy = fabricPrivacy,
+            injector = injector,
+            uel = uel,
+            profileRepository = profileRepository,
+            sceneApi = sceneApi
+        )
+
     private var disposable: CompositeDisposable = CompositeDisposable()
     private var scope: CoroutineScope? = null
     private val deferredStart = DeferredForegroundStart()
+
+    /**
+     * Whether the location foreground service has actually been started (driven by
+     * [updateLocationService]). Volatile because it's written from the deferred main-thread start
+     * callback and read from the IO-dispatched reconcilers.
+     */
+    @Volatile private var locationServiceRunning = false
 
     private val automationEvents = ArrayList<AutomationEventObject>()
     var executionLog: MutableList<String> = ArrayList()
@@ -211,29 +228,63 @@ class AutomationPlugin @Inject constructor(
             "{\"title\":\"Low\",\"enabled\":true,\"trigger\":\"{\\\"type\\\":\\\"TriggerConnector\\\",\\\"data\\\":{\\\"connectorType\\\":\\\"AND\\\",\\\"triggerList\\\":[\\\"{\\\\\\\"type\\\\\\\":\\\\\\\"TriggerBg\\\\\\\",\\\\\\\"data\\\\\\\":{\\\\\\\"bg\\\\\\\":4,\\\\\\\"comparator\\\\\\\":\\\\\\\"IS_LESSER\\\\\\\",\\\\\\\"units\\\\\\\":\\\\\\\"mmol\\\\\\\"}}\\\",\\\"{\\\\\\\"type\\\\\\\":\\\\\\\"TriggerDelta\\\\\\\",\\\\\\\"data\\\\\\\":{\\\\\\\"value\\\\\\\":-0.1,\\\\\\\"units\\\\\\\":\\\\\\\"mmol\\\\\\\",\\\\\\\"deltaType\\\\\\\":\\\\\\\"DELTA\\\\\\\",\\\\\\\"comparator\\\\\\\":\\\\\\\"IS_LESSER\\\\\\\"}}\\\"]}}\",\"actions\":[\"{\\\"type\\\":\\\"ActionStartTempTarget\\\",\\\"data\\\":{\\\"value\\\":8,\\\"units\\\":\\\"mmol\\\",\\\"durationInMinutes\\\":60}}\"]}"
     }
 
-    override fun specialEnableCondition(): Boolean = !config.AAPSCLIENT
+    /**
+     * Location permission is required only on a master device that has at least one enabled event
+     * using a [TriggerLocation]. Queried by [ActivePlugin.collectMissingPermissions] on every
+     * collection pass, so the permission appears/disappears as the event set changes.
+     */
+    override fun requiredPermissions(): List<PermissionGroup> =
+        if (config.APS && usesLocationTrigger()) listOf(
+            PermissionGroup(
+                permissions = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                rationaleTitle = R.string.permission_location_title,
+                rationaleDescription = R.string.permission_location_description,
+            ),
+            PermissionGroup(
+                permissions = listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                rationaleTitle = R.string.permission_location_title,
+                rationaleDescription = R.string.permission_background_location_description,
+            ),
+        ) else emptyList()
 
-    override fun requiredPermissions(): List<PermissionGroup> = listOf(
-        PermissionGroup(
-            permissions = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-            rationaleTitle = R.string.permission_location_title,
-            rationaleDescription = R.string.permission_location_description,
-        ),
-        PermissionGroup(
-            permissions = listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-            rationaleTitle = R.string.permission_location_title,
-            rationaleDescription = R.string.permission_background_location_description,
-        ),
-    )
+    /** True when any enabled event's trigger tree contains a [TriggerLocation]. */
+    private fun usesLocationTrigger(): Boolean =
+        synchronized(this) { automationEvents.toList() }
+            .any { it.isEnabled && connectorHasLocation(it.trigger) }
 
-    override suspend fun onStart() {
-        deferredStart.start { locationServiceHelper.startService(context) }
+    private fun connectorHasLocation(connector: TriggerConnector): Boolean =
+        connector.list.any { t ->
+            when (t) {
+                is TriggerLocation  -> true
+                is TriggerConnector -> connectorHasLocation(t)
+                else                -> false
+            }
+        }
 
-        super.onStart()
+    /**
+     * Start the runtime. Called once from MainApp at boot. Definition load + persistence + tile
+     * refresh run on every flavor; the processing loop and location service are master-only.
+     */
+    fun start() {
+        if (scope != null) return // idempotent — already started; avoid leaking a second scope + duplicate subscriptions
         loadFromSP()
 
         val newScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope = newScope
+
+        // Persist on any config change. drop(1) skips the seed empty value; debounce coalesces
+        // rapid edit-flow mutations (toggle/move/save all back-to-back) into a single write.
+        @Suppress("OPT_IN_USAGE")
+        _events.drop(1).debounce(300).onEach { storeToSP() }.launchIn(newScope)
+        // Refresh the wear UserAction tile on any cache change — fires for NS-synced edits too,
+        // not only when the in-app Automation screen is open. debounce(300) prevents per-drag-tick
+        // tile storms during reorder.
+        @Suppress("OPT_IN_USAGE")
+        _events.drop(1).debounce(300).onEach { rxBus.send(EventWearUpdateTiles()) }.launchIn(newScope)
+
+        // Execution is master-only. On a client we only edit + sync definitions — no loop, no
+        // location service, no event processing.
+        if (!config.APS) return
 
         newScope.launch {
             delay(T.mins(1).msecs())
@@ -252,21 +303,21 @@ class AutomationPlugin @Inject constructor(
             .onEach { processActions() }
             .launchIn(newScope)
 
+        // Start/stop the location service reactively: run it only while an enabled event actually
+        // uses a location trigger (avoids a permanent foreground-service notification otherwise).
+        // No drop(1) — evaluate the freshly loaded state immediately.
+        _events.onEach { updateLocationService() }.launchIn(newScope)
+        // Re-create the service when the location provider mode changes — restart through the same
+        // deferred/flag-aware path (avoids a background startForegroundService crash on Android 12+).
         preferences.observe(StringKey.AutomationLocation).drop(1).onEach {
-            locationServiceHelper.stopService(context)
-            locationServiceHelper.startService(context)
+            if (locationServiceRunning) {
+                deferredStart.cancel()
+                locationServiceHelper.stopService(context)
+                locationServiceRunning = false
+            }
+            updateLocationService()
         }.launchIn(newScope)
-        // Persist on any config change. drop(1) skips the seed empty value; debounce coalesces
-        // rapid edit-flow mutations (toggle/move/save all back-to-back) into a single write.
-        @Suppress("OPT_IN_USAGE")
-        _events.drop(1).debounce(300).onEach { storeToSP() }.launchIn(newScope)
-        // Refresh the wear UserAction tile on any cache change — bound to the plugin scope so it
-        // fires for NS-synced edits too, not only when the in-app Automation screen is open (which
-        // is what previously gated the broadcast — and silently dropped tile refreshes on remote
-        // edits while the user was on a different screen). debounce(300) prevents per-drag-tick
-        // tile storms during reorder.
-        @Suppress("OPT_IN_USAGE")
-        _events.drop(1).debounce(300).onEach { rxBus.send(EventWearUpdateTiles()) }.launchIn(newScope)
+
         disposable += rxBus
             .toObservable(EventLocationChange::class.java)
             .observeOn(aapsSchedulers.io)
@@ -284,13 +335,31 @@ class AutomationPlugin @Inject constructor(
                        }, fabricPrivacy::logException)
     }
 
-    override suspend fun onStop() {
+    /** Tear down the runtime. Not called in production (always-on singleton); used by tests. */
+    fun stop() {
         scope?.cancel()
         scope = null
         disposable.clear()
         deferredStart.cancel()
-        locationServiceHelper.stopService(context)
-        super.onStop()
+        if (locationServiceRunning) {
+            locationServiceHelper.stopService(context)
+            locationServiceRunning = false
+        }
+    }
+
+    @Synchronized
+    private fun updateLocationService() {
+        val need = usesLocationTrigger()
+        if (need && !locationServiceRunning) {
+            // startService() returns false when the location permission isn't granted yet; only
+            // latch the flag once it actually started, so a later permission grant — reconciled on
+            // the next processActions tick — retries instead of leaving the service stuck off.
+            deferredStart.start { if (locationServiceHelper.startService(context)) locationServiceRunning = true }
+        } else if (!need && locationServiceRunning) {
+            deferredStart.cancel()
+            locationServiceHelper.stopService(context)
+            locationServiceRunning = false
+        }
     }
 
     private fun storeToSP() {
@@ -337,6 +406,10 @@ class AutomationPlugin @Inject constructor(
 
     internal suspend fun processActions() {
         if (!config.appInitialized) return
+        if (!config.APS) return // execution is master-only — clients never run automation
+        // Reconcile the location service each tick: retries a start that earlier no-op'd because the
+        // location permission wasn't granted yet, and stops it if the last location event was removed.
+        updateLocationService()
         /**
          * Changed to false if some condition prevents automation from running.
          * In this case only system automations are enabled.
@@ -395,6 +468,7 @@ class AutomationPlugin @Inject constructor(
     }
 
     override suspend fun processEvent(someEvent: AutomationEvent) {
+        if (!config.APS) return // execution is master-only — guards every UI entry point (wear, quick launch, scenes, run-now)
         val event = someEvent as AutomationEventObject
         if (event.canRun() && event.preconditionCanRun()) {
             val actions = event.actions
@@ -649,15 +723,4 @@ class AutomationPlugin @Inject constructor(
         }
         removeIfExists(event)
     }
-
-    override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
-        key = "automation_settings",
-        titleResId = app.aaps.core.ui.R.string.automation,
-        items = listOf(
-            StringKey.AutomationLocation
-
-        ),
-        icon = pluginDescription.icon
-    )
-
 }

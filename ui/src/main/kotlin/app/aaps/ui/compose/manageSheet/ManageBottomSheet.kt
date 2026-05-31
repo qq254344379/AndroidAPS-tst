@@ -13,9 +13,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.pump.actions.CustomAction
 import app.aaps.core.ui.compose.consumeOverscroll
-import app.aaps.core.ui.compose.rememberBringIntoViewOnExpand
 import app.aaps.core.ui.compose.icons.IcCancelExtendedBolus
 import app.aaps.core.ui.compose.icons.IcTbrCancel
 import app.aaps.core.ui.compose.navigation.ElementType
@@ -54,6 +53,7 @@ import app.aaps.core.ui.compose.navigation.color
 import app.aaps.core.ui.compose.navigation.descriptionResId
 import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.compose.navigation.labelResId
+import app.aaps.core.ui.compose.rememberBringIntoViewOnExpand
 import app.aaps.core.ui.R as CoreUiR
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -186,6 +186,14 @@ internal fun ManageBottomSheetContent(
             add { modifier ->
                 ManageGridItem(
                     elementType = ElementType.SCENE_MANAGEMENT,
+                    onDismiss = onDismiss,
+                    onNavigate = onNavigate,
+                    modifier = modifier
+                )
+            }
+            add { modifier ->
+                ManageGridItem(
+                    elementType = ElementType.AUTOMATION_MANAGEMENT,
                     onDismiss = onDismiss,
                     onNavigate = onNavigate,
                     modifier = modifier

@@ -56,6 +56,7 @@ enum class ElementType(
 
     // System
     AUTOMATION(category = ElementCategory.SYSTEM),
+    AUTOMATION_MANAGEMENT(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
     PUMP(category = ElementCategory.SYSTEM),
     SETTINGS(category = ElementCategory.SYSTEM, protection = ProtectionCheck.Protection.PREFERENCES),
     QUICK_LAUNCH_CONFIG(category = ElementCategory.SYSTEM, searchable = true),

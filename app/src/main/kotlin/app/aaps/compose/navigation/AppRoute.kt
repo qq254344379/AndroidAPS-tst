@@ -93,6 +93,7 @@ sealed class AppRoute(val route: String) {
         fun createRoute(pluginIndex: Int) = "plugin_content/$pluginIndex"
     }
 
+    data object AutomationList : AppRoute("automation_list")
     data object SceneList : AppRoute("scene_list")
     data object SceneWizard : AppRoute("scene_wizard?sceneId={sceneId}") {
 

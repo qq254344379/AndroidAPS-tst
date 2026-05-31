@@ -58,6 +58,7 @@ import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.preference.PluginPreferencesScreen
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.compose.siteRotation.SiteLocationPickerScreen
+import app.aaps.plugins.automation.AutomationRuntime
 import app.aaps.plugins.configuration.setupwizard.SWDefinition
 import app.aaps.plugins.configuration.setupwizard.SetupWizardScreen
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.compose.AuthorizedClientsScreen
@@ -146,6 +147,7 @@ fun NavGraphBuilder.appNavGraph(
     swDefinition: SWDefinition,
     rxBus: RxBus,
     activePlugin: ActivePlugin,
+    automationRuntime: AutomationRuntime,
     preferences: Preferences,
     rh: ResourceHelper,
     builtInSearchables: BuiltInSearchables,
@@ -505,6 +507,16 @@ fun NavGraphBuilder.appNavGraph(
         )
     }
 
+    composable(AppRoute.AutomationList.route) {
+        // remember so the content wrapper isn't re-allocated on every recomposition of the route.
+        val automationContent = remember { automationRuntime.composeContent() }
+        AutomationContentRoute(
+            navController = navController,
+            composeContent = automationContent,
+            withProtection = withProtection,
+        )
+    }
+
     composable(AppRoute.SceneList.route) {
         SceneListScreen(
             onNavigateToWizard = {
@@ -766,6 +778,71 @@ private fun PluginContentRoute(
                     }
                 )
             }
+        }
+    }
+}
+
+/**
+ * Host for the standalone Automation screen — mirrors [PluginContentRoute] but sources its content
+ * from [AutomationRuntime.composeContent] instead of a plugin, and opens the settings subscreen via
+ * the generic [AppRoute.PreferenceScreen] route. Automation does not use `LocalPluginNavigationRequest`.
+ */
+@Composable
+private fun AutomationContentRoute(
+    navController: NavHostController,
+    composeContent: ComposablePluginContent,
+    withProtection: (ProtectionCheck.Protection, () -> Unit) -> Unit,
+) {
+    val openSettings = {
+        withProtection(ElementType.SETTINGS.protection) {
+            navController.navigate(AppRoute.PreferenceScreen.createRoute("automation_settings"))
+        }
+    }
+    val navigateBack: @Composable () -> Unit = {
+        IconButton(onClick = { navController.safePopBackStack() }) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(app.aaps.core.ui.R.string.back)
+            )
+        }
+    }
+    val settingsAction: @Composable RowScope.() -> Unit = {
+        IconButton(onClick = openSettings) {
+            Icon(
+                Icons.Filled.Settings,
+                contentDescription = stringResource(app.aaps.core.ui.R.string.settings)
+            )
+        }
+    }
+    val title = stringResource(app.aaps.core.ui.R.string.automation)
+    var toolbarConfig by remember {
+        mutableStateOf(
+            ToolbarConfig(
+                title = title,
+                navigationIcon = navigateBack,
+                actions = settingsAction
+            )
+        )
+    }
+    Scaffold(
+        topBar = {
+            AapsTopAppBar(
+                title = { Text(toolbarConfig.title) },
+                navigationIcon = { toolbarConfig.navigationIcon() },
+                actions = { toolbarConfig.actions(this) }
+            )
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            composeContent.Render(
+                setToolbarConfig = { config -> toolbarConfig = config },
+                onNavigateBack = { navController.safePopBackStack() },
+                onSettings = openSettings
+            )
         }
     }
 }

@@ -16,6 +16,7 @@ import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.overview.LastBgData
 import app.aaps.core.interfaces.overview.OverviewData
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.plugin.PermissionProvider
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileStore
@@ -99,6 +100,7 @@ import dagger.Module
 import dagger.android.ContributesAndroidInjector
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.Multibinds
 
 @Module(
     includes = [
@@ -121,6 +123,11 @@ class ImplementationModule {
         @Binds fun bindPreferenceVisibilityContext(impl: PreferenceVisibilityContextImpl): PreferenceVisibilityContext
         @Binds fun bindFabricPrivacy(fabricPrivacyImpl: FabricPrivacyImpl): FabricPrivacy
         @Binds fun bindActivePlugin(pluginStore: PluginStore): ActivePlugin
+
+        // Runtime-permission sources for non-plugin features (e.g. standalone Automation).
+        // May be empty; contributors bind via @IntoSet PermissionProvider.
+        @Multibinds fun permissionProviders(): Set<PermissionProvider>
+
         @Binds fun bindLastBgData(lastBgData: LastBgDataImpl): LastBgData
         @Binds fun bindOverviewData(overviewData: OverviewDataImpl): OverviewData
         @Binds fun bindProcessedTbrEbData(pProcessedTbrEbData: ProcessedTbrEbDataImpl): ProcessedTbrEbData
