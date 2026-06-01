@@ -1,7 +1,7 @@
 package app.aaps.database
 
+import androidx.room.Transactor.SQLiteTransactionType
 import androidx.room.useWriterConnection
-import androidx.room.withTransaction
 import app.aaps.database.entities.APSResult
 import app.aaps.database.entities.Bolus
 import app.aaps.database.entities.BolusCalculatorResult
@@ -96,9 +96,11 @@ class AppRepository @Inject internal constructor(
      */
     suspend fun <T> runTransactionSuspend(transaction: Transaction<T>) {
         val changes = mutableListOf<DBEntry>()
-        database.withTransaction {
-            transaction.database = DelegatedAppDatabase(changes, database)
-            transaction.run()
+        database.useWriterConnection { connection ->
+            connection.withTransaction(SQLiteTransactionType.IMMEDIATE) {
+                transaction.database = DelegatedAppDatabase(changes, database)
+                transaction.run()
+            }
         }
         // Emit to RxJava (existing) - for backwards compatibility
         changeSubject.onNext(changes)
@@ -116,9 +118,11 @@ class AppRepository @Inject internal constructor(
      */
     suspend fun <T : Any> runTransactionForResultSuspend(transaction: Transaction<T>): T {
         val changes = mutableListOf<DBEntry>()
-        val result = database.withTransaction {
-            transaction.database = DelegatedAppDatabase(changes, database)
-            transaction.run()
+        val result = database.useWriterConnection { connection ->
+            connection.withTransaction(SQLiteTransactionType.IMMEDIATE) {
+                transaction.database = DelegatedAppDatabase(changes, database)
+                transaction.run()
+            }
         }
         // Emit to RxJava (existing) - for backwards compatibility
         changeSubject.onNext(changes)

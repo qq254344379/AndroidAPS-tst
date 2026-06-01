@@ -3,6 +3,7 @@ package app.aaps.database.dao
 import android.content.Context
 import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
+import androidx.room.useReaderConnection
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.core.app.ApplicationProvider
@@ -35,7 +36,6 @@ class StepsCountDaoTest {
     }
 
     private fun getTableNames(db: SupportSQLiteDatabase) = getDbObjects(db, "table")
-    private fun getIndexNames(db: SupportSQLiteDatabase) = getDbObjects(db, "index")
 
     private fun insertAndFind(database: AppDatabase) {
         val sc1 = createStepsCount()
@@ -66,17 +66,29 @@ class StepsCountDaoTest {
     }
 
     @Test
-    fun migrate_createsTableAndIndices() {
+    fun migrate_createsTableAndIndices() = runTest {
         val helper = MigrationTestHelper(
             InstrumentationRegistry.getInstrumentation(),
             AppDatabase::class.java
         )
         val startVersion = 24
+        // Seed a DB at the old schema version (still missing the stepsCount table)...
         val supportDb = helper.createDatabase(TEST_DB_NAME, startVersion)
         Assert.assertFalse(getTableNames(supportDb).contains(TABLE_STEPS_COUNT))
-        DatabaseModule().migrations.filter { m -> m.startVersion >= startVersion }.forEach { m -> m.migrate(supportDb) }
-        Assert.assertTrue(getTableNames(supportDb).contains(TABLE_STEPS_COUNT))
-        Assert.assertTrue(getIndexNames(supportDb).contains("index_stepsCount_timestamp"))
+        // ...then reopen through the production driver so the migration chain runs under the bundled driver.
+        Room.databaseBuilder(context, AppDatabase::class.java, TEST_DB_NAME)
+            .setDriver(BundledSQLiteDriver())
+            .addMigrations(*DatabaseModule().migrations)
+            .build().also { db ->
+                val objects = db.useReaderConnection { connection ->
+                    connection.usePrepared("SELECT type, name FROM sqlite_master") { statement ->
+                        buildList { while (statement.step()) add(statement.getText(0) to statement.getText(1)) }
+                    }
+                }
+                Assert.assertTrue(objects.contains("table" to TABLE_STEPS_COUNT))
+                Assert.assertTrue(objects.contains("index" to "index_stepsCount_timestamp"))
+                db.close()
+            }
     }
 
     @Test
