@@ -5,7 +5,10 @@ import androidx.annotation.VisibleForTesting
 import androidx.room.Room
 import androidx.room.RoomDatabase.Callback
 import androidx.room.migration.Migration
+import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.execSQL
 import app.aaps.database.AppDatabase
 import app.aaps.database.entities.TABLE_APS_RESULTS
 import app.aaps.database.entities.TABLE_BOLUSES
@@ -39,11 +42,18 @@ open class DatabaseModule {
     internal fun provideAppDatabase(context: Context, @DbFileName fileName: String) =
         Room
             .databaseBuilder(context, AppDatabase::class.java, fileName)
+            // Bundled SQLite driver: ships its own SQLite compiled from source instead of the
+            // device's framework SQLite. This is Google's recommended driver (consistent engine
+            // across all devices) and, crucially, it does not allocate the framework CursorWindow
+            // ashmem buffer, eliminating CursorWindowAllocationException on memory-constrained devices.
+            .setDriver(BundledSQLiteDriver())
             .addMigrations(*migrations)
             .addCallback(object : Callback() {
-                override fun onOpen(db: SupportSQLiteDatabase) {
-                    super.onOpen(db)
-                    createCustomIndexes(db)
+                // Driver mode delivers an SQLiteConnection (not a SupportSQLiteConnection), so the
+                // SupportSQLiteDatabase overload of onOpen never fires here — the connection overload must.
+                override fun onOpen(connection: SQLiteConnection) {
+                    super.onOpen(connection)
+                    createCustomIndexes(connection)
                 }
             })
             .fallbackToDestructiveMigration(false)
@@ -52,12 +62,12 @@ open class DatabaseModule {
     @Qualifier
     annotation class DbFileName
 
-    private fun createCustomIndexes(database: SupportSQLiteDatabase) {
-        database.execSQL("CREATE INDEX IF NOT EXISTS `index_temporaryBasals_end` ON `temporaryBasals` (`timestamp` + `duration`)")
-        database.execSQL("CREATE INDEX IF NOT EXISTS `index_extendedBoluses_end` ON `extendedBoluses` (`timestamp` + `duration`)")
-        database.execSQL("CREATE INDEX IF NOT EXISTS `index_temporaryTargets_end` ON `temporaryTargets` (`timestamp` + `duration`)")
-        database.execSQL("CREATE INDEX IF NOT EXISTS `index_carbs_end` ON `carbs` (`timestamp` + `duration`)")
-        database.execSQL("CREATE INDEX IF NOT EXISTS `index_runningModes_end` ON `runningModes` (`timestamp` + `duration`)")
+    private fun createCustomIndexes(connection: SQLiteConnection) {
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_temporaryBasals_end` ON `temporaryBasals` (`timestamp` + `duration`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_extendedBoluses_end` ON `extendedBoluses` (`timestamp` + `duration`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_temporaryTargets_end` ON `temporaryTargets` (`timestamp` + `duration`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_carbs_end` ON `carbs` (`timestamp` + `duration`)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS `index_runningModes_end` ON `runningModes` (`timestamp` + `duration`)")
     }
 
     private fun dropCustomIndexes(database: SupportSQLiteDatabase) {

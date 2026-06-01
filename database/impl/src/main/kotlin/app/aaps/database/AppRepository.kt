@@ -1,5 +1,6 @@
 package app.aaps.database
 
+import androidx.room.useWriterConnection
 import androidx.room.withTransaction
 import app.aaps.database.entities.APSResult
 import app.aaps.database.entities.Bolus
@@ -137,7 +138,7 @@ class AppRepository @Inject internal constructor(
     fun clearApsResults() = database.apsResultDao.deleteAllEntries()
 
     suspend fun cleanupDatabase(keepDays: Long, deleteTrackedChanges: Boolean): String {
-        database.openHelper.writableDatabase.query("PRAGMA optimize").use { }
+        database.useWriterConnection { connection -> connection.usePrepared("PRAGMA optimize") { it.step() } }
         val than = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(keepDays)
         val removed = mutableListOf<Pair<String, Int>>()
         removed.add(Pair("APSResult", database.apsResultDao.deleteOlderThan(than)))
@@ -195,7 +196,7 @@ class AppRepository @Inject internal constructor(
         // VACUUM is intentionally NOT run here. It is memory heavy and crashed (SQLITE_NOMEM) when
         // it overlapped live DB activity; defragmenting VACUUM now runs only at startup while the
         // DB is quiescent (see vacuumDatabase / MainApp.vacuumDatabaseIfDue).
-        database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { }
+        database.useWriterConnection { connection -> connection.usePrepared("PRAGMA wal_checkpoint(TRUNCATE)") { it.step() } }
         return ret.toString()
     }
 
@@ -206,10 +207,11 @@ class AppRepository @Inject internal constructor(
      * May throw if the DB is busy/locked; callers must handle that and treat only a clean return
      * as success.
      */
-    fun vacuumDatabase() {
-        val db = database.openHelper.writableDatabase
-        db.query("PRAGMA wal_checkpoint(TRUNCATE)").use { }
-        db.execSQL("VACUUM")
+    suspend fun vacuumDatabase() {
+        database.useWriterConnection { connection ->
+            connection.usePrepared("PRAGMA wal_checkpoint(TRUNCATE)") { it.step() }
+            connection.usePrepared("VACUUM") { it.step() }
+        }
     }
 
     suspend fun clearCachedTddData(from: Long) = database.totalDailyDoseDao.deleteNewerThan(from, InterfaceIDs.PumpType.CACHE)

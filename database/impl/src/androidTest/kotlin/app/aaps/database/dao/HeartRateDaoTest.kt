@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -21,7 +22,9 @@ class HeartRateDaoTest {
 
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private fun createDatabase() =
-        Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .setDriver(BundledSQLiteDriver())
+            .build()
 
     private fun getDbObjects(supportDb: SupportSQLiteDatabase, type: String): Set<String> {
         val names = mutableSetOf<String>()
@@ -83,6 +86,7 @@ class HeartRateDaoTest {
         Assert.assertFalse(getTableNames(supportDb).contains(TABLE_HEART_RATE))
         // Room.databaseBuilder will use the previously created db file that has version 22.
         Room.databaseBuilder(ApplicationProvider.getApplicationContext(), AppDatabase::class.java, TEST_DB_NAME)
+            .setDriver(BundledSQLiteDriver())
             .addMigrations(*DatabaseModule().migrations)
             .build().also { db ->
                 insertAndFind(db)
