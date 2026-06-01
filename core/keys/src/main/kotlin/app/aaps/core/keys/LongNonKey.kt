@@ -24,5 +24,6 @@ enum class LongNonKey(
     // orphan signals on settings/aaps docs whose srvModified predates the pairing (master
     // hasn't republished the roster yet). Not exported — re-pair regenerates this.
     NsClientControlPairedAt("nsclient_control_paired_at", 0L, exportable = false),
+    LastVacuumRun("last_vacuum_run", 0L),
 }
 

@@ -34,6 +34,7 @@ import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.collectResilient
 import app.aaps.core.interfaces.rx.events.EventAppExit
 import app.aaps.core.interfaces.rx.events.EventSWSyncStatus
 import app.aaps.core.interfaces.source.NSClientSource
@@ -275,13 +276,13 @@ class NSClientV3Plugin @Inject constructor(
                 }
         }
         rxBus.toFlow(EventAppExit::class.java)
-            .onEach {
+            .collectResilient(scope, aapsLogger, LTag.NSCLIENT) {
                 stopService()
                 WorkManager.getInstance(context).cancelUniqueWork(JOB_NAME)
-            }.launchIn(scope)
+            }
         receiverDelegate.connectivityStatusFlow
             .drop(1) // skip initial value
-            .onEach { ev ->
+            .collectResilient(scope, aapsLogger, LTag.NSCLIENT) { ev ->
                 nsClientRepository.addLog("● CONNECTIVITY", ev.blockingReason)
                 if (ev.connected && isAllowed) {
                     val service = nsClientV3Service
@@ -298,7 +299,7 @@ class NSClientV3Plugin @Inject constructor(
                     }
                 }
                 nsClientRepository.updateStatus(status)
-            }.launchIn(scope)
+            }
         val restartOnChange: suspend (Any) -> Unit = {
             stopService()
             nsAndroidClient = null
@@ -306,7 +307,6 @@ class NSClientV3Plugin @Inject constructor(
             nsClientRepository.updateUrl(preferences.get(StringKey.NsClientUrl))
         }
         nsClientRepository.updateUrl(preferences.get(StringKey.NsClientUrl))
-
         // Re-run watchdog: when WorkManager's unique job goes idle, fire any pending follow-up.
         // Replaces the old `forceNew=true` Thread.sleep(5000) busy-wait. A loop subsumes an
         // upload (DataSyncWorker is the loop's last step), so loop wins if both are pending.
@@ -330,20 +330,22 @@ class NSClientV3Plugin @Inject constructor(
                 .launchIn(scope)
         }
 
-        preferences.observe(StringKey.NsClientAccessToken).drop(1).onEach(restartOnChange).launchIn(scope)
-        preferences.observe(StringKey.NsClientUrl).drop(1).onEach(restartOnChange).launchIn(scope)
-        preferences.observe(BooleanKey.NsClient3UseWs).drop(1).onEach(restartOnChange).launchIn(scope)
-        preferences.observe(NsclientBooleanKey.NsPaused).drop(1).onEach(restartOnChange).launchIn(scope)
-        preferences.observe(BooleanKey.NsClientNotificationsFromAlarms).drop(1).onEach(restartOnChange).launchIn(scope)
-        preferences.observe(BooleanKey.NsClientNotificationsFromAnnouncements).drop(1).onEach(restartOnChange).launchIn(scope)
+        // Resilient collection (from dev). forceNew args dropped: this branch replaced the
+        // forceNew mechanism with the WorkManager re-run watchdog above (see executeUpload).
+        preferences.observe(StringKey.NsClientAccessToken).drop(1).collectResilient(scope, aapsLogger, LTag.NSCLIENT, block = restartOnChange)
+        preferences.observe(StringKey.NsClientUrl).drop(1).collectResilient(scope, aapsLogger, LTag.NSCLIENT, block = restartOnChange)
+        preferences.observe(BooleanKey.NsClient3UseWs).drop(1).collectResilient(scope, aapsLogger, LTag.NSCLIENT, block = restartOnChange)
+        preferences.observe(NsclientBooleanKey.NsPaused).drop(1).collectResilient(scope, aapsLogger, LTag.NSCLIENT, block = restartOnChange)
+        preferences.observe(BooleanKey.NsClientNotificationsFromAlarms).drop(1).collectResilient(scope, aapsLogger, LTag.NSCLIENT, block = restartOnChange)
+        preferences.observe(BooleanKey.NsClientNotificationsFromAnnouncements).drop(1).collectResilient(scope, aapsLogger, LTag.NSCLIENT, block = restartOnChange)
         preferences.observe(LongNonKey.LocalProfileLastChange).drop(1)
-            .onEach { executeUpload("PROFILE_CHANGE") }.launchIn(scope)
+            .collectResilient(scope, aapsLogger, LTag.NSCLIENT) { executeUpload("PROFILE_CHANGE") }
         persistenceLayer.observeAnyChange()
             // HR/SC writes come from the watch; this plugin doesn't upload them — skip to avoid reconnect-flush storm.
             .filter { types -> types.any { it != HR::class && it != SC::class } }
-            .onEach { types -> executeUpload("DB_CHANGED(${types.joinToString { it.simpleName ?: "?" }})") }.launchIn(scope)
+            .collectResilient(scope, aapsLogger, LTag.NSCLIENT) { types -> executeUpload("DB_CHANGED(${types.joinToString { it.simpleName ?: "?" }})") }
         profileRepository.profile.drop(1)
-            .onEach { executeUpload("profileRepository.profile changed") }.launchIn(scope)
+            .collectResilient(scope, aapsLogger, LTag.NSCLIENT) { executeUpload("profileRepository.profile changed") }
 
         runLoop = Runnable {
             var refreshInterval = T.mins(5).msecs()
@@ -462,7 +464,7 @@ class NSClientV3Plugin @Inject constructor(
     }
 
     override fun resend(reason: String) {
-        // If WS is enabled, download is triggered by changes in NS. Thus uploadOnly
+        // If WS is enabled, download is triggered by changes in NS. Thus, uploadOnly
         // Exception is after reset to full sync (initialLoadFinished == false), where
         // older data must be loaded directly and then continue over WS
         if (preferences.get(BooleanKey.NsClient3UseWs) && initialLoadFinished)
