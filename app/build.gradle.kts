@@ -224,6 +224,9 @@ dependencies {
     testImplementation(project(":shared:tests"))
     androidTestImplementation(project(":shared:tests"))
     androidTestImplementation(libs.androidx.test.rules)
+    // Initializes WorkManager for instrumented tests (BaseTestApp), since the production
+    // Configuration.Provider/manifest initializer don't apply under the Hilt test application.
+    androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(libs.org.skyscreamer.jsonassert)
     androidTestImplementation(libs.kotlinx.coroutines.test)
     // Rhino is needed by the openAPS adapter test fixtures under app/src/androidTest
