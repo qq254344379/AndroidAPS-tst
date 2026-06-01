@@ -4,6 +4,7 @@ import androidx.annotation.VisibleForTesting
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.CA
+import app.aaps.core.data.model.CAL
 import app.aaps.core.data.model.DS
 import app.aaps.core.data.model.EB
 import app.aaps.core.data.model.EPS
@@ -52,6 +53,7 @@ class StoreDataForDbImpl @Inject constructor(
 ) : StoreDataForDb {
 
     private val glucoseValues: MutableList<GV> = mutableListOf()
+    private val calibrationEntries: MutableList<CAL> = mutableListOf()
     private val boluses: MutableList<BS> = mutableListOf()
     private val carbs: MutableList<CA> = mutableListOf()
     private val temporaryTargets: MutableList<TT> = mutableListOf()
@@ -65,6 +67,7 @@ class StoreDataForDbImpl @Inject constructor(
     private val foods: MutableList<FD> = mutableListOf()
 
     @VisibleForTesting val nsIdGlucoseValues: MutableList<GV> = mutableListOf()
+    @VisibleForTesting val nsIdCalibrationEntries: MutableList<CAL> = mutableListOf()
     @VisibleForTesting val nsIdBoluses: MutableList<BS> = mutableListOf()
     @VisibleForTesting val nsIdCarbs: MutableList<CA> = mutableListOf()
     @VisibleForTesting val nsIdTemporaryTargets: MutableList<TT> = mutableListOf()
@@ -94,6 +97,7 @@ class StoreDataForDbImpl @Inject constructor(
 
     // Per-pipeline mutexes so BG ingest can run while a long treatments sync is in progress.
     private val bgMutex = Mutex()
+    private val calibrationMutex = Mutex()
     private val treatmentsMutex = Mutex()
     private val nsIdMutex = Mutex()
 
@@ -101,6 +105,7 @@ class StoreDataForDbImpl @Inject constructor(
     // of N WS arrivals collapses into 1 (or 2) collector runs instead of queueing N
     // coroutines on the mutex. The buffer is shared, so the single drain catches all.
     private val glucoseRequests = Channel<Unit>(Channel.CONFLATED)
+    private val calibrationRequests = Channel<Unit>(Channel.CONFLATED)
     private val treatmentsRequests = Channel<Boolean>(Channel.CONFLATED)
     private val foodsRequests = Channel<Unit>(Channel.CONFLATED)
     private val deletedTreatmentsRequests = Channel<Unit>(Channel.CONFLATED)
@@ -108,17 +113,36 @@ class StoreDataForDbImpl @Inject constructor(
 
     init {
         appScope.launch { glucoseRequests.consumeEach { storeGlucoseValuesToDb() } }
+        appScope.launch { calibrationRequests.consumeEach { storeCalibrationEntriesToDb() } }
         appScope.launch { treatmentsRequests.consumeEach { fullSync -> storeTreatmentsToDb(fullSync) } }
         appScope.launch { foodsRequests.consumeEach { storeFoodsToDb() } }
         appScope.launch { deletedTreatmentsRequests.consumeEach { updateDeletedTreatmentsInDb() } }
         appScope.launch { deletedGlucoseRequests.consumeEach { updateDeletedGlucoseValuesInDb() } }
     }
 
-    override fun requestStoreGlucoseValues() { glucoseRequests.trySend(Unit) }
-    override fun requestStoreTreatments(fullSync: Boolean) { treatmentsRequests.trySend(fullSync) }
-    override fun requestStoreFoods() { foodsRequests.trySend(Unit) }
-    override fun requestUpdateDeletedTreatments() { deletedTreatmentsRequests.trySend(Unit) }
-    override fun requestUpdateDeletedGlucoseValues() { deletedGlucoseRequests.trySend(Unit) }
+    override fun requestStoreGlucoseValues() {
+        glucoseRequests.trySend(Unit)
+    }
+
+    override fun requestStoreCalibrationEntries() {
+        calibrationRequests.trySend(Unit)
+    }
+
+    override fun requestStoreTreatments(fullSync: Boolean) {
+        treatmentsRequests.trySend(fullSync)
+    }
+
+    override fun requestStoreFoods() {
+        foodsRequests.trySend(Unit)
+    }
+
+    override fun requestUpdateDeletedTreatments() {
+        deletedTreatmentsRequests.trySend(Unit)
+    }
+
+    override fun requestUpdateDeletedGlucoseValues() {
+        deletedGlucoseRequests.trySend(Unit)
+    }
 
     fun <T> HashMap<T, Int>.add(key: T, amount: Int) = synchronized(this) {
         if (containsKey(key)) merge(key, amount, Int::plus)
@@ -147,6 +171,19 @@ class StoreDataForDbImpl @Inject constructor(
             delay(pause)
         }
         nsClientRepository.addLog("● DONE PROCESSING BG", "")
+    }
+
+    override suspend fun storeCalibrationEntriesToDb() {
+        calibrationMutex.withLock {
+            snapshotAndClear(calibrationEntries)?.chunked(chunk)?.forEach { batch ->
+                val result = persistenceLayer.syncNsCalibrationEntries(batch.toMutableList())
+                updated.add(CAL::class.java.simpleName, result.updated.size)
+                inserted.add(CAL::class.java.simpleName, result.inserted.size)
+                invalidated.add(CAL::class.java.simpleName, result.invalidated.size)
+                sendLog("CalibrationEntry", CAL::class.java.simpleName)
+                delay(pause)
+            }
+        }
     }
 
     override suspend fun storeFoodsToDb() = treatmentsMutex.withLock {
@@ -294,6 +331,11 @@ class StoreDataForDbImpl @Inject constructor(
             nsIdUpdated.add(GV::class.java.simpleName, result.updatedNsId.size)
         }
 
+        snapshotAndClear(nsIdCalibrationEntries)?.let { batch ->
+            val result = persistenceLayer.updateCalibrationEntriesNsIds(batch)
+            nsIdUpdated.add(CAL::class.java.simpleName, result.updatedNsId.size)
+        }
+
         snapshotAndClear(nsIdFoods)?.let { batch ->
             val result = persistenceLayer.updateFoodsNsIds(batch)
             nsIdUpdated.add(FD::class.java.simpleName, result.updatedNsId.size)
@@ -430,6 +472,7 @@ class StoreDataForDbImpl @Inject constructor(
     }
 
     override fun addToGlucoseValues(payload: MutableList<GV>): Boolean = synchronized(glucoseValues) { glucoseValues.addAll(payload) }
+    override fun addToCalibrationEntries(payload: MutableList<CAL>): Boolean = synchronized(calibrationEntries) { calibrationEntries.addAll(payload) }
     override fun addToBoluses(payload: BS): Boolean = synchronized(boluses) { boluses.add(payload) }
     override fun addToCarbs(payload: CA): Boolean = synchronized(carbs) { carbs.add(payload) }
     override fun addToTemporaryTargets(payload: TT): Boolean = synchronized(temporaryTargets) { temporaryTargets.add(payload) }
@@ -442,6 +485,7 @@ class StoreDataForDbImpl @Inject constructor(
     override fun addToRunningModes(payload: RM): Boolean = synchronized(runningModes) { runningModes.add(payload) }
     override fun addToFoods(payload: MutableList<FD>): Boolean = synchronized(foods) { foods.addAll(payload) }
     override fun addToNsIdGlucoseValues(payload: GV): Boolean = synchronized(nsIdGlucoseValues) { nsIdGlucoseValues.add(payload) }
+    override fun addToNsIdCalibrationEntries(payload: CAL): Boolean = synchronized(nsIdCalibrationEntries) { nsIdCalibrationEntries.add(payload) }
     override fun addToNsIdBoluses(payload: BS): Boolean = synchronized(nsIdBoluses) { nsIdBoluses.add(payload) }
     override fun addToNsIdCarbs(payload: CA): Boolean = synchronized(nsIdCarbs) { nsIdCarbs.add(payload) }
     override fun addToNsIdTemporaryTargets(payload: TT): Boolean = synchronized(nsIdTemporaryTargets) { nsIdTemporaryTargets.add(payload) }

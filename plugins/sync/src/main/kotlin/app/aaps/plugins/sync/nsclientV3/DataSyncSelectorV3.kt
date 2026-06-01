@@ -47,6 +47,7 @@ class DataSyncSelectorV3 @Inject constructor(
 // NSCv3 doesn't support food update
 //        var foodsRemaining: Long = -1L,
         var gvsRemaining: Long = -1L,
+        var calsRemaining: Long = -1L,
         var tesRemaining: Long = -1L,
         var dssRemaining: Long = -1L,
         var tbrsRemaining: Long = -1L,
@@ -64,6 +65,7 @@ class DataSyncSelectorV3 @Inject constructor(
 // NSCv3 doesn't support food update
 //                foodsRemaining +
                 gvsRemaining +
+                calsRemaining +
                 tesRemaining +
                 dssRemaining +
                 tbrsRemaining +
@@ -90,6 +92,7 @@ class DataSyncSelectorV3 @Inject constructor(
 // NSCv3 doesn't support food update
 //            queueCounter.foodsRemaining = (persistenceLayer.getLastFoodId() ?: 0L) - preferences.get(NsclientLongKey.FoodLastSyncedId)
             queueCounter.gvsRemaining = (persistenceLayer.getLastGlucoseValueId() ?: 0L) - preferences.get(NsclientLongKey.GlucoseValueLastSyncedId)
+            queueCounter.calsRemaining = (persistenceLayer.getLastCalibrationEntryId() ?: 0L) - preferences.get(NsclientLongKey.CalibrationEntryLastSyncedId)
             queueCounter.tesRemaining = (persistenceLayer.getLastTherapyEventId() ?: 0L) - preferences.get(NsclientLongKey.TherapyEventLastSyncedId)
             queueCounter.dssRemaining = (persistenceLayer.getLastDeviceStatusId() ?: 0L) - preferences.get(NsclientLongKey.DeviceStatusLastSyncedId)
             queueCounter.tbrsRemaining = (persistenceLayer.getLastTemporaryBasalId() ?: 0L) - preferences.get(NsclientLongKey.TemporaryBasalLastSyncedId)
@@ -99,6 +102,7 @@ class DataSyncSelectorV3 @Inject constructor(
             queueCounter.rmsRemaining = (persistenceLayer.getLastRunningModeId() ?: 0L) - preferences.get(NsclientLongKey.RunningModeLastSyncedId)
             nsClientRepository.updateQueueSize(queueCounter.size())
             processChangedGlucoseValues()
+            processChangedCalibrationEntries()
             processChangedBoluses()
             processChangedCarbs()
             processChangedBolusCalculatorResults()
@@ -121,6 +125,7 @@ class DataSyncSelectorV3 @Inject constructor(
 
     override suspend fun resetToNextFullSync() {
         preferences.remove(NsclientLongKey.GlucoseValueLastSyncedId)
+        preferences.remove(NsclientLongKey.CalibrationEntryLastSyncedId)
         preferences.remove(NsclientLongKey.TemporaryBasalLastSyncedId)
         preferences.remove(NsclientLongKey.TemporaryTargetLastSyncedId)
         preferences.remove(NsclientLongKey.ExtendedBolusLastSyncedId)
@@ -149,7 +154,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedBoluses() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.BolusLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -205,7 +213,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedCarbs() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.CarbsLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -261,7 +272,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedBolusCalculatorResults() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.BolusCalculatorLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -325,7 +339,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedTempTargets() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.TemporaryTargetLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -425,7 +442,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedGlucoseValues() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.GlucoseValueLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -457,6 +477,7 @@ class DataSyncSelectorV3 @Inject constructor(
                             cont = nsClientV3Plugin.get().nsAdd("entries", DataSyncSelector.PairGlucoseValue(gv.first, gv.second.id), "$startId/$lastDbId") == true
                             if (cont) added++
                         }
+
                         else                                                             -> {  //  gv.first.interfaceIDs.nightscoutId != null
                             cont = nsClientV3Plugin.get().nsUpdate("entries", DataSyncSelector.PairGlucoseValue(gv.first, gv.second.id), "$startId/$lastDbId") == true
                             if (cont) updated++
@@ -472,6 +493,64 @@ class DataSyncSelectorV3 @Inject constructor(
             aapsLogger.info(LTag.NSCLIENT, "GlucoseValue: from=$firstId to=$lastId ignored=$ignored added=$added updated=$updated")
     }
 
+    fun confirmLastCalibrationEntryIdIfGreater(lastSynced: Long) {
+        if (lastSynced > preferences.get(NsclientLongKey.CalibrationEntryLastSyncedId)) {
+            preferences.put(NsclientLongKey.CalibrationEntryLastSyncedId, lastSynced)
+        }
+    }
+
+    @OpenForTesting
+    suspend fun processChangedCalibrationEntries() {
+        var cont = true
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
+        val firstId = preferences.get(NsclientLongKey.CalibrationEntryLastSyncedId)
+        while (cont) {
+            if (isPaused) return
+            val lastDbId = persistenceLayer.getLastCalibrationEntryId() ?: 0L
+            var startId = preferences.get(NsclientLongKey.CalibrationEntryLastSyncedId)
+            if (startId > lastDbId) {
+                aapsLogger.info(LTag.NSCLIENT, "Resetting startId: $startId lastDbId: $lastDbId")
+                preferences.put(NsclientLongKey.CalibrationEntryLastSyncedId, 0)
+                startId = 0
+            }
+            queueCounter.calsRemaining = lastDbId - startId
+            nsClientRepository.updateQueueSize(queueCounter.size())
+            persistenceLayer.getNextSyncElementCalibrationEntry(startId)?.let { cal ->
+                lastId = cal.second.id
+                when {
+                    // new record with existing NS id => must be coming from NS => ignore
+                    cal.first.id == cal.second.id && cal.first.ids.nightscoutId != null -> {
+                        aapsLogger.debug(LTag.NSCLIENT_SYNC, "Ignoring CalibrationEntry. Loaded from NS: ${cal.second.id}")
+                        ignored++
+                    }
+                    // only NsId changed, no need to upload
+                    cal.first.onlyNsIdAdded(cal.second)                                 -> {
+                        aapsLogger.debug(LTag.NSCLIENT_SYNC, "Ignoring CalibrationEntry. Only NS id changed: ${cal.second.id}")
+                        ignored++
+                    }
+                    // without nsId = create new
+                    cal.first.ids.nightscoutId == null                                  -> {
+                        cont = nsClientV3Plugin.get().nsAdd("entries", DataSyncSelector.PairCalibrationEntry(cal.first, cal.second.id), "$startId/$lastDbId") == true
+                        if (cont) added++
+                    }
+
+                    else                                                                -> {  //  cal.first.ids.nightscoutId != null
+                        cont = nsClientV3Plugin.get().nsUpdate("entries", DataSyncSelector.PairCalibrationEntry(cal.first, cal.second.id), "$startId/$lastDbId") == true
+                        if (cont) updated++
+                    }
+                }
+                if (cont) confirmLastCalibrationEntryIdIfGreater(cal.second.id)
+            } ?: run {
+                cont = false
+            }
+        }
+        if (ignored + added + updated > 0)
+            aapsLogger.info(LTag.NSCLIENT, "CalibrationEntry: from=$firstId to=$lastId ignored=$ignored added=$added updated=$updated")
+    }
+
     @OpenForTesting
     fun confirmLastTherapyEventIdIfGreater(lastSynced: Long) {
         if (lastSynced > preferences.get(NsclientLongKey.TherapyEventLastSyncedId)) {
@@ -482,7 +561,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedTherapyEvents() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.TherapyEventLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -538,7 +620,8 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedDeviceStatuses() {
         var cont = true
-        var added = 0; var lastId = 0L
+        var added = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.DeviceStatusLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -554,7 +637,9 @@ class DataSyncSelectorV3 @Inject constructor(
             persistenceLayer.getNextSyncElementDeviceStatus(startId)?.let { deviceStatus ->
                 lastId = deviceStatus.id
                 cont = nsClientV3Plugin.get().nsAdd("devicestatus", DataSyncSelector.PairDeviceStatus(deviceStatus, lastDbId), "$startId/$lastDbId") == true
-                if (cont) { added++; confirmLastDeviceStatusIdIfGreater(deviceStatus.id) }
+                if (cont) {
+                    added++; confirmLastDeviceStatusIdIfGreater(deviceStatus.id)
+                }
                 // with nsId = ignore
             } ?: run {
                 cont = false
@@ -574,7 +659,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedTemporaryBasals() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.TemporaryBasalLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -631,7 +719,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedExtendedBoluses() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.ExtendedBolusLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -693,7 +784,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedProfileSwitches() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.ProfileSwitchLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -749,7 +843,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedEffectiveProfileSwitches() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.EffectiveProfileSwitchLastSyncedId)
         while (cont) {
             if (isPaused) return
@@ -805,7 +902,10 @@ class DataSyncSelectorV3 @Inject constructor(
     @OpenForTesting
     suspend fun processChangedRunningModes() {
         var cont = true
-        var ignored = 0; var added = 0; var updated = 0; var lastId = 0L
+        var ignored = 0
+        var added = 0
+        var updated = 0
+        var lastId = 0L
         val firstId = preferences.get(NsclientLongKey.RunningModeLastSyncedId)
         while (cont) {
             if (isPaused) return

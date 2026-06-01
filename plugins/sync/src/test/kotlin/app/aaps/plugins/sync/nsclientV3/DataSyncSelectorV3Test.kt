@@ -240,7 +240,7 @@ class DataSyncSelectorV3Test : TestBaseWithProfile() {
     @Test
     fun queueSizeTest() {
         // All counters initialized to -1, so total should be -13 (13 fields)
-        assertThat(sut.queueSize()).isEqualTo(-12)
+        assertThat(sut.queueSize()).isEqualTo(-13)
     }
 
     @Test

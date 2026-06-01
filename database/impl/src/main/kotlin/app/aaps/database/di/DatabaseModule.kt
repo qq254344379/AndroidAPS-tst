@@ -9,15 +9,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import app.aaps.database.AppDatabase
 import app.aaps.database.entities.TABLE_APS_RESULTS
 import app.aaps.database.entities.TABLE_BOLUSES
+import app.aaps.database.entities.TABLE_CALIBRATION_ENTRIES
 import app.aaps.database.entities.TABLE_EFFECTIVE_PROFILE_SWITCHES
 import app.aaps.database.entities.TABLE_HEART_RATE
-import app.aaps.database.entities.TABLE_TOTAL_DAILY_DOSES
 import app.aaps.database.entities.TABLE_PREFERENCE_CHANGES
 import app.aaps.database.entities.TABLE_PROFILE_SWITCHES
 import app.aaps.database.entities.TABLE_RUNNING_MODE
 import app.aaps.database.entities.TABLE_STEPS_COUNT
 import app.aaps.database.entities.TABLE_TEMPORARY_BASALS
 import app.aaps.database.entities.TABLE_THERAPY_EVENTS
+import app.aaps.database.entities.TABLE_TOTAL_DAILY_DOSES
 import app.aaps.database.entities.TABLE_USER_ENTRY
 import dagger.Module
 import dagger.Provides
@@ -319,7 +320,36 @@ open class DatabaseModule {
         }
     }
 
+    internal val migration34to35 = object : Migration(34, 35) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `$TABLE_CALIBRATION_ENTRIES`")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `$TABLE_CALIBRATION_ENTRIES` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `version` INTEGER NOT NULL, `dateCreated` INTEGER NOT NULL, `isValid` INTEGER NOT NULL, `referenceId` INTEGER, `timestamp` INTEGER NOT NULL, `utcOffset` INTEGER NOT NULL, `fingerstickMgdl` REAL NOT NULL, `sensorMgdlAtPairing` REAL NOT NULL, `nightscoutSystemId` TEXT, `nightscoutId` TEXT, `pumpType` TEXT, `pumpSerial` TEXT, `temporaryId` INTEGER, `pumpId` INTEGER, `startId` INTEGER, `endId` INTEGER, FOREIGN KEY(`referenceId`) REFERENCES `$TABLE_CALIBRATION_ENTRIES`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calibrationEntries_nightscoutId` ON `$TABLE_CALIBRATION_ENTRIES` (`nightscoutId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calibrationEntries_referenceId` ON `$TABLE_CALIBRATION_ENTRIES` (`referenceId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calibrationEntries_timestamp` ON `$TABLE_CALIBRATION_ENTRIES` (`timestamp`)")
+            // Custom indexes must be dropped on migration to pass room schema checking after upgrade
+            dropCustomIndexes(db)
+        }
+    }
+
     /** List of all migrations for easy reply in tests. */
     @VisibleForTesting
-    internal val migrations = arrayOf(migration20to21, migration21to22, migration22to23, migration23to24, migration24to25, migration25to26, migration26to27, migration27to28, migration28to29, migration29to30, migration30to31, migration31to32, migration32to33, migration33to34)
+    internal val migrations =
+        arrayOf(
+            migration20to21,
+            migration21to22,
+            migration22to23,
+            migration23to24,
+            migration24to25,
+            migration25to26,
+            migration26to27,
+            migration27to28,
+            migration28to29,
+            migration29to30,
+            migration30to31,
+            migration31to32,
+            migration32to33,
+            migration33to34,
+            migration34to35
+        )
 }

@@ -20,6 +20,7 @@ data class NSRunningConfiguration(
     val aps: String? = null,
     val sensitivity: Int? = null,
     val smoothing: String? = null,
+    val calibration: String? = null,
     val insulinConfiguration: JsonObject? = null,
     val apsConfiguration: JsonObject? = null,
     val sensitivityConfiguration: JsonObject? = null,

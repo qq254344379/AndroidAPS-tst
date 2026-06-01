@@ -7,6 +7,7 @@ import app.aaps.core.interfaces.aps.APS
 import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.Sensitivity
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.calibration.Calibration
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.configuration.ConfigExportImport
@@ -76,6 +77,7 @@ class RunningConfigurationImpl @Inject constructor(
             val sensitivityInterface = activePlugin.activeSensitivity
             val safetyInterface = activePlugin.activeSafety
             val smoothingInterface = activePlugin.activeSmoothing
+            val calibrationInterface = activePlugin.activeCalibration
             // APS interface is needed for dynamic sensitivity calculation
             val apsInterface = activePlugin.activeAPS
 
@@ -88,6 +90,7 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("sensitivity", sensitivityInterface.id.value)
             json.put("sensitivityConfiguration", JSONObject(buildFromPlugin(sensitivityInterface).toString()))
             json.put("smoothing", smoothingInterface.javaClass.simpleName)
+            json.put("calibration", calibrationInterface.javaClass.simpleName)
             json.put("overviewConfiguration", JSONObject(buildOverviewConfiguration().toString()))
             json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
             json.put("quickWizardConfiguration", JSONObject(buildFromPlugin(quickWizard).toString()))
@@ -198,6 +201,18 @@ class RunningConfigurationImpl @Inject constructor(
                     if (!p.isEnabled()) {
                         aapsLogger.debug(LTag.CORE, "Changing smoothing plugin to ${smoothingPlugin.javaClass.simpleName}")
                         configBuilder.performPluginSwitch(p, true, PluginType.SMOOTHING)
+                    }
+                }
+            }
+        }
+
+        configuration.calibration?.let {
+            for (p in activePlugin.getSpecificPluginsListByInterface(Calibration::class.java)) {
+                val calibrationPlugin = p as Calibration
+                if (calibrationPlugin.javaClass.simpleName == it) {
+                    if (!p.isEnabled()) {
+                        aapsLogger.debug(LTag.CORE, "Changing calibration plugin to ${calibrationPlugin.javaClass.simpleName}")
+                        configBuilder.performPluginSwitch(p, true, PluginType.CALIBRATION)
                     }
                 }
             }

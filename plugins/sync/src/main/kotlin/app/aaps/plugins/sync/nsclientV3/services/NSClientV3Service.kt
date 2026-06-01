@@ -24,6 +24,7 @@ import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
+import app.aaps.core.nssdk.mapper.toCalibrationMbg
 import app.aaps.core.nssdk.mapper.toNSDeviceStatus
 import app.aaps.core.nssdk.mapper.toNSFood
 import app.aaps.core.nssdk.mapper.toNSSgvV3
@@ -262,9 +263,17 @@ class NSClientV3Service : DaggerService() {
         }
         when (collection) {
             "devicestatus" -> docString.toNSDeviceStatus().let { nsDeviceStatusHandler.handleNewData(arrayOf(it)) }
-            "entries"      -> docString.toNSSgvV3()?.let {
-                nsIncomingDataProcessor.processSgvs(listOf(it), doFullSync = false)
-                storeDataForDb.requestStoreGlucoseValues()
+
+            "entries"      -> {
+                docString.toNSSgvV3()?.let {
+                    nsIncomingDataProcessor.processSgvs(listOf(it), doFullSync = false)
+                    storeDataForDb.requestStoreGlucoseValues()
+                }
+                // Same entries collection also carries AAPS calibration mbg entries (marked).
+                docString.toCalibrationMbg()?.let {
+                    nsIncomingDataProcessor.processCalibrations(listOf(it), doFullSync = false)
+                    storeDataForDb.requestStoreCalibrationEntries()
+                }
             }
 
             "profile"      ->

@@ -54,8 +54,8 @@ import app.aaps.core.nssdk.remotemodel.LastModified
 import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
-import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.AutomationDefinitionsClientPublisher
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolus
@@ -65,6 +65,7 @@ import app.aaps.plugins.sync.nsclientV3.extensions.toNSDeviceStatus
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSEffectiveProfileSwitch
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSExtendedBolus
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSFood
+import app.aaps.plugins.sync.nsclientV3.extensions.toNSMbgV3
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSOfflineEvent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSProfileSwitch
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSSvgV3
@@ -423,7 +424,9 @@ class NSClientV3Plugin @Inject constructor(
     // push and the catch-up worker land in the same handler, so a single update site suffices.
     private val _lastDevicestatusReceivedAt = MutableStateFlow(0L)
     override val lastDevicestatusReceivedAt: StateFlow<Long> = _lastDevicestatusReceivedAt.asStateFlow()
-    internal fun bumpDevicestatusHeartbeat(now: Long) { _lastDevicestatusReceivedAt.value = now }
+    internal fun bumpDevicestatusHeartbeat(now: Long) {
+        _lastDevicestatusReceivedAt.value = now
+    }
 
     private fun setClient() {
         if (nsAndroidClient == null)
@@ -630,6 +633,51 @@ class NSClientV3Plugin @Inject constructor(
         return false
     }
 
+    private suspend fun dbOperationCalibrations(collection: String = "entries", dataPair: DataSyncSelector.PairCalibrationEntry, progress: String, operation: Operation): Boolean {
+        val call = when (operation) {
+            Operation.CREATE -> nsAndroidClient?.let { return@let it::createCalibration }
+            Operation.UPDATE -> nsAndroidClient?.let { return@let it::updateCalibration }
+        }
+        try {
+            val data = dataPair.value.toNSMbgV3()
+            val id = dataPair.value.ids.nightscoutId
+            nsClientRepository.addLog(
+                when (operation) {
+                    Operation.CREATE -> "► ADD $collection"
+                    Operation.UPDATE -> "► UPDATE $collection"
+                },
+                when (operation) {
+                    Operation.CREATE -> "Sent ${dataPair.javaClass.simpleName} $progress"
+                    Operation.UPDATE -> "Sent ${dataPair.javaClass.simpleName} $id $progress"
+                },
+                Json {}.encodeToJsonElement(data)
+            )
+            call?.let { it(data) }?.let { result ->
+                when (result.response) {
+                    200  -> nsClientRepository.addLog("◄ UPDATED", "OK ${dataPair.value.javaClass.simpleName}")
+                    201  -> nsClientRepository.addLog("◄ ADDED", "OK ${dataPair.value.javaClass.simpleName}")
+                    400  -> nsClientRepository.addLog("◄ FAIL", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+                    404  -> nsClientRepository.addLog("◄ NOT_FOUND", "${dataPair.value.javaClass.simpleName} ${result.errorResponse}")
+
+                    else -> {
+                        nsClientRepository.addLog("◄ ERROR", "${result.errorResponse} ")
+                        return config.isEnabled(ExternalOptions.IGNORE_NS_V3_ERRORS)
+                    }
+                }
+                result.identifier?.let {
+                    dataPair.value.ids.nightscoutId = it
+                    storeDataForDb.addToNsIdCalibrationEntries(dataPair.value)
+                }
+                slowDown()
+                return true
+            }
+        } catch (e: Exception) {
+            aapsLogger.error(LTag.NSCLIENT, "Upload exception", e)
+            return false
+        }
+        return false
+    }
+
     private suspend fun dbOperationFood(collection: String = "food", dataPair: DataSyncSelector.PairFood, progress: String, operation: Operation): Boolean {
         val call = when (operation) {
             Operation.CREATE -> nsAndroidClient?.let { return@let it::createFood }
@@ -800,7 +848,12 @@ class NSClientV3Plugin @Inject constructor(
         when (collection) {
             "profile"      -> dbOperationProfileStore(dataPair = dataPair, progress = progress)
             "devicestatus" -> dbOperationDeviceStatus(dataPair = dataPair as DataSyncSelector.PairDeviceStatus, progress = progress)
-            "entries"      -> dbOperationEntries(dataPair = dataPair as DataSyncSelector.PairGlucoseValue, progress = progress, operation = operation)
+            // entries collection carries both sgv (PairGlucoseValue) and AAPS calibration (PairCalibrationEntry)
+            "entries"      -> when (dataPair) {
+                is DataSyncSelector.PairCalibrationEntry -> dbOperationCalibrations(dataPair = dataPair, progress = progress, operation = operation)
+                else                                     -> dbOperationEntries(dataPair = dataPair as DataSyncSelector.PairGlucoseValue, progress = progress, operation = operation)
+            }
+
             "food"         -> dbOperationFood(dataPair = dataPair as DataSyncSelector.PairFood, progress = progress, operation = operation)
             "treatments"   -> dbOperationTreatments(dataPair = dataPair, progress = progress, operation = operation, profile = profile)
             "settings"     -> dbOperationSettings(dataPair = dataPair, progress = progress, operation = operation)

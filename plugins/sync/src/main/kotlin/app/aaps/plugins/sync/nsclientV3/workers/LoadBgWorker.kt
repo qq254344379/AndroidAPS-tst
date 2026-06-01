@@ -56,6 +56,12 @@ class LoadBgWorker(
                         nsClientV3Plugin.scheduleIrregularExecution() // Idea is to run after 5 min after last BG
                     }
                     sgvs = response.values
+                    // Calibration mbg entries ride the same entries fetch + cursor; ingest them
+                    // regardless of whether there were any sgvs in this page.
+                    if (response.calibrations.isNotEmpty()) {
+                        nsClientRepository.addLog("◄ RCV", "${response.calibrations.size} calibrations from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
+                        nsIncomingDataProcessor.processCalibrations(response.calibrations, nsClientV3Plugin.doingFullSync)
+                    }
                     aapsLogger.debug(LTag.NSCLIENT, "SGVS: $sgvs")
                     if (sgvs.isNotEmpty()) {
                         val action = if (isFirstLoad) "RCV-F" else "RCV"
@@ -89,6 +95,7 @@ class LoadBgWorker(
         }
 
         storeDataForDb.storeGlucoseValuesToDb()
+        storeDataForDb.storeCalibrationEntriesToDb()
         nsClientV3Plugin.lastOperationError = null
         return Result.success()
     }

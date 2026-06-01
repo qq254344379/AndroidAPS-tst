@@ -23,6 +23,7 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.nssdk.localmodel.entry.NSMbgV3
 import app.aaps.core.nssdk.localmodel.entry.NSSgvV3
 import app.aaps.core.nssdk.localmodel.food.NSFood
 import app.aaps.core.nssdk.localmodel.treatment.NSBolus
@@ -39,6 +40,7 @@ import app.aaps.core.nssdk.localmodel.treatment.NSTreatment
 import app.aaps.core.ui.R
 import app.aaps.plugins.sync.nsclientV3.extensions.toBolus
 import app.aaps.plugins.sync.nsclientV3.extensions.toBolusCalculatorResult
+import app.aaps.plugins.sync.nsclientV3.extensions.toCAL
 import app.aaps.plugins.sync.nsclientV3.extensions.toCarbs
 import app.aaps.plugins.sync.nsclientV3.extensions.toEffectiveProfileSwitch
 import app.aaps.plugins.sync.nsclientV3.extensions.toExtendedBolus
@@ -106,6 +108,21 @@ class NsIncomingDataProcessor @Inject constructor(
             storeDataForDb.addToGlucoseValues(glucoseValues)
         }
         return glucoseValues.isNotEmpty()
+    }
+
+    /**
+     * Preprocess list of calibration mbg entries (AAPS-marked). Used on follower instances so they
+     * can re-fit the same calibration curve as the master.
+     *
+     * @return true if there was an accepted calibration entry
+     */
+    fun processCalibrations(mbgs: List<NSMbgV3>, doFullSync: Boolean): Boolean {
+        if (!config.AAPSCLIENT && !preferences.get(BooleanKey.NsClientAcceptCgmData) && !doFullSync) return false
+        if (mbgs.isEmpty()) return false
+        val calibrationEntries = mbgs.map { it.toCAL() }
+        aapsLogger.debug(LTag.NSCLIENT, "Received NS calibrations: ${calibrationEntries.size}")
+        storeDataForDb.addToCalibrationEntries(calibrationEntries.toMutableList())
+        return calibrationEntries.isNotEmpty()
     }
 
     /**

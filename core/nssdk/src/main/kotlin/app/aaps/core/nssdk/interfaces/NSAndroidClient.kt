@@ -2,6 +2,7 @@ package app.aaps.core.nssdk.interfaces
 
 import app.aaps.core.nssdk.localmodel.Status
 import app.aaps.core.nssdk.localmodel.devicestatus.NSDeviceStatus
+import app.aaps.core.nssdk.localmodel.entry.NSMbgV3
 import app.aaps.core.nssdk.localmodel.entry.NSSgvV3
 import app.aaps.core.nssdk.localmodel.food.NSFood
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
@@ -14,7 +15,10 @@ interface NSAndroidClient {
     class ReadResponse<T>(
         val code: Int,
         val lastServerModified: Long?,
-        val values: T
+        val values: T,
+        // Only populated by the entries reads (getSgvsNewerThan / getSgvsModifiedSince): the AAPS
+        // calibration `mbg` entries fetched in the same pass, so they share the single entries cursor.
+        val calibrations: List<NSMbgV3> = emptyList()
     )
 
     val lastStatus: Status?
@@ -27,6 +31,8 @@ interface NSAndroidClient {
     suspend fun getSgvsNewerThan(from: Long, limit: Int): ReadResponse<List<NSSgvV3>>
     suspend fun createSgv(nsSgvV3: NSSgvV3): CreateUpdateResponse
     suspend fun updateSvg(nsSgvV3: NSSgvV3): CreateUpdateResponse
+    suspend fun createCalibration(nsMbgV3: NSMbgV3): CreateUpdateResponse
+    suspend fun updateCalibration(nsMbgV3: NSMbgV3): CreateUpdateResponse
 
     suspend fun getTreatmentsNewerThan(createdAt: String, limit: Int): ReadResponse<List<NSTreatment>>
     suspend fun getTreatmentsModifiedSince(from: Long, limit: Int): ReadResponse<List<NSTreatment>>
