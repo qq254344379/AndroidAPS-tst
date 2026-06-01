@@ -2,21 +2,22 @@ package app.aaps.plugins.sync.di
 
 import android.content.Context
 import androidx.work.WorkManager
+import app.aaps.core.interfaces.automation.ClientControlAutomationSender
+import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.nsclient.StoreDataForDb
-import app.aaps.core.interfaces.automation.ClientControlAutomationSender
 import app.aaps.core.interfaces.scenes.ClientControlSceneSender
 import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.interfaces.sync.DataSyncSelectorXdrip
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.sync.XDripBroadcast
-import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
 import app.aaps.plugins.sync.garmin.LoopHub
 import app.aaps.plugins.sync.garmin.LoopHubImpl
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.StoreDataForDbImpl
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientRepositoryImpl
 import app.aaps.plugins.sync.nsclientV3.data.NSSettingsStatusImpl
 import app.aaps.plugins.sync.nsclientV3.data.ProcessedDeviceStatusDataImpl
@@ -100,6 +101,7 @@ abstract class SyncModule {
         @Binds fun bindClientControlSceneSender(publisher: ClientControlPublisher): ClientControlSceneSender
 
         @Binds fun bindClientControlAutomationSender(publisher: ClientControlPublisher): ClientControlAutomationSender
+        @Binds fun bindClientControlInsulinSender(publisher: ClientControlPublisher): ClientControlInsulinSender
     }
 
 }

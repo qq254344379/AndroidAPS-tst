@@ -148,6 +148,10 @@
     <!-- Insulin Management -->
     <string name="missing_insulin_name">Missing Insulin Name</string>
     <string name="insulin_name_exists">Insulin Name %1$s already exists, select a new name</string>
+    <string name="insulin_external_update_title">Insulin configuration changed</string>
+    <string name="insulin_external_update_message">A paired client changed the insulin configuration. Tap OK to load their changes and discard your unsaved edits, or Cancel to keep editing (your next save will overwrite theirs).</string>
+    <string name="insulin_edit_target_gone">This insulin was removed elsewhere, so your edit could not be saved. The list has been reloaded.</string>
+    <string name="insulin_activation_requested">Activation requested — the master will apply it</string>
     <string name="a11y_add_new_insulin">Add new insulin</string>
     <string name="a11y_delete_current_insulin">Delete current insulin</string>
     <string name="activate_insulin_no_profile">No active profile found</string>

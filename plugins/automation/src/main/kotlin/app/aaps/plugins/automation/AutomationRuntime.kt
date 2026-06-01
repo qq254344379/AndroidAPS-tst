@@ -215,7 +215,10 @@ class AutomationRuntime @Inject constructor(
      * stale one. Bumped only on real definition edits — NOT by loadFromSP (reload) or the
      * processActions last-run persistence, so the version doesn't climb on reloads/execution.
      */
-    private fun bumpModified() = preferences.put(LongNonKey.AutomationEventsModified, dateUtil.now())
+    // Monotonic (max(stored+1, now())): strictly increases even on same-ms edits or a backwards wall
+    // clock, and lets the master out-version a client value it previously adopted despite clock skew.
+    private fun bumpModified() =
+        preferences.put(LongNonKey.AutomationEventsModified, maxOf(preferences.get(LongNonKey.AutomationEventsModified) + 1, dateUtil.now()))
 
     /** Definition edit from an in-place external editor (e.g. toggleEnabled): bump version + emit. */
     @Synchronized

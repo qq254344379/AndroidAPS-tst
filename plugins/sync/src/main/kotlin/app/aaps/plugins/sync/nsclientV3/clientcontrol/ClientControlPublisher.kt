@@ -1,6 +1,7 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.interfaces.automation.ClientControlAutomationSender
+import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -42,7 +43,7 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) : ClientControlSceneSender, ClientControlAutomationSender {
+) : ClientControlSceneSender, ClientControlAutomationSender, ClientControlInsulinSender {
 
     companion object {
 
@@ -107,7 +108,9 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
             is ClientControlMessage.SceneDefinitionsUpdate,
-            is ClientControlMessage.AutomationDefinitionsUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
+            is ClientControlMessage.AutomationDefinitionsUpdate,
+            is ClientControlMessage.InsulinConfigurationUpdate,
+            is ClientControlMessage.InsulinActivate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
         return uploadEnvelope(identifier, envelope)
     }
@@ -123,6 +126,12 @@ class ClientControlPublisher @Inject constructor(
 
     override suspend fun sendAutomationUpdate(automationJson: String, version: Long): ClientControlSendResult =
         publish(ClientControlMessage.AutomationDefinitionsUpdate(automationJson, version))
+
+    override suspend fun sendInsulinUpdate(insulinJson: String, version: Long): ClientControlSendResult =
+        publish(ClientControlMessage.InsulinConfigurationUpdate(insulinJson, version))
+
+    override suspend fun sendInsulinActivate(iCfgJson: String): ClientControlSendResult =
+        publish(ClientControlMessage.InsulinActivate(iCfgJson))
 
     private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): ClientControlSendResult {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: run {

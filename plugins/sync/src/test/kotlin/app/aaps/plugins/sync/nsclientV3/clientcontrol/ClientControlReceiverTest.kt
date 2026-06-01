@@ -1,11 +1,15 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
 import app.aaps.core.interfaces.scenes.ActiveSceneSnapshot
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
@@ -50,6 +54,8 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
     @Mock private lateinit var automation: Automation
+    @Mock private lateinit var insulin: Insulin
+    @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
 
@@ -67,6 +73,7 @@ internal class ClientControlReceiverTest {
 
     private var stored = "[]"
     private var automationVersion = 0L
+    private var insulinVersion = 0L
 
     // Per-key backing store — the scenes-update merge writes a different StringNonKey
     // (`SceneDefinitions`) than the authorized-clients repository, so a shared `stored`
@@ -89,15 +96,23 @@ internal class ClientControlReceiverTest {
             val value = invocation.arguments[1] as String
             when (key) {
                 StringNonKey.SceneDefinitions,
-                StringNonKey.AutomationEvents -> storage[key.key] = value
-                else                          -> stored = value
+                StringNonKey.AutomationEvents,
+                StringNonKey.InsulinConfiguration -> storage[key.key] = value
+
+                else                              -> stored = value
             }
         }
         // Automation whole-list version (LongNonKey). Receiver reads it for the LWW compare and
         // writes it on apply.
         whenever(preferences.get(LongNonKey.AutomationEventsModified)).thenAnswer { automationVersion }
+        whenever(preferences.get(LongNonKey.InsulinConfigurationModified)).thenAnswer { insulinVersion }
         whenever(preferences.put(any<LongNonKey>(), any<Long>())).thenAnswer { invocation ->
-            if (invocation.arguments[0] == LongNonKey.AutomationEventsModified) automationVersion = invocation.arguments[1] as Long
+            when (invocation.arguments[0]) {
+                LongNonKey.AutomationEventsModified     -> automationVersion = invocation.arguments[1] as Long
+                LongNonKey.InsulinConfigurationModified -> insulinVersion = invocation.arguments[1] as Long
+
+                else                                    -> {}
+            }
         }
         authorizedRepository = AuthorizedClientsRepository(preferences, secureEncrypt, aapsLogger)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
@@ -109,6 +124,8 @@ internal class ClientControlReceiverTest {
             sceneAutomationApi,
             activeSceneSync,
             automation,
+            insulin,
+            profileFunction,
             offerPublisher,
             preferences,
             dateUtil,
@@ -734,5 +751,106 @@ internal class ClientControlReceiverTest {
 
         assertThat(storage[StringNonKey.AutomationEvents.key]).isEqualTo(before)
         verify(automation, never()).reloadInternalState()
+    }
+
+    // -- insulin_configuration_update ----------------------------------------------------
+
+    private fun insulinJson(label: String): String =
+        """{"insulin":[{"insulinLabel":"$label","insulinPeakTime":75,"dia":6.0,"concentration":100.0}]}"""
+
+    private suspend fun sendInsulinUpdate(clientId: String, secret: ByteArray, json: String, version: Long, counter: Long = 5L) {
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}insulin_configuration_update_$clientId"
+        val msg = ClientControlMessage.InsulinConfigurationUpdate(json, version)
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
+    }
+
+    @Test
+    fun insulinUpdateAppliesWhenIncomingVersionIsNewer() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        insulinVersion = 1_000L
+        storage[StringNonKey.InsulinConfiguration.key] = insulinJson("old")
+
+        sendInsulinUpdate(clientId, secret, insulinJson("new"), version = 2_000L)
+
+        assertThat(storage[StringNonKey.InsulinConfiguration.key]).contains("\"insulinLabel\":\"new\"")
+        assertThat(insulinVersion).isEqualTo(2_000L)
+        verify(insulin).reloadInternalState()
+    }
+
+    @Test
+    fun insulinUpdateDropsStaleIncoming() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        insulinVersion = 5_000L
+        storage[StringNonKey.InsulinConfiguration.key] = insulinJson("master")
+
+        sendInsulinUpdate(clientId, secret, insulinJson("stale"), version = 1_000L)
+
+        assertThat(storage[StringNonKey.InsulinConfiguration.key]).contains("\"insulinLabel\":\"master\"")
+        assertThat(insulinVersion).isEqualTo(5_000L)
+        verify(insulin, never()).reloadInternalState()
+    }
+
+    @Test
+    fun insulinUpdateEqualVersionIsTreatedAsStale() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        insulinVersion = 3_000L
+        storage[StringNonKey.InsulinConfiguration.key] = insulinJson("master")
+
+        sendInsulinUpdate(clientId, secret, insulinJson("incoming"), version = 3_000L)
+
+        assertThat(storage[StringNonKey.InsulinConfiguration.key]).contains("\"insulinLabel\":\"master\"")
+        verify(insulin, never()).reloadInternalState()
+    }
+
+    @Test
+    fun insulinUpdateInvalidJsonLeavesPrefUntouched() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        insulinVersion = 1_000L
+        val before = insulinJson("x")
+        storage[StringNonKey.InsulinConfiguration.key] = before
+
+        sendInsulinUpdate(clientId, secret, "{not json", version = 9_000L)
+
+        assertThat(storage[StringNonKey.InsulinConfiguration.key]).isEqualTo(before)
+        verify(insulin, never()).reloadInternalState()
+    }
+
+    // -- insulin_activate -----------------------------------------------------------------
+
+    private fun iCfgJson(label: String): String =
+        """{"insulinLabel":"$label","insulinEndTime":360,"insulinPeakTime":75,"concentration":100.0,"insulinNickname":"$label"}"""
+
+    private suspend fun sendInsulinActivate(clientId: String, secret: ByteArray, json: String, counter: Long = 5L) {
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}insulin_activate_$clientId"
+        val msg = ClientControlMessage.InsulinActivate(json)
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
+    }
+
+    @Test
+    fun insulinActivateCreatesProfileSwitchWithPushedICfg() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(profileFunction.createProfileSwitchWithNewInsulin(any(), any())).thenReturn(true)
+
+        sendInsulinActivate(clientId, secret, iCfgJson("remote"))
+
+        verify(profileFunction).createProfileSwitchWithNewInsulin(
+            argThat<ICfg> { insulinLabel == "remote" },
+            eq(Sources.Insulin)
+        )
+    }
+
+    @Test
+    fun insulinActivateWithInvalidJsonDoesNotSwitch() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+
+        sendInsulinActivate(clientId, secret, "{not json")
+
+        verify(profileFunction, never()).createProfileSwitchWithNewInsulin(any(), any())
     }
 }

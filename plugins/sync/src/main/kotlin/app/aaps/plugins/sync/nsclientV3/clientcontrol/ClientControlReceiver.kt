@@ -1,10 +1,14 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
@@ -17,8 +21,10 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto
+import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
@@ -64,6 +70,8 @@ class ClientControlReceiver @Inject constructor(
     private val sceneAutomationApi: SceneAutomationApi,
     private val activeSceneSync: ActiveSceneSync,
     private val automation: Automation,
+    private val insulin: Insulin,
+    private val profileFunction: ProfileFunction,
     private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
@@ -159,13 +167,15 @@ class ClientControlReceiver @Inject constructor(
             onVerifiedUndecodablePayload(entry, envelope, now)
         } else {
             when (message) {
-                is ClientControlMessage.Hello                  -> onVerifiedHello(entry, envelope, now)
+                is ClientControlMessage.Hello                       -> onVerifiedHello(entry, envelope, now)
                 // Hello handling already includes the Pending → Active transition; offer doc
                 // cleanup is inside onVerifiedHello so it can suspend on deleteOffer.
-                is ClientControlMessage.SceneStart             -> onVerifiedSceneStart(entry, envelope, message, now)
-                is ClientControlMessage.SceneStop              -> onVerifiedSceneStop(entry, envelope, message, now)
-                is ClientControlMessage.SceneDefinitionsUpdate -> onVerifiedScenesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.SceneStart                  -> onVerifiedSceneStart(entry, envelope, message, now)
+                is ClientControlMessage.SceneStop                   -> onVerifiedSceneStop(entry, envelope, message, now)
+                is ClientControlMessage.SceneDefinitionsUpdate      -> onVerifiedScenesUpdate(entry, envelope, message, now)
                 is ClientControlMessage.AutomationDefinitionsUpdate -> onVerifiedAutomationUpdate(entry, envelope, message, now)
+                is ClientControlMessage.InsulinConfigurationUpdate  -> onVerifiedInsulinUpdate(entry, envelope, message, now)
+                is ClientControlMessage.InsulinActivate             -> onVerifiedInsulinActivate(entry, envelope, message, now)
             }
         }
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -304,6 +314,56 @@ class ClientControlReceiver @Inject constructor(
         preferences.put(LongNonKey.AutomationEventsModified, message.version)
         automation.reloadInternalState()
         nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: applied v=${message.version} (${incoming.length()} events)")
+    }
+
+    /**
+     * Apply a client-pushed insulin-configuration JSON via whole-list last-writer-wins by version
+     * (the client's last local-edit wall clock). A strictly-newer push replaces the master's config
+     * and adopts its version; a stale one is dropped. The write to [StringNonKey.InsulinConfiguration]
+     * triggers `RunningConfigurationPublisher`'s debounce (the key is in `insulin.syncedKeys`),
+     * fanning the merged result out to every paired client; the master service is reloaded directly
+     * since it caches the insulin list in memory rather than reading the pref live.
+     */
+    private fun onVerifiedInsulinUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.InsulinConfigurationUpdate, now: Long) {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val localVersion = preferences.get(LongNonKey.InsulinConfigurationModified)
+        if (message.version <= localVersion) {
+            nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: stale (v=${message.version} <= local=$localVersion)")
+            return
+        }
+        val incoming = runCatching { JSONObject(message.insulinJson) }.getOrNull()
+        if (incoming == null) {
+            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: insulin.update from ${entry.name} has invalid JSON, ignoring")
+            nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: invalid JSON")
+            return
+        }
+        preferences.put(StringNonKey.InsulinConfiguration, message.insulinJson)
+        preferences.put(LongNonKey.InsulinConfigurationModified, message.version)
+        insulin.reloadInternalState()
+        nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: applied v=${message.version}")
+    }
+
+    /**
+     * Activate an insulin requested by a client: create a profile switch over the master's CURRENT
+     * profile with the pushed insulin config. The master is authoritative for the profile (the
+     * client's view may be stale), so only the iCfg travels; the resulting EPS syncs back normally.
+     * No-op (logged) if the master has no active profile switch to re-apply.
+     */
+    private suspend fun onVerifiedInsulinActivate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.InsulinActivate, now: Long) {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val iCfg = runCatching {
+            (Json.parseToJsonElement(message.iCfgJson) as? JsonObject)?.let { ICfg.fromJsonObject(it) }
+        }.getOrNull()
+        if (iCfg == null) {
+            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: insulin.activate from ${entry.name} has invalid iCfg JSON, ignoring")
+            nsClientRepository.addLog("◄ CLIENTCTL", "insulin.activate from ${entry.name}: invalid JSON")
+            return
+        }
+        val applied = profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)
+        nsClientRepository.addLog(
+            "◄ CLIENTCTL",
+            "insulin.activate from ${entry.name}: " + if (applied) "applied ${iCfg.insulinLabel}" else "no active profile"
+        )
     }
 
     private fun SceneAutomationResult.tag(): String = when (this) {

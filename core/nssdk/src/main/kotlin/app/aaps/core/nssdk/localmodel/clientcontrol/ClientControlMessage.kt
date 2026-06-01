@@ -90,4 +90,32 @@ sealed class ClientControlMessage {
         val automationJson: String,
         val version: Long
     ) : ClientControlMessage()
+
+    /**
+     * Client pushes its full insulin-configuration JSON to the master after a local edit. The master
+     * applies whole-list last-writer-wins by [version] (this device's last-edit wall clock) —
+     * strictly-newer replaces, stale is dropped — then republishes via the running-config doc.
+     *
+     * `insulinJson` is opaque to the nssdk module (a String, the same object shape the local pref
+     * holds) so the wire schema stays decoupled from the insulin model. Master parses it.
+     */
+    @Serializable
+    @SerialName("insulin_configuration_update")
+    data class InsulinConfigurationUpdate(
+        val insulinJson: String,
+        val version: Long
+    ) : ClientControlMessage()
+
+    /**
+     * Client asks the master to activate an insulin — i.e. create a profile switch that re-applies
+     * the master's CURRENT profile (name/%/timeshift/duration) with this insulin's [iCfgJson] config.
+     * The master uses its own live profile (the client's view may be stale), so only the insulin
+     * config travels; the resulting profile switch syncs back normally. `iCfgJson` is the same JSON
+     * shape `ICfg` serializes to, opaque to the nssdk module.
+     */
+    @Serializable
+    @SerialName("insulin_activate")
+    data class InsulinActivate(
+        val iCfgJson: String
+    ) : ClientControlMessage()
 }

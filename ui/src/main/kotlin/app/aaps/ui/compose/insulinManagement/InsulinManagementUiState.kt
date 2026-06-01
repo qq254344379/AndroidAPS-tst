@@ -32,6 +32,9 @@ data class InsulinManagementUiState(
     // Activation dialog
     val activationMessage: String? = null,
 
+    // External (client→master sync) update arrived while the user has unsaved edits — master asks
+    val externalUpdatePending: Boolean = false,
+
     // Screen mode
     val screenMode: ScreenMode = ScreenMode.EDIT,
 

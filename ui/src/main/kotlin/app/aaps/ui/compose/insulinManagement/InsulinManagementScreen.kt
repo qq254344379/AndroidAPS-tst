@@ -174,6 +174,17 @@ fun InsulinManagementScreen(
         )
     }
 
+    // External (client→master sync) update arrived while the user has unsaved edits
+    if (uiState.externalUpdatePending) {
+        OkCancelDialog(
+            title = stringResource(R.string.insulin_external_update_title),
+            message = stringResource(R.string.insulin_external_update_message),
+            icon = IcPluginInsulin,
+            onConfirm = { viewModel.acceptExternalUpdate() },
+            onDismiss = { viewModel.dismissExternalUpdate() }
+        )
+    }
+
     // Unsaved changes dialog
     if (uiState.pendingNavigation != null) {
         UnsavedChangesDialog(

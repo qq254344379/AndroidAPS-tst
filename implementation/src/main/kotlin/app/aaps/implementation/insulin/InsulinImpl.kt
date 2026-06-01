@@ -19,7 +19,9 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.collectResilient
+import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.HardLimits
+import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -49,8 +51,14 @@ class InsulinImpl @Inject constructor(
     val config: Config,
     val hardLimits: HardLimits,
     val uel: UserEntryLogger,
+    val dateUtil: DateUtil,
     @ApplicationScope private val appScope: CoroutineScope
 ) : Insulin, InsulinManager {
+
+    // True while loading/applying a config snapshot (local pref or master-pushed), so the
+    // re-store inside [applyConfiguration] does not bump [LongNonKey.InsulinConfigurationModified]
+    // — only genuine user edits advance the client→master last-writer-wins version.
+    @Volatile private var suppressVersionBump = false
 
     override val id get() = InsulinType.fromPeak(iCfg.insulinPeakTime) // Only used within Autotune Plugin
     override val friendlyName get() = iCfg.insulinNickname  // No more used to delete or a way to provide Nickname ?
@@ -179,12 +187,22 @@ class InsulinImpl @Inject constructor(
         val jsonObject = runCatching {
             Json.parseToJsonElement(jsonString) as? JsonObject
         }.getOrNull()
-        applyConfiguration(jsonObject ?: buildJsonObject {})
+        suppressVersionBump = true
+        try {
+            applyConfiguration(jsonObject ?: buildJsonObject {})
+        } finally {
+            suppressVersionBump = false
+        }
     }
 
     @Synchronized
     override fun storeSettings() {
         preferences.put(StringNonKey.InsulinConfiguration, configuration().toString())
+        // Bump the client→master version only on genuine user edits, not while (re)loading a snapshot.
+        // Monotonic (max(stored+1, now())): strictly increases even on same-ms edits or a backwards wall
+        // clock, and lets the master out-version a client value it previously adopted despite clock skew.
+        if (!suppressVersionBump)
+            preferences.put(LongNonKey.InsulinConfigurationModified, maxOf(preferences.get(LongNonKey.InsulinConfigurationModified) + 1, dateUtil.now()))
     }
 
     @Synchronized

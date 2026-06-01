@@ -17,7 +17,6 @@ import app.aaps.core.interfaces.source.NSClientSource
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.remotemodel.LastModified
-import app.aaps.core.utils.receivers.DataWorkerStorage
 import app.aaps.plugins.sync.nsclientV3.DataSyncSelectorV3
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.NsIncomingDataProcessor
@@ -84,7 +83,7 @@ internal class LoadTreatmentsWorkerTest : TestBaseWithProfile() {
         nsClientV3Plugin = NSClientV3Plugin(
             aapsLogger, rh, preferences, rxBus, context,
             receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
-            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, mock(), mock(), mock(), mock(), profileRepository
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel, mock(), mock(), mock(), mock(), mock(), profileRepository
         )
         nsClientV3Plugin.newestDataOnServer = LastModified(LastModified.Collections())
     }
