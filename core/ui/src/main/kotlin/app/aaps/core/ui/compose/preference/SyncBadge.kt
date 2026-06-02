@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.PhonelinkRing
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,11 +29,13 @@ import app.aaps.core.ui.compose.LocalConfig
 fun SyncBadge(key: NonPreferenceKey?, modifier: Modifier = Modifier) {
     if (!LocalConfig.current.AAPSCLIENT) return
     if (key?.sync?.direction != SyncDirection.Bidirectional) return
+    // PhonelinkRing ("linked to another phone"), muted/small so it reads as a passive status marker,
+    // NOT a tappable refresh/sync control.
     Icon(
-        imageVector = Icons.Default.Sync,
+        imageVector = Icons.Default.PhonelinkRing,
         contentDescription = stringResource(R.string.pref_syncs_with_main_phone),
-        modifier = modifier.size(16.dp),
-        tint = MaterialTheme.colorScheme.secondary
+        modifier = modifier.size(14.dp),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     )
 }
 

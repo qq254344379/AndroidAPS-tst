@@ -41,7 +41,8 @@ enum class StringKey(
         entries = mapOf(
             "mg/dl" to R.string.units_mgdl,
             "mmol" to R.string.units_mmol
-        )
+        ),
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     GeneralLanguage(
         key = "language",

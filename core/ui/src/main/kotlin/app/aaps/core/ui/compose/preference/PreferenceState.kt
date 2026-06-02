@@ -16,6 +16,7 @@ import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.BooleanPreferenceKey
 import app.aaps.core.keys.interfaces.DoublePreferenceKey
+import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.IntPreferenceKey
 import app.aaps.core.keys.interfaces.IntentPreferenceKey
 import app.aaps.core.keys.interfaces.PreferenceKey
@@ -335,6 +336,14 @@ internal suspend fun observeSyncedKeysIntoState(
 
             is StringNonPreferenceKey  -> launch {
                 preferences.observe(key).drop(1).collect { setSharedStringState(sharedStates, key.key, it) }
+            }
+
+            is IntPreferenceKey        -> launch {
+                preferences.observe(key).drop(1).collect { setSharedIntState(sharedStates, key.key, preferences.get(key)) }
+            }
+
+            is IntNonPreferenceKey     -> launch {
+                preferences.observe(key).drop(1).collect { setSharedIntState(sharedStates, key.key, it) }
             }
         }
     }

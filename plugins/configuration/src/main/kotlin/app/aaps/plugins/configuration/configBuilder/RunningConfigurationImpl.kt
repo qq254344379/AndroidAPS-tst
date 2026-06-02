@@ -31,10 +31,12 @@ import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
+import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.SyncChannel
+import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
@@ -94,7 +96,6 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("sensitivityConfiguration", JSONObject(buildFromPlugin(sensitivityInterface).toString()))
             json.put("smoothing", smoothingInterface.javaClass.simpleName)
             json.put("calibration", calibrationInterface.javaClass.simpleName)
-            json.put("overviewConfiguration", JSONObject(buildOverviewConfiguration().toString()))
             json.put("syncedPrefs", buildSyncedPrefs())
             json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
             json.put("quickWizardConfiguration", JSONObject(buildFromPlugin(quickWizard).toString()))
@@ -150,7 +151,6 @@ class RunningConfigurationImpl @Inject constructor(
         keys += quickWizard.syncedKeys
         keys += scenes.syncedKeys
         keys += automation.syncedKeys
-        keys += SyncedConfigSchema.overviewKeys
         // Cold-channel keys declared via SyncSpec (single source of truth) — a change republishes.
         keys += coldSyncKeys()
         return keys.distinctBy { it.key }
@@ -173,6 +173,8 @@ class RunningConfigurationImpl @Inject constructor(
             when (key) {
                 is BooleanNonPreferenceKey -> out.put(key.key, preferences.get(key).toString())
                 is StringNonPreferenceKey  -> out.put(key.key, preferences.get(key))
+                is IntNonPreferenceKey     -> out.put(key.key, preferences.get(key).toString())
+                is UnitDoublePreferenceKey -> out.put(key.key, preferences.getRaw(key).toString())   // raw mg/dl, 1:1
                 else                       -> aapsLogger.warn(LTag.CORE, "syncedPrefs: unsupported key type for ${key.key}")
             }
         }
@@ -188,6 +190,8 @@ class RunningConfigurationImpl @Inject constructor(
             when (key) {
                 is BooleanNonPreferenceKey -> valueString.toBooleanStrictOrNull()?.let { preferences.putRemote(key, it, 0L) }
                 is StringNonPreferenceKey  -> preferences.putRemote(key, valueString, 0L)
+                is IntNonPreferenceKey     -> valueString.toIntOrNull()?.let { preferences.putRemote(key, it, 0L) }
+                is UnitDoublePreferenceKey -> valueString.toDoubleOrNull()?.let { preferences.putRemote(key, it, 0L) }   // raw mg/dl
                 else                       -> aapsLogger.warn(LTag.CORE, "syncedPrefs: unsupported key type for $keyString")
             }
         }
@@ -270,8 +274,6 @@ class RunningConfigurationImpl @Inject constructor(
             }
         }
 
-        configuration.overviewConfiguration?.let { applyOverviewConfiguration(it) }
-
         configuration.syncedPrefs?.let { applySyncedPrefs(it) }
 
         configuration.safetyConfiguration?.let { sc ->
@@ -324,12 +326,4 @@ class RunningConfigurationImpl @Inject constructor(
         plugin.reloadInternalState()
     }
 
-    private fun buildOverviewConfiguration(): JsonObject =
-        SyncedConfigSchema.overviewKeys.fold(JsonObject(emptyMap())) { acc, k ->
-            acc.put(k, preferences)
-        }
-
-    private fun applyOverviewConfiguration(configuration: JsonObject) {
-        SyncedConfigSchema.overviewKeys.forEach { configuration.store(it, preferences) }
-    }
 }

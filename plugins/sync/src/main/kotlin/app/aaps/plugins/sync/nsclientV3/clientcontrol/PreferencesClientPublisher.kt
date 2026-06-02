@@ -7,9 +7,11 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
+import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
+import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -79,6 +81,8 @@ class PreferencesClientPublisher @Inject constructor(
         val value = when (key) {
             is BooleanNonPreferenceKey -> preferences.get(key).toString()
             is StringNonPreferenceKey  -> preferences.get(key)
+            is IntNonPreferenceKey     -> preferences.get(key).toString()
+            is UnitDoublePreferenceKey -> preferences.getRaw(key).toString()   // raw mg/dl, 1:1
 
             else                       -> {
                 aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update unsupported key type for ${key.key}, skipping")

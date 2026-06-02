@@ -230,8 +230,18 @@ class PreferencesImpl @Inject constructor(
     override fun put(key: UnitDoublePreferenceKey, value: Double) {
         sp.putDouble(key.key, value)
         unitDoubleFlows[key.key]?.value = get(key)
-
+        onLocalSyncedWrite(key)
     }
+
+    override fun putRemote(key: UnitDoublePreferenceKey, value: Double, version: Long) {
+        sp.putDouble(key.key, value)
+        unitDoubleFlows[key.key]?.value = get(key)
+        onRemoteSyncedWrite(key, version)
+    }
+
+    // Raw stored mg/dl, no display-unit conversion (unlike get()). Used for 1:1 sync.
+    override fun getRaw(key: UnitDoublePreferenceKey): Double =
+        sp.getDouble(key.key, key.defaultValue)
 
     override fun observe(key: UnitDoublePreferenceKey): StateFlow<Double> =
         unitDoubleFlows.computeIfAbsent(key.key) { MutableStateFlow(get(key)) }
@@ -245,7 +255,13 @@ class PreferencesImpl @Inject constructor(
     override fun put(key: IntNonPreferenceKey, value: Int) {
         sp.putInt(key.key, value)
         intFlows[key.key]?.value = value
+        onLocalSyncedWrite(key)
+    }
 
+    override fun putRemote(key: IntNonPreferenceKey, value: Int, version: Long) {
+        sp.putInt(key.key, value)
+        intFlows[key.key]?.value = value
+        onRemoteSyncedWrite(key, version)
     }
 
     override fun observe(key: IntNonPreferenceKey): StateFlow<Int> =

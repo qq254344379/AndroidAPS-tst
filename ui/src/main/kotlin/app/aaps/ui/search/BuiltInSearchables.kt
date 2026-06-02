@@ -18,9 +18,12 @@ import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.keys.interfaces.withChangeGuard
 import app.aaps.core.ui.compose.icons.IcBolus
 import app.aaps.core.ui.compose.icons.IcCalculator
+import app.aaps.core.ui.compose.icons.IcCannulaChange
 import app.aaps.core.ui.compose.icons.IcCarbs
+import app.aaps.core.ui.compose.icons.IcCgmInsert
 import app.aaps.core.ui.compose.icons.IcPluginAutomation
 import app.aaps.core.ui.compose.icons.IcPluginMaintenance
+import app.aaps.core.ui.compose.icons.IcPumpBattery
 import app.aaps.core.ui.compose.icons.IcPumpCartridge
 import app.aaps.core.ui.compose.icons.Pump
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -230,25 +233,40 @@ class BuiltInSearchables @Inject constructor(
     /**
      * Status lights warning/critical thresholds (accessible from Overview)
      */
+    // Status-light thresholds, grouped into 4 individually-searchable subscreens. The grouping is the
+    // single source of truth: the overview status-light settings bottom sheet renders from these
+    // (via [statusLights].items), and search indexes each group below.
+    val statusLightsCannula = PreferenceSubScreenDef(
+        key = "statuslights_cannula",
+        titleResId = app.aaps.core.ui.R.string.cannula,
+        items = listOf(IntKey.OverviewCageWarning, IntKey.OverviewCageCritical),
+        icon = IcCannulaChange
+    )
+    val statusLightsInsulin = PreferenceSubScreenDef(
+        key = "statuslights_insulin",
+        titleResId = app.aaps.core.ui.R.string.insulin_label,
+        items = listOf(IntKey.OverviewIageWarning, IntKey.OverviewIageCritical, IntKey.OverviewResWarning, IntKey.OverviewResCritical),
+        icon = IcPumpCartridge
+    )
+    val statusLightsSensor = PreferenceSubScreenDef(
+        key = "statuslights_sensor",
+        titleResId = app.aaps.core.ui.R.string.sensor_label,
+        items = listOf(IntKey.OverviewSageWarning, IntKey.OverviewSageCritical, IntKey.OverviewSbatWarning, IntKey.OverviewSbatCritical),
+        icon = IcCgmInsert
+    )
+    val statusLightsPump = PreferenceSubScreenDef(
+        key = "statuslights_pump",
+        titleResId = app.aaps.core.ui.R.string.pb_label,
+        items = listOf(IntKey.OverviewBageWarning, IntKey.OverviewBageCritical, IntKey.OverviewBattWarning, IntKey.OverviewBattCritical),
+        icon = IcPumpBattery
+    )
+
+    // Container for the status-light settings bottom sheet — items are the 4 group subscreens above
+    // (each searchable individually). The parent itself is not added to search.
     val statusLights = PreferenceSubScreenDef(
         key = "statuslights_overview_advanced",
         titleResId = app.aaps.core.ui.R.string.statuslights,
-        items = listOf(
-            IntKey.OverviewCageWarning,
-            IntKey.OverviewCageCritical,
-            IntKey.OverviewIageWarning,
-            IntKey.OverviewIageCritical,
-            IntKey.OverviewSageWarning,
-            IntKey.OverviewSageCritical,
-            IntKey.OverviewSbatWarning,
-            IntKey.OverviewSbatCritical,
-            IntKey.OverviewResWarning,
-            IntKey.OverviewResCritical,
-            IntKey.OverviewBattWarning,
-            IntKey.OverviewBattCritical,
-            IntKey.OverviewBageWarning,
-            IntKey.OverviewBageCritical
-        ),
+        items = listOf(statusLightsCannula, statusLightsInsulin, statusLightsSensor, statusLightsPump),
         icon = Icons.Default.TipsAndUpdates
     )
 
@@ -312,7 +330,12 @@ class BuiltInSearchables @Inject constructor(
         add(SearchableItem.Category(fillButtons))
         add(SearchableItem.Category(insulinButtons))
         add(SearchableItem.Category(carbsButtons))
-        add(SearchableItem.Category(statusLights))
+        // Status lights as 4 individually-searchable groups (parent `statusLights` is just the
+        // bottom-sheet container).
+        add(SearchableItem.Category(statusLightsCannula))
+        add(SearchableItem.Category(statusLightsInsulin))
+        add(SearchableItem.Category(statusLightsSensor))
+        add(SearchableItem.Category(statusLightsPump))
         add(SearchableItem.Category(treatmentButtons))
         add(SearchableItem.Category(wizardSettings))
     }

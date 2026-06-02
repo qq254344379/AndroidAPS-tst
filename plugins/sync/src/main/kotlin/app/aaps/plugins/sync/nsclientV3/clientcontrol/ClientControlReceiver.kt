@@ -19,9 +19,11 @@ import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
+import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.SyncDirection
+import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
@@ -411,6 +413,26 @@ class ClientControlReceiver @Inject constructor(
                 is StringNonPreferenceKey  -> {
                     preferences.putRemote(key, pushed.value, pushed.lastModified)
                     applied += "$keyString=${pushed.value}"
+                }
+
+                is IntNonPreferenceKey     -> {
+                    val value = pushed.value.toIntOrNull()
+                    if (value == null) {
+                        aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} bad int for $keyString: '${pushed.value}'")
+                        return@forEach
+                    }
+                    preferences.putRemote(key, value, pushed.lastModified)
+                    applied += "$keyString=$value"
+                }
+
+                is UnitDoublePreferenceKey -> {
+                    val value = pushed.value.toDoubleOrNull()
+                    if (value == null) {
+                        aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} bad double for $keyString: '${pushed.value}'")
+                        return@forEach
+                    }
+                    preferences.putRemote(key, value, pushed.lastModified)   // raw mg/dl
+                    applied += "$keyString=$value"
                 }
 
                 else                       ->

@@ -18,6 +18,7 @@ import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringKey
@@ -906,6 +907,18 @@ internal class ClientControlReceiverTest {
         sendPreferencesUpdate(clientId, secret, mapOf(StringKey.AutomationLocation.key to PrefEntry("GPS", 2_000L)))
 
         verify(preferences).putRemote(StringKey.AutomationLocation, "GPS", 2_000L)
+    }
+
+    @Test
+    fun preferencesUpdateAppliesIntKey() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(preferences.get(IntKey.OverviewBolusPercentage.key)).thenReturn(IntKey.OverviewBolusPercentage)
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, IntKey.OverviewBolusPercentage.key)).thenReturn(1_000L)
+
+        sendPreferencesUpdate(clientId, secret, mapOf(IntKey.OverviewBolusPercentage.key to PrefEntry("80", 2_000L)))
+
+        verify(preferences).putRemote(IntKey.OverviewBolusPercentage, 80, 2_000L)
     }
 
     @Test

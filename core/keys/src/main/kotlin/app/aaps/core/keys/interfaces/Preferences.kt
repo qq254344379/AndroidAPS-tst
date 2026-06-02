@@ -40,6 +40,22 @@ interface Preferences {
     /** [String] variant of [putRemote] — applied-from-sync write, stamps [version], does not re-publish. */
     fun putRemote(key: StringNonPreferenceKey, value: String, version: Long) = put(key, value)
 
+    /** [Int] variant of [putRemote] — applied-from-sync write, stamps [version], does not re-publish. */
+    fun putRemote(key: IntNonPreferenceKey, value: Int, version: Long) = put(key, value)
+
+    /**
+     * [UnitDoublePreferenceKey] variant of [putRemote]. [value] is the **raw stored** value (mg/dl),
+     * written 1:1 (the normal `put` already stores raw; the unit conversion is only on read/UI).
+     */
+    fun putRemote(key: UnitDoublePreferenceKey, value: Double, version: Long) = put(key, value)
+
+    /**
+     * Raw stored value of a [UnitDoublePreferenceKey] (mg/dl), bypassing the display-unit conversion
+     * that [get] applies. Used to sync the unit-independent stored value 1:1. Default delegates to
+     * [get] for non-syncing implementations (they never serialize UnitDouble).
+     */
+    fun getRaw(key: UnitDoublePreferenceKey): Double = get(key)
+
     /**
      * Are we in currently in SimpleMode ?
      */

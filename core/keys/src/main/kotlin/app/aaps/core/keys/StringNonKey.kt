@@ -1,11 +1,15 @@
 package app.aaps.core.keys
 
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
+import app.aaps.core.keys.interfaces.SyncChannel
+import app.aaps.core.keys.interfaces.SyncDirection
+import app.aaps.core.keys.interfaces.SyncSpec
 
 enum class StringNonKey(
     override val key: String,
     override val defaultValue: String,
-    override val exportable: Boolean = true
+    override val exportable: Boolean = true,
+    override val sync: SyncSpec? = null
 ) : StringNonPreferenceKey {
 
     QuickWizard(key = "QuickWizard", defaultValue = "[]"),
@@ -19,9 +23,10 @@ enum class StringNonKey(
     TotalBaseBasal("TBB", defaultValue = "10.00"),
     PumpCommonBolusStorage(key = "pump_sync_storage_bolus", defaultValue = ""),
     PumpCommonTbrStorage(key = "pump_sync_storage_tbr", defaultValue = ""),
-    TempTargetPresets(key = "temp_target_presets", defaultValue = "[]"),
+    TempTargetPresets(key = "temp_target_presets", defaultValue = "[]", sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     SceneDefinitions(key = "scene_definitions", defaultValue = "[]"),
     ActiveScene(key = "active_scene", defaultValue = ""),
+
     // Standalone Automation runtime. In core/keys (not the automation module) so the client→master
     // sync publisher/receiver in :plugins:sync can observe it without an inter-module dependency.
     AutomationEvents(key = "AUTOMATION_EVENTS", defaultValue = ""),
