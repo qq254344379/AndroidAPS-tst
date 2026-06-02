@@ -76,11 +76,6 @@ class CobExtendedCarbsTest : HiltInstrumentedTest() {
 
     @After
     fun tearDown() {
-        // If @Before (HiltInstrumentedTest.setUpHiltGraph → hiltRule.inject()) didn't complete, the
-        // injected fields are unset; touching them here would mask the real setup failure with an
-        // UninitializedPropertyAccessException. All fields are injected together, so rxHelper is a
-        // reliable proxy for "graph injected".
-        if (!::rxHelper.isInitialized) return
         rxHelper.clear()
         loop.lastRun = null
         objectivesPlugin.objectives.forEach { it.startedOn = 0 }
