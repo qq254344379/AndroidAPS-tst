@@ -28,27 +28,35 @@ enum class BooleanKey(
     override val sync: SyncSpec? = null
 ) : BooleanPreferenceKey {
 
-    GeneralSimpleMode("simple_mode", true, R.string.pref_title_simple_mode),
+    GeneralSimpleMode(key = "simple_mode", defaultValue = true, titleResId = R.string.pref_title_simple_mode, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     GeneralInsulinConcentration(
-        "insulin_concentration_enabled", false, R.string.pref_title_insulin_concentration, R.string.pref_summary_insulin_concentration,
+        key = "insulin_concentration_enabled", defaultValue = false, titleResId = R.string.pref_title_insulin_concentration, summaryResId = R.string.pref_summary_insulin_concentration,
         defaultedBySM = true,
         enabledCondition = PreferenceEnabledCondition { it.isConcentrationEnabled },
         sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
-    OverviewKeepScreenOn("keep_screen_on", false, R.string.pref_title_keep_screen_on, R.string.pref_summary_keep_screen_on, calculatedDefaultValue = true),
-    OverviewShowTreatmentButton("show_treatment_button", false, R.string.pref_title_show_treatment_button, defaultedBySM = true, hideParentScreenIfHidden = true),
-    OverviewShowWizardButton("show_wizard_button", true, R.string.pref_title_show_wizard_button, defaultedBySM = true),
-    OverviewShowInsulinButton("show_insulin_button", true, R.string.pref_title_show_insulin_button, defaultedBySM = true),
-    OverviewShowCarbsButton("show_carbs_button", true, R.string.pref_title_show_carbs_button, defaultedBySM = true),
-    OverviewShowCgmButton("show_cgm_button", false, R.string.pref_title_show_cgm_button, R.string.pref_summary_show_cgm_button, defaultedBySM = true, showInNsClientMode = false),
-    OverviewShowCalibrationButton("show_calibration_button", false, R.string.pref_title_show_calibration_button, R.string.pref_summary_show_calibration_button, defaultedBySM = true, showInNsClientMode = false),
-    OverviewShowNotesInDialogs("show_notes_entry_dialogs", false, R.string.pref_title_show_notes_in_dialogs, defaultedBySM = true),
+    OverviewKeepScreenOn(key = "keep_screen_on", defaultValue = false, titleResId = R.string.pref_title_keep_screen_on, summaryResId = R.string.pref_summary_keep_screen_on, calculatedDefaultValue = true),
+    OverviewShowTreatmentButton(key = "show_treatment_button", defaultValue = false, titleResId = R.string.pref_title_show_treatment_button, defaultedBySM = true),
+    OverviewShowWizardButton(key = "show_wizard_button", defaultValue = true, titleResId = R.string.pref_title_show_wizard_button, defaultedBySM = true),
+    OverviewShowInsulinButton(key = "show_insulin_button", defaultValue = true, titleResId = R.string.pref_title_show_insulin_button, defaultedBySM = true),
+    OverviewShowCarbsButton(key = "show_carbs_button", defaultValue = true, titleResId = R.string.pref_title_show_carbs_button, defaultedBySM = true),
+    OverviewShowCgmButton(key = "show_cgm_button", defaultValue = false, titleResId = R.string.pref_title_show_cgm_button, summaryResId = R.string.pref_summary_show_cgm_button, defaultedBySM = true, showInNsClientMode = false),
+    OverviewShowCalibrationButton(
+        key = "show_calibration_button",
+        defaultValue = false,
+        titleResId = R.string.pref_title_show_calibration_button,
+        summaryResId = R.string.pref_summary_show_calibration_button,
+        defaultedBySM = true,
+        showInNsClientMode = false
+    ),
+    OverviewShowNotesInDialogs(key = "show_notes_entry_dialogs", defaultValue = false, titleResId = R.string.pref_title_show_notes_in_dialogs, defaultedBySM = true),
     OverviewUseBolusAdvisor("use_bolus_advisor", true, R.string.pref_title_use_bolus_advisor, R.string.pref_summary_use_bolus_advisor, defaultedBySM = true),
     OverviewUseBolusReminder("use_bolus_reminder", true, R.string.pref_title_use_bolus_reminder, R.string.pref_summary_use_bolus_reminder, defaultedBySM = true),
 
     @Deprecated("Remove support")
     OverviewUseSuperBolus("key_usersuperbolus", false, R.string.pref_title_use_super_bolus, R.string.pref_summary_use_super_bolus, defaultedBySM = true, hideParentScreenIfHidden = true),
 
+    @Deprecated("High SDK")
     PumpBtWatchdog("bt_watchdog", false, R.string.pref_title_bt_watchdog, R.string.pref_summary_bt_watchdog, showInNsClientMode = false, hideParentScreenIfHidden = true),
 
     AlertMissedBgReading("enable_missed_bg_readings", false, R.string.pref_title_alert_missed_bg_reading),
@@ -166,9 +174,6 @@ enum class BooleanKey(
     WearNotifyOnSmb(key = "wear_notifySMB", defaultValue = true, titleResId = R.string.pref_title_wear_notify_on_smb, summaryResId = R.string.pref_summary_wear_notify_on_smb),
     WearBroadcastData(key = "wear_broadcast_data", defaultValue = false, titleResId = R.string.pref_title_wear_broadcast_data, summaryResId = R.string.pref_summary_wear_broadcast_data, showInApsMode = false, showInPumpControlMode = false),
 
-    @Deprecated("remove after migration")
-    WizardCalculationVisible("wizard_calculation_visible", defaultValue = false, titleResId = R.string.pref_title_wizard_calculation_visible),
-    WizardCorrectionPercent("wizard_correction_percent", defaultValue = false, titleResId = R.string.pref_title_wizard_correction_percent),
     SiteRotationManagePump("site_rotation_manage_pump", defaultValue = false, titleResId = R.string.pref_title_site_rotation_manage_pump),
     SiteRotationManageCgm("site_rotation_manage_cgm", defaultValue = false, titleResId = R.string.pref_title_site_rotation_manage_cgm),
 

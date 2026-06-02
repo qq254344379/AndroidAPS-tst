@@ -5,6 +5,9 @@ import app.aaps.core.keys.interfaces.PreferenceEnabledCondition
 import app.aaps.core.keys.interfaces.PreferenceVisibility
 import app.aaps.core.keys.interfaces.StringPreferenceKey
 import app.aaps.core.keys.interfaces.StringValidator
+import app.aaps.core.keys.interfaces.SyncChannel
+import app.aaps.core.keys.interfaces.SyncDirection
+import app.aaps.core.keys.interfaces.SyncSpec
 
 enum class StringKey(
     override val key: String,
@@ -26,7 +29,8 @@ enum class StringKey(
     override val exportable: Boolean = true,
     override val validator: StringValidator = StringValidator.NONE,
     override val visibility: PreferenceVisibility = PreferenceVisibility.ALWAYS,
-    override val enabledCondition: PreferenceEnabledCondition = PreferenceEnabledCondition.ALWAYS
+    override val enabledCondition: PreferenceEnabledCondition = PreferenceEnabledCondition.ALWAYS,
+    override val sync: SyncSpec? = null
 ) : StringPreferenceKey {
 
     GeneralUnits(
@@ -142,7 +146,7 @@ enum class StringKey(
             "NETWORK" to R.string.automation_location_network,
             "GPS" to R.string.automation_location_gps
         ),
-        hideParentScreenIfHidden = true
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
 
     SmsAllowedNumbers(

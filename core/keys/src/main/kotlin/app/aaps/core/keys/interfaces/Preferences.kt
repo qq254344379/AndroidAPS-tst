@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** Shared empty flow backing the [Preferences.syncedLocalChanges] default (one instance, never emits). */
 private object EmptySyncedChanges {
+
     val flow: SharedFlow<NonPreferenceKey> = MutableSharedFlow()
 }
 
@@ -35,6 +36,9 @@ interface Preferences {
      * behaves like an ordinary put. Default delegates to [put] for implementations that don't sync.
      */
     fun putRemote(key: BooleanNonPreferenceKey, value: Boolean, version: Long) = put(key, value)
+
+    /** [String] variant of [putRemote] — applied-from-sync write, stamps [version], does not re-publish. */
+    fun putRemote(key: StringNonPreferenceKey, value: String, version: Long) = put(key, value)
 
     /**
      * Are we in currently in SimpleMode ?

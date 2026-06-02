@@ -81,7 +81,7 @@ class AutomationComposeContent(
         val ioScope = rememberCoroutineScope()
 
         when (route) {
-            is AutomationRoute.List        -> ListRoute(
+            is AutomationRoute.List -> ListRoute(
                 holder = holder,
                 setToolbarConfig = setToolbarConfig,
                 onNavigateBack = onNavigateBack,
@@ -90,7 +90,7 @@ class AutomationComposeContent(
                 activity = activity
             )
 
-            is AutomationRoute.Edit        -> EditRoute(
+            is AutomationRoute.Edit -> EditRoute(
                 holder = holder,
                 setToolbarConfig = setToolbarConfig,
                 activity = activity
@@ -101,7 +101,7 @@ class AutomationComposeContent(
                 setToolbarConfig = setToolbarConfig
             )
 
-            is AutomationRoute.MapPicker   -> MapPickerRoute(
+            is AutomationRoute.MapPicker -> MapPickerRoute(
                 holder = holder,
                 setToolbarConfig = setToolbarConfig,
                 route = route as AutomationRoute.MapPicker
@@ -133,9 +133,10 @@ class AutomationComposeContent(
                     settingsDesc = settingsDesc,
                     onBack = onNavigateBack,
                     onRun = onRun,
-                    // Settings + Run are master-only: automation does not execute on a client, so its
-                    // preferences are irrelevant there (and the preference screen hangs on a client).
-                    onSettings = onSettings?.takeIf { plugin.executionEnabled },
+                    // Run stays master-only (automation executes only on the master). Settings is shown on
+                    // the client too: its sole pref (location-provider mode) is now a Bidirectional synced
+                    // setting the client can change, and the screen resolves on a client (see BuiltInSearchables).
+                    onSettings = onSettings,
                     showRun = plugin.executionEnabled
                 )
             )

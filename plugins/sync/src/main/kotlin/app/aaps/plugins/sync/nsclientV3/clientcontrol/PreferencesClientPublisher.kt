@@ -9,6 +9,7 @@ import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -77,6 +78,8 @@ class PreferencesClientPublisher @Inject constructor(
     private fun serialize(key: NonPreferenceKey): Pair<String, Long>? {
         val value = when (key) {
             is BooleanNonPreferenceKey -> preferences.get(key).toString()
+            is StringNonPreferenceKey  -> preferences.get(key)
+
             else                       -> {
                 aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update unsupported key type for ${key.key}, skipping")
                 return null

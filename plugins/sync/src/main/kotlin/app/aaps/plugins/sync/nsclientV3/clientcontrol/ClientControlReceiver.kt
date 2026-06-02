@@ -20,6 +20,7 @@ import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
@@ -405,6 +406,11 @@ class ClientControlReceiver @Inject constructor(
                     }
                     preferences.putRemote(key, value, pushed.lastModified)
                     applied += "$keyString=$value"
+                }
+
+                is StringNonPreferenceKey  -> {
+                    preferences.putRemote(key, pushed.value, pushed.lastModified)
+                    applied += "$keyString=${pushed.value}"
                 }
 
                 else                       ->

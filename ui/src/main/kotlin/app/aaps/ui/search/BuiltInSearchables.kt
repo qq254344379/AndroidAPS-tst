@@ -304,9 +304,10 @@ class BuiltInSearchables @Inject constructor(
         add(SearchableItem.Category(pump))
         add(SearchableItem.Category(alerts))
         add(SearchableItem.Category(maintenance))
-        // Automation location setting only has effect on a master device — keep it out of search on
-        // a client too, matching AllPreferencesScreen's `if (config.APS)` gating.
-        if (config.APS) add(SearchableItem.Category(automation))
+        // Registered for both roles: the location-provider mode is a Bidirectional synced setting, so a
+        // client can view/set the master's value. Also makes the standalone automation cog resolve its
+        // screen on a client (findScreenDef sources from here).
+        add(SearchableItem.Category(automation))
         // Dialog settings (only for search, not in AllPreferencesScreen)
         add(SearchableItem.Category(fillButtons))
         add(SearchableItem.Category(insulinButtons))

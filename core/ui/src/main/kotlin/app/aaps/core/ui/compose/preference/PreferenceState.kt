@@ -21,6 +21,7 @@ import app.aaps.core.keys.interfaces.IntentPreferenceKey
 import app.aaps.core.keys.interfaces.PreferenceKey
 import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.StringPreferenceKey
 import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import app.aaps.core.ui.compose.LocalConfig
@@ -323,8 +324,17 @@ internal suspend fun observeSyncedKeysIntoState(
             is BooleanPreferenceKey    -> launch {
                 preferences.observe(key).drop(1).collect { setSharedBooleanState(sharedStates, key.key, preferences.get(key)) }
             }
+
             is BooleanNonPreferenceKey -> launch {
                 preferences.observe(key).drop(1).collect { setSharedBooleanState(sharedStates, key.key, it) }
+            }
+            // PreferenceKey getter applies mode logic; write the EFFECTIVE value for it.
+            is StringPreferenceKey     -> launch {
+                preferences.observe(key).drop(1).collect { setSharedStringState(sharedStates, key.key, preferences.get(key)) }
+            }
+
+            is StringNonPreferenceKey  -> launch {
+                preferences.observe(key).drop(1).collect { setSharedStringState(sharedStates, key.key, it) }
             }
         }
     }

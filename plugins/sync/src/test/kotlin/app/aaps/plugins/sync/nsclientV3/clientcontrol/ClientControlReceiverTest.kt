@@ -20,12 +20,14 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.LongNonKey
+import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
-import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
+import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.core.nssdk.utils.ClientControlCrypto
@@ -891,7 +893,19 @@ internal class ClientControlReceiverTest {
 
         sendPreferencesUpdate(clientId, secret, mapOf(concentrationKey to PrefEntry("true", 1_000L)))
 
-        verify(preferences, never()).putRemote(any(), any(), any())
+        verify(preferences, never()).putRemote(any<BooleanNonPreferenceKey>(), any(), any())
+    }
+
+    @Test
+    fun preferencesUpdateAppliesStringKey() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(preferences.get(StringKey.AutomationLocation.key)).thenReturn(StringKey.AutomationLocation)
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, StringKey.AutomationLocation.key)).thenReturn(1_000L)
+
+        sendPreferencesUpdate(clientId, secret, mapOf(StringKey.AutomationLocation.key to PrefEntry("GPS", 2_000L)))
+
+        verify(preferences).putRemote(StringKey.AutomationLocation, "GPS", 2_000L)
     }
 
     @Test
@@ -902,6 +916,6 @@ internal class ClientControlReceiverTest {
 
         sendPreferencesUpdate(clientId, secret, mapOf("not_a_synced_key" to PrefEntry("true", 9_000L)))
 
-        verify(preferences, never()).putRemote(any(), any(), any())
+        verify(preferences, never()).putRemote(any<BooleanNonPreferenceKey>(), any(), any())
     }
 }

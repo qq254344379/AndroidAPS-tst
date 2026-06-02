@@ -170,7 +170,13 @@ class PreferencesImpl @Inject constructor(
     override fun put(key: StringNonPreferenceKey, value: String) {
         sp.putString(key.key, value)
         stringFlows[key.key]?.value = value
+        onLocalSyncedWrite(key)
+    }
 
+    override fun putRemote(key: StringNonPreferenceKey, value: String, version: Long) {
+        sp.putString(key.key, value)
+        stringFlows[key.key]?.value = value
+        onRemoteSyncedWrite(key, version)
     }
 
     override fun observe(key: StringNonPreferenceKey): StateFlow<String> =

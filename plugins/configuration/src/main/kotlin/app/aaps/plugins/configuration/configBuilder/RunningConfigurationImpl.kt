@@ -33,6 +33,7 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.SyncChannel
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
@@ -171,6 +172,7 @@ class RunningConfigurationImpl @Inject constructor(
         coldSyncKeys().forEach { key ->
             when (key) {
                 is BooleanNonPreferenceKey -> out.put(key.key, preferences.get(key).toString())
+                is StringNonPreferenceKey  -> out.put(key.key, preferences.get(key))
                 else                       -> aapsLogger.warn(LTag.CORE, "syncedPrefs: unsupported key type for ${key.key}")
             }
         }
@@ -185,6 +187,7 @@ class RunningConfigurationImpl @Inject constructor(
             val key = preferences.get(keyString) ?: return@forEach
             when (key) {
                 is BooleanNonPreferenceKey -> valueString.toBooleanStrictOrNull()?.let { preferences.putRemote(key, it, 0L) }
+                is StringNonPreferenceKey  -> preferences.putRemote(key, valueString, 0L)
                 else                       -> aapsLogger.warn(LTag.CORE, "syncedPrefs: unsupported key type for $keyString")
             }
         }
