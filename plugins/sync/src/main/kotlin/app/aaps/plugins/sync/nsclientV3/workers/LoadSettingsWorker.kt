@@ -1,12 +1,15 @@
 package app.aaps.plugins.sync.nsclientV3.workers
 
 import android.content.Context
+import androidx.hilt.work.HiltWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
@@ -15,8 +18,9 @@ import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.SettingsIdentifiers
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.extensions.toRunningConfiguration
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
-import javax.inject.Inject
 
 /**
  * Catch-up loader for the NS `settings/aaps` document.
@@ -28,17 +32,19 @@ import javax.inject.Inject
  * [RunningConfiguration.apply], advance the settings high-water-mark. Real-time updates
  * after this initial catch-up arrive via the WS `settings` branch in `NSClientV3Service`.
  */
-class LoadSettingsWorker(
-    context: Context,
-    params: WorkerParameters
-) : LoggingWorker(context, params, Dispatchers.IO) {
-
-    @Inject lateinit var nsClientV3Plugin: NSClientV3Plugin
-    @Inject lateinit var nsClientRepository: NSClientRepository
-    @Inject lateinit var runningConfiguration: RunningConfiguration
-    @Inject lateinit var config: Config
-    @Inject lateinit var dateUtil: DateUtil
-    @Inject lateinit var orphanDetector: OrphanDetector
+@HiltWorker
+class LoadSettingsWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted params: WorkerParameters,
+    aapsLogger: AAPSLogger,
+    fabricPrivacy: FabricPrivacy,
+    private val nsClientV3Plugin: NSClientV3Plugin,
+    private val nsClientRepository: NSClientRepository,
+    private val runningConfiguration: RunningConfiguration,
+    private val config: Config,
+    private val dateUtil: DateUtil,
+    private val orphanDetector: OrphanDetector
+) : LoggingWorker(context, params, Dispatchers.IO, aapsLogger, fabricPrivacy) {
 
     override suspend fun doWorkAndLog(): Result {
         val client = nsClientV3Plugin.nsAndroidClient ?: return Result.success()
