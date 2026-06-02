@@ -248,6 +248,7 @@
     <string name="engineering_mode_enabled">Engineering mode enabled</string>
     <string name="back">Back</string>
     <string name="next">Next</string>
+    <string name="pref_syncs_with_main_phone">Syncs with the main phone</string>
     <string name="show_hide_records">Hide loop records</string>
 
     <!--    Protection-->
