@@ -31,6 +31,7 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
+import app.aaps.core.objects.extensions.observeChange
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.ui.R
@@ -42,6 +43,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.DecimalFormat
@@ -130,6 +133,15 @@ class FillDialogViewModel @Inject constructor(
             }
         }
         loadLastSiteLocation()
+        observeConcentrationEnabled()
+    }
+
+    // The concentration-support flag is a synced preference (it can change from another device while
+    // this dialog is open), so observe it instead of only snapshotting it at construction.
+    private fun observeConcentrationEnabled() {
+        preferences.observeChange(BooleanKey.GeneralInsulinConcentration)
+            .onEach { _uiState.update { it.copy(concentrationEnabled = preferences.get(BooleanKey.GeneralInsulinConcentration)) } }
+            .launchIn(viewModelScope)
     }
 
     private fun loadLastSiteLocation() {
