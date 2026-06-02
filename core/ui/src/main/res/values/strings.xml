@@ -628,6 +628,7 @@
     <string name="uel_running_mode_updarted">RUNNING MODE UPDATED</string>
     <string name="uel_scene_activated">SCENE ACTIVATED</string>
     <string name="uel_scene_deactivated">SCENE DEACTIVATED</string>
+    <string name="uel_remote_config_changed">REMOTE CONFIG CHANGED</string>
 
     <!-- HardLimits -->
     <string name="profile_low_target">Profile low target</string>

@@ -2,11 +2,13 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
@@ -78,6 +80,7 @@ class ClientControlReceiver @Inject constructor(
     private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
+    private val uel: UserEntryLogger,
     private val aapsLogger: AAPSLogger
 ) {
 
@@ -291,6 +294,7 @@ class ClientControlReceiver @Inject constructor(
         }
         if (changed > 0) preferences.put(StringNonKey.SceneDefinitions, existing.toString())
         nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: applied=$changed stale=$dropped")
+        if (changed > 0) uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: scenes")
     }
 
     /**
@@ -318,6 +322,7 @@ class ClientControlReceiver @Inject constructor(
         preferences.put(LongNonKey.AutomationEventsModified, message.version)
         automation.reloadInternalState()
         nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: applied v=${message.version} (${incoming.length()} events)")
+        uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: automation")
     }
 
     /**
@@ -345,6 +350,7 @@ class ClientControlReceiver @Inject constructor(
         preferences.put(LongNonKey.InsulinConfigurationModified, message.version)
         insulin.reloadInternalState()
         nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: applied v=${message.version}")
+        uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: insulin configuration")
     }
 
     /**
@@ -406,6 +412,7 @@ class ClientControlReceiver @Inject constructor(
             }
         }
         nsClientRepository.addLog("◄ CLIENTCTL", "preferences.update from ${entry.name}: " + if (applied.isEmpty()) "nothing applied" else "applied ${applied.joinToString()}")
+        if (applied.isNotEmpty()) uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: ${applied.joinToString()}")
     }
 
     private fun SceneAutomationResult.tag(): String = when (this) {

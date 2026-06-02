@@ -8,6 +8,7 @@ import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
@@ -61,6 +62,7 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
+    @Mock private lateinit var uel: UserEntryLogger
 
     // Same deterministic fake as the repository tests — encrypt/decrypt round-trip via reverse,
     // so the persisted form does not contain the original plaintext.
@@ -132,6 +134,7 @@ internal class ClientControlReceiverTest {
             offerPublisher,
             preferences,
             dateUtil,
+            uel,
             aapsLogger
         )
     }
