@@ -118,4 +118,26 @@ sealed class ClientControlMessage {
     data class InsulinActivate(
         val iCfgJson: String
     ) : ClientControlMessage()
+
+    /**
+     * Generic client→master push of plain, bidirectionally-synced preference values (keys carrying a
+     * `SyncSpec(direction = Bidirectional)`). One message batches every locally-changed synced key, so
+     * new synced settings need no new wire type — they just appear as another entry in [prefs].
+     *
+     * Each entry's value is the preference serialized as a string (the master parses it back using the
+     * key's declared type), plus a per-key `lastModified` the master applies last-writer-wins by.
+     * Master adopts strictly-newer values and republishes via the running-config doc.
+     */
+    @Serializable
+    @SerialName("preferences_update")
+    data class PreferencesUpdate(
+        val prefs: Map<String, PrefEntry>
+    ) : ClientControlMessage()
 }
+
+/** One synced preference on the wire: its value (serialized as a string) and edit timestamp. */
+@Serializable
+data class PrefEntry(
+    val value: String,
+    val lastModified: Long
+)

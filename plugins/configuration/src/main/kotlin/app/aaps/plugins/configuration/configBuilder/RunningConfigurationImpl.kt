@@ -30,8 +30,10 @@ import app.aaps.core.interfaces.smoothing.Smoothing
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.SyncChannel
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
@@ -92,6 +94,7 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("smoothing", smoothingInterface.javaClass.simpleName)
             json.put("calibration", calibrationInterface.javaClass.simpleName)
             json.put("overviewConfiguration", JSONObject(buildOverviewConfiguration().toString()))
+            json.put("syncedPrefs", buildSyncedPrefs())
             json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
             json.put("quickWizardConfiguration", JSONObject(buildFromPlugin(quickWizard).toString()))
             json.put("scenesConfiguration", JSONObject(buildFromPlugin(scenes).toString()))
@@ -147,7 +150,44 @@ class RunningConfigurationImpl @Inject constructor(
         keys += scenes.syncedKeys
         keys += automation.syncedKeys
         keys += SyncedConfigSchema.overviewKeys
+        // Cold-channel keys declared via SyncSpec (single source of truth) — a change republishes.
+        keys += coldSyncKeys()
         return keys.distinctBy { it.key }
+    }
+
+    /** Plain preference keys declared to ride the cold running-config doc via [SyncChannel.Cold]. */
+    private fun coldSyncKeys(): List<NonPreferenceKey> =
+        preferences.getSyncKeys().filter { it.sync?.channel == SyncChannel.Cold }
+
+    // Flat {keyString: valueAsString} block of cold synced prefs. Values serialized as strings so the
+    // wire stays a Map<String, String> regardless of the key's underlying type. Boolean-only for now.
+    //
+    // We sync the RAW persisted value (via the BooleanNonPreferenceKey getter), NOT the mode-adjusted
+    // effective value the BooleanPreferenceKey getter returns. Simple mode / defaultedBySM is a
+    // per-device presentation choice; the persisted user setting is what should travel, and each
+    // device re-applies its own mode logic on read. Do not "fix" this to preferences.get(asPreferenceKey).
+    private fun buildSyncedPrefs(): JSONObject {
+        val out = JSONObject()
+        coldSyncKeys().forEach { key ->
+            when (key) {
+                is BooleanNonPreferenceKey -> out.put(key.key, preferences.get(key).toString())
+                else                       -> aapsLogger.warn(LTag.CORE, "syncedPrefs: unsupported key type for ${key.key}")
+            }
+        }
+        return out
+    }
+
+    // Apply master-published synced prefs on the client. "Master wins": adopt verbatim via putRemote
+    // (which suppresses the client→master echo and floors the modified stamp; the wire carries no
+    // per-key lastModified yet). A later client edit out-stamps it via max(stored+1, now()).
+    private fun applySyncedPrefs(prefs: Map<String, String>) {
+        prefs.forEach { (keyString, valueString) ->
+            val key = preferences.get(keyString) ?: return@forEach
+            when (key) {
+                is BooleanNonPreferenceKey -> valueString.toBooleanStrictOrNull()?.let { preferences.putRemote(key, it, 0L) }
+                else                       -> aapsLogger.warn(LTag.CORE, "syncedPrefs: unsupported key type for $keyString")
+            }
+        }
     }
 
     // Runtime state — published to the separate "hot" doc, not the cold config doc.
@@ -228,6 +268,8 @@ class RunningConfigurationImpl @Inject constructor(
         }
 
         configuration.overviewConfiguration?.let { applyOverviewConfiguration(it) }
+
+        configuration.syncedPrefs?.let { applySyncedPrefs(it) }
 
         configuration.safetyConfiguration?.let { sc ->
             applyToPlugin(activePlugin.activeSafety, sc)

@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import app.aaps.core.interfaces.profile.ProfileUtil
+import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.BooleanPreferenceKey
 import app.aaps.core.keys.interfaces.DoublePreferenceKey
 import app.aaps.core.keys.interfaces.IntPreferenceKey
@@ -25,6 +26,9 @@ import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import app.aaps.core.ui.compose.LocalConfig
 import app.aaps.core.ui.compose.LocalPreferences
 import app.aaps.core.ui.compose.LocalProfileUtil
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -296,6 +300,34 @@ private fun getSharedDoubleState(map: SnapshotStateMap<String, Any?>, key: Strin
 
 private fun setSharedDoubleState(map: SnapshotStateMap<String, Any?>, key: String, value: Double) {
     map["double:$key"] = value
+}
+
+/**
+ * Feed external preference writes into the shared-state map so open preference screens live-update,
+ * not just on edits made on-screen. Without this the map is seeded once via `getOrPut` and never
+ * re-reads, so a value changed behind the screen's back (notably device-to-device sync) stays stale
+ * until the user navigates away and back.
+ *
+ * Scoped to the keys declared synced ([Preferences.getSyncKeys]) — the only realistic source of
+ * external writes — so it's a bounded, known-up-front set rather than reacting to lazy map growth.
+ * Launched once from [ProvidePreferenceTheme]. Currently handles Boolean keys (the only synced type
+ * so far); extend the `when` per type as new synced types appear.
+ */
+internal suspend fun observeSyncedKeysIntoState(
+    preferences: Preferences,
+    sharedStates: SnapshotStateMap<String, Any?>
+): Unit = coroutineScope {
+    preferences.getSyncKeys().forEach { key ->
+        when (key) {
+            // PreferenceKey getter applies mode logic (simpleMode/engineering); write the EFFECTIVE value.
+            is BooleanPreferenceKey    -> launch {
+                preferences.observe(key).drop(1).collect { setSharedBooleanState(sharedStates, key.key, preferences.get(key)) }
+            }
+            is BooleanNonPreferenceKey -> launch {
+                preferences.observe(key).drop(1).collect { setSharedBooleanState(sharedStates, key.key, it) }
+            }
+        }
+    }
 }
 
 // =================================

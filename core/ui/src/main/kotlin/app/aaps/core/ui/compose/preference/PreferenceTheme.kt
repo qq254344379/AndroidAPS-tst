@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.aaps.core.ui.compose.LocalPreferences
 
 @Stable
 class PreferenceTheme(
@@ -155,6 +157,10 @@ fun ProvidePreferenceTheme(
     content: @Composable () -> Unit,
 ) {
     val sharedPreferenceStates = remember { mutableStateMapOf<String, Any?>() }
+    // Reflect external preference writes (device-to-device sync) into the shared state so every
+    // preference screen live-updates, not just on-screen edits. Scoped to synced keys.
+    val preferences = LocalPreferences.current
+    LaunchedEffect(preferences) { observeSyncedKeysIntoState(preferences, sharedPreferenceStates) }
     CompositionLocalProvider(
         LocalPreferenceTheme provides theme,
         LocalSharedPreferenceStates provides sharedPreferenceStates,

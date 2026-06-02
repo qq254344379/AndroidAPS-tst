@@ -30,6 +30,10 @@ data class NSRunningConfiguration(
     val scenesConfiguration: JsonObject? = null,
     val automationConfiguration: JsonObject? = null,
     val activeScene: NSActiveScene? = null,
+    // Flat block of cold-channel synced preference values (key string → value serialized as string),
+    // driven by each key's SyncSpec. Applied with "master wins" on the client; client→master edits
+    // travel separately via the signed Client-Control PreferencesUpdate channel.
+    val syncedPrefs: Map<String, String>? = null,
     // Computed runtime flag carried in the "hot" doc alongside [activeScene] — whether autosens
     // is actually in use on the master. Top-level (not nested in overviewConfiguration) so it can
     // ride the small hot doc and refresh on scene lifecycle events.

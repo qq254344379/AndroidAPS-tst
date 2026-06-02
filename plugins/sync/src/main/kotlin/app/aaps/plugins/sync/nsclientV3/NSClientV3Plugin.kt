@@ -58,6 +58,7 @@ import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.AutomationDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.InsulinDefinitionsClientPublisher
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.PreferencesClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolus
@@ -137,6 +138,7 @@ class NSClientV3Plugin @Inject constructor(
     private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
     private val automationDefinitionsClientPublisher: AutomationDefinitionsClientPublisher,
     private val insulinDefinitionsClientPublisher: InsulinDefinitionsClientPublisher,
+    private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
 ) : NsClient, Sync, PluginBaseWithPreferences(
     PluginDescription()
@@ -257,6 +259,7 @@ class NSClientV3Plugin @Inject constructor(
         sceneDefinitionsClientPublisher.start(scope)
         automationDefinitionsClientPublisher.start(scope)
         insulinDefinitionsClientPublisher.start(scope)
+        preferencesClientPublisher.start(scope)
         // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
         // WS settings-collection listener in NSClientV3Service that calls into
         // [handleClientControlSettingsEvent]; this loop only catches docs that arrived while
@@ -406,6 +409,7 @@ class NSClientV3Plugin @Inject constructor(
         sceneDefinitionsClientPublisher.stop()
         automationDefinitionsClientPublisher.stop()
         insulinDefinitionsClientPublisher.stop()
+        preferencesClientPublisher.stop()
         scope.cancel()
         stopService()
         WorkManager.getInstance(context).cancelUniqueWork(JOB_NAME)

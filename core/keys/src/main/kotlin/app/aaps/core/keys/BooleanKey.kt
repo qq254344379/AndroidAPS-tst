@@ -3,6 +3,9 @@ package app.aaps.core.keys
 import app.aaps.core.keys.interfaces.BooleanPreferenceKey
 import app.aaps.core.keys.interfaces.PreferenceEnabledCondition
 import app.aaps.core.keys.interfaces.PreferenceVisibility
+import app.aaps.core.keys.interfaces.SyncChannel
+import app.aaps.core.keys.interfaces.SyncDirection
+import app.aaps.core.keys.interfaces.SyncSpec
 
 enum class BooleanKey(
     override val key: String,
@@ -21,14 +24,16 @@ enum class BooleanKey(
     override val engineeringModeOnly: Boolean = false,
     override val exportable: Boolean = true,
     override val visibility: PreferenceVisibility = PreferenceVisibility.ALWAYS,
-    override val enabledCondition: PreferenceEnabledCondition = PreferenceEnabledCondition.ALWAYS
+    override val enabledCondition: PreferenceEnabledCondition = PreferenceEnabledCondition.ALWAYS,
+    override val sync: SyncSpec? = null
 ) : BooleanPreferenceKey {
 
     GeneralSimpleMode("simple_mode", true, R.string.pref_title_simple_mode),
     GeneralInsulinConcentration(
         "insulin_concentration_enabled", false, R.string.pref_title_insulin_concentration, R.string.pref_summary_insulin_concentration,
         defaultedBySM = true,
-        enabledCondition = PreferenceEnabledCondition { it.isConcentrationEnabled }
+        enabledCondition = PreferenceEnabledCondition { it.isConcentrationEnabled },
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     OverviewKeepScreenOn("keep_screen_on", false, R.string.pref_title_keep_screen_on, R.string.pref_summary_keep_screen_on, calculatedDefaultValue = true),
     OverviewShowTreatmentButton("show_treatment_button", false, R.string.pref_title_show_treatment_button, defaultedBySM = true, hideParentScreenIfHidden = true),

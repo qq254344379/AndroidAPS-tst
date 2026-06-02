@@ -16,11 +16,14 @@ import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
+import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
@@ -852,5 +855,50 @@ internal class ClientControlReceiverTest {
         sendInsulinActivate(clientId, secret, "{not json")
 
         verify(profileFunction, never()).createProfileSwitchWithNewInsulin(any(), any())
+    }
+
+    // -- preferences_update (generic synced-pref channel) ---------------------------------
+
+    private val concentrationKey = BooleanKey.GeneralInsulinConcentration.key
+
+    private suspend fun sendPreferencesUpdate(clientId: String, secret: ByteArray, prefs: Map<String, PrefEntry>, counter: Long = 5L) {
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}preferences_update_$clientId"
+        val msg = ClientControlMessage.PreferencesUpdate(prefs)
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
+    }
+
+    @Test
+    fun preferencesUpdateAppliesStrictlyNewerBidirectionalKey() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(preferences.get(concentrationKey)).thenReturn(BooleanKey.GeneralInsulinConcentration)
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, concentrationKey)).thenReturn(1_000L)
+
+        sendPreferencesUpdate(clientId, secret, mapOf(concentrationKey to PrefEntry("true", 2_000L)))
+
+        verify(preferences).putRemote(BooleanKey.GeneralInsulinConcentration, true, 2_000L)
+    }
+
+    @Test
+    fun preferencesUpdateDropsStaleByLww() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(preferences.get(concentrationKey)).thenReturn(BooleanKey.GeneralInsulinConcentration)
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, concentrationKey)).thenReturn(5_000L)
+
+        sendPreferencesUpdate(clientId, secret, mapOf(concentrationKey to PrefEntry("true", 1_000L)))
+
+        verify(preferences, never()).putRemote(any(), any(), any())
+    }
+
+    @Test
+    fun preferencesUpdateRejectsUnknownKey() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(preferences.get("not_a_synced_key")).thenReturn(null)
+
+        sendPreferencesUpdate(clientId, secret, mapOf("not_a_synced_key" to PrefEntry("true", 9_000L)))
+
+        verify(preferences, never()).putRemote(any(), any(), any())
     }
 }

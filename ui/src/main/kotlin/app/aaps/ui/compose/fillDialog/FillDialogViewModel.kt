@@ -137,7 +137,9 @@ class FillDialogViewModel @Inject constructor(
     }
 
     // The concentration-support flag is a synced preference (it can change from another device while
-    // this dialog is open), so observe it instead of only snapshotting it at construction.
+    // this dialog is open). This dialog is not a preference screen, so it isn't covered by the
+    // shared-state observer in ProvidePreferenceTheme — observe the key here instead of only
+    // snapshotting it at construction.
     private fun observeConcentrationEnabled() {
         preferences.observeChange(BooleanKey.GeneralInsulinConcentration)
             .onEach { _uiState.update { it.copy(concentrationEnabled = preferences.get(BooleanKey.GeneralInsulinConcentration)) } }

@@ -13,9 +13,12 @@ import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
@@ -176,6 +179,7 @@ class ClientControlReceiver @Inject constructor(
                 is ClientControlMessage.AutomationDefinitionsUpdate -> onVerifiedAutomationUpdate(entry, envelope, message, now)
                 is ClientControlMessage.InsulinConfigurationUpdate  -> onVerifiedInsulinUpdate(entry, envelope, message, now)
                 is ClientControlMessage.InsulinActivate             -> onVerifiedInsulinActivate(entry, envelope, message, now)
+                is ClientControlMessage.PreferencesUpdate           -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
             }
         }
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -364,6 +368,44 @@ class ClientControlReceiver @Inject constructor(
             "◄ CLIENTCTL",
             "insulin.activate from ${entry.name}: " + if (applied) "applied ${iCfg.insulinLabel}" else "no active profile"
         )
+    }
+
+    /**
+     * Generic apply of client-pushed bidirectionally-synced preference values. Per key: resolve it
+     * from the registry, reject anything not declared `Bidirectional` (authority), drop stale pushes
+     * by per-key last-writer-wins, and write the winners via [Preferences.putRemote] — which stamps
+     * the modified time to the pushed version and suppresses re-publish (no echo). The running-config
+     * publisher then republishes the cold doc, fanning the merged value out to all clients.
+     *
+     * Value parsing is Boolean-only for now (the only bidirectional plain key so far); extend the
+     * `when` per type as new types are marked `Bidirectional`.
+     */
+    private fun onVerifiedPreferencesUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.PreferencesUpdate, now: Long) {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val applied = mutableListOf<String>()
+        message.prefs.forEach { (keyString, pushed) ->
+            val key = preferences.get(keyString)
+            if (key == null || key.sync?.direction != SyncDirection.Bidirectional) {
+                aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} rejected $keyString (unknown or not client-writable)")
+                return@forEach
+            }
+            if (pushed.lastModified <= preferences.get(LongComposedKey.SyncedPrefModified, keyString)) return@forEach // stale, LWW
+            when (key) {
+                is BooleanNonPreferenceKey -> {
+                    val value = pushed.value.toBooleanStrictOrNull()
+                    if (value == null) {
+                        aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} bad boolean for $keyString: '${pushed.value}'")
+                        return@forEach
+                    }
+                    preferences.putRemote(key, value, pushed.lastModified)
+                    applied += "$keyString=$value"
+                }
+
+                else                       ->
+                    aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} unsupported key type for $keyString")
+            }
+        }
+        nsClientRepository.addLog("◄ CLIENTCTL", "preferences.update from ${entry.name}: " + if (applied.isEmpty()) "nothing applied" else "applied ${applied.joinToString()}")
     }
 
     private fun SceneAutomationResult.tag(): String = when (this) {

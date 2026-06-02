@@ -1,6 +1,7 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.interfaces.automation.ClientControlAutomationSender
+import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -9,6 +10,7 @@ import app.aaps.core.interfaces.scenes.ClientControlSceneSender
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
+import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.serialization.json.Json
@@ -43,7 +45,7 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) : ClientControlSceneSender, ClientControlAutomationSender, ClientControlInsulinSender {
+) : ClientControlSceneSender, ClientControlAutomationSender, ClientControlInsulinSender, ClientControlPreferencesSender {
 
     companion object {
 
@@ -110,7 +112,8 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.SceneDefinitionsUpdate,
             is ClientControlMessage.AutomationDefinitionsUpdate,
             is ClientControlMessage.InsulinConfigurationUpdate,
-            is ClientControlMessage.InsulinActivate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
+            is ClientControlMessage.InsulinActivate,
+            is ClientControlMessage.PreferencesUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
         return uploadEnvelope(identifier, envelope)
     }
@@ -132,6 +135,9 @@ class ClientControlPublisher @Inject constructor(
 
     override suspend fun sendInsulinActivate(iCfgJson: String): ClientControlSendResult =
         publish(ClientControlMessage.InsulinActivate(iCfgJson))
+
+    override suspend fun sendPreferencesUpdate(changes: Map<String, Pair<String, Long>>): ClientControlSendResult =
+        publish(ClientControlMessage.PreferencesUpdate(changes.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) }))
 
     private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): ClientControlSendResult {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: run {

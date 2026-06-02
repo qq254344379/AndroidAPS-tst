@@ -3,6 +3,7 @@ package app.aaps.plugins.sync.di
 import android.content.Context
 import androidx.work.WorkManager
 import app.aaps.core.interfaces.automation.ClientControlAutomationSender
+import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
@@ -102,6 +103,7 @@ abstract class SyncModule {
 
         @Binds fun bindClientControlAutomationSender(publisher: ClientControlPublisher): ClientControlAutomationSender
         @Binds fun bindClientControlInsulinSender(publisher: ClientControlPublisher): ClientControlInsulinSender
+        @Binds fun bindClientControlPreferencesSender(publisher: ClientControlPublisher): ClientControlPreferencesSender
     }
 
 }

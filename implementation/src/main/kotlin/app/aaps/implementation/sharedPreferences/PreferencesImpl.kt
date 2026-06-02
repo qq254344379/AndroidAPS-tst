@@ -44,9 +44,13 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringComposedNonPreferenceKey
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.StringPreferenceKey
+import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import dagger.Lazy
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ConcurrentHashMap
@@ -91,6 +95,28 @@ class PreferencesImpl @Inject constructor(
             ProfileIntKey::class.java,
         )
 
+    // Emits a key on every LOCAL write to a Bidirectional-synced preference (not on putRemote), so
+    // the client→master sync publisher can push local edits. Buffered + DROP_OLDEST so a pref write
+    // never suspends or fails if no collector is attached.
+    private val _syncedLocalChanges = MutableSharedFlow<NonPreferenceKey>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val syncedLocalChanges: SharedFlow<NonPreferenceKey> get() = _syncedLocalChanges
+
+    override fun getSyncKeys(): List<NonPreferenceKey> =
+        prefsList.flatMap { it.enumConstants!!.asIterable() }.filter { it.sync != null }
+
+    /** Local edit of a synced key: bump its monotonic modified stamp and signal the publisher. */
+    private fun onLocalSyncedWrite(key: NonPreferenceKey) {
+        if (key.sync?.direction != SyncDirection.Bidirectional) return
+        put(LongComposedKey.SyncedPrefModified, key.key, value = max(get(LongComposedKey.SyncedPrefModified, key.key) + 1, dateUtil.now()))
+        _syncedLocalChanges.tryEmit(key)
+    }
+
+    /** Applied-from-sync write of a synced key: adopt the incoming stamp, do NOT signal the publisher. */
+    private fun onRemoteSyncedWrite(key: NonPreferenceKey, version: Long) {
+        if (key.sync?.direction != SyncDirection.Bidirectional) return
+        put(LongComposedKey.SyncedPrefModified, key.key, value = version)
+    }
+
     private val booleanFlows = ConcurrentHashMap<String, MutableStateFlow<Boolean>>()
     private val stringFlows = ConcurrentHashMap<String, MutableStateFlow<String>>()
     private val doubleFlows = ConcurrentHashMap<String, MutableStateFlow<Double>>()
@@ -113,7 +139,13 @@ class PreferencesImpl @Inject constructor(
     override fun put(key: BooleanNonPreferenceKey, value: Boolean) {
         sp.putBoolean(key.key, value)
         booleanFlows[key.key]?.value = value
+        onLocalSyncedWrite(key)
+    }
 
+    override fun putRemote(key: BooleanNonPreferenceKey, value: Boolean, version: Long) {
+        sp.putBoolean(key.key, value)
+        booleanFlows[key.key]?.value = value
+        onRemoteSyncedWrite(key, version)
     }
 
     override fun observe(key: BooleanNonPreferenceKey): StateFlow<Boolean> =
