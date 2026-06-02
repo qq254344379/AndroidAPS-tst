@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -93,6 +94,7 @@ class TempTargetManagementViewModel @Inject constructor(
     init {
         loadData()
         observeTempTargetChanges()
+        observePresetChanges()
     }
 
     /**
@@ -212,6 +214,19 @@ class TempTargetManagementViewModel @Inject constructor(
                 // Reload data when TT changes in database
                 loadData()
             }
+            .launchIn(viewModelScope)
+    }
+
+    /**
+     * Subscribe to TempTargetPresets changes (edited elsewhere or synced from the master phone).
+     * Soft refresh: updates the preset cards + active TT without resetting the editor, so an
+     * incoming change doesn't clobber the user's in-progress edits. Reads only — no echo/loop.
+     */
+    private fun observePresetChanges() {
+        preferences
+            .observe(StringNonKey.TempTargetPresets)
+            .drop(1) // skip initial replay; loadData() in init already read the current value
+            .onEach { refreshData() }
             .launchIn(viewModelScope)
     }
 
