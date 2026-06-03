@@ -24,8 +24,10 @@ import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.StringPreferenceKey
+import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
 import app.aaps.core.ui.compose.LocalConfig
+import app.aaps.core.ui.compose.LocalMasterReachable
 import app.aaps.core.ui.compose.LocalPreferences
 import app.aaps.core.ui.compose.LocalProfileUtil
 import kotlinx.coroutines.coroutineScope
@@ -173,6 +175,12 @@ fun calculatePreferenceVisibility(
             enabled = false
         }
     }
+
+    // On a client, a Bidirectional synced key is master-arbitrated — lock the whole row while the
+    // master is unreachable, so the user can't make an edit that won't sync now (it would queue
+    // silently and could expire past the replay window). Master/previews never gated (default true).
+    if (config.AAPSCLIENT && preferenceKey.sync?.direction == SyncDirection.Bidirectional && !LocalMasterReachable.current)
+        enabled = false
 
     return PreferenceVisibilityState(visible, enabled)
 }

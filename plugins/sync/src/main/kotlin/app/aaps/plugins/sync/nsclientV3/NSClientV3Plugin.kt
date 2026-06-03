@@ -52,6 +52,7 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.NSAndroidClientImpl
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.remotemodel.LastModified
+import app.aaps.core.objects.extensions.freshness
 import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
@@ -89,19 +90,24 @@ import app.aaps.plugins.sync.nsclientV3.workers.LoadStatusWorker
 import app.aaps.plugins.sync.nsclientV3.workers.LoadTreatmentsWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -429,6 +435,30 @@ class NSClientV3Plugin @Inject constructor(
     internal fun bumpDevicestatusHeartbeat(now: Long) {
         _lastDevicestatusReceivedAt.value = now
     }
+
+    // Grace before flagging offline on a WS drop — swallows brief flaps (reconnect storms during NS
+    // restarts), short enough that a real outage surfaces in seconds.
+    private val wsDisconnectGraceMs = 5_000L
+    // Heartbeat staleness threshold (~1.8 loop cycles): one missed devicestatus publication of grace.
+    private val heartbeatStaleMs = 9 * 60_000L
+    private val heartbeatTickMs = 60_000L
+    // App-lifetime scope for [masterReachable] — independent of the restartable [scope] so the derived
+    // signal (and its freshness ticker) survives service stop/start.
+    private val reachableScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // See [NsClient.masterReachable]. Master: always reachable. Client: live WS (falling-edge grace)
+    // AND a fresh master devicestatus heartbeat. Single shared flow (WhileSubscribed) — consumers no
+    // longer each rebuild the combine on their own scope.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override val masterReachable: StateFlow<Boolean> =
+        if (!config.AAPSCLIENT) MutableStateFlow(true).asStateFlow()
+        else combine(
+            wsConnectedFlow.transformLatest { connected ->
+                if (connected) emit(true) else { delay(wsDisconnectGraceMs); emit(false) }
+            },
+            lastDevicestatusReceivedAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = true)
+        ) { ws, fresh -> ws && fresh }
+            .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), true)
 
     private fun setClient() {
         if (nsAndroidClient == null)

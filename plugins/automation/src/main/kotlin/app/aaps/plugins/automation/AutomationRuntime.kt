@@ -302,12 +302,17 @@ class AutomationRuntime @Inject constructor(
         @Suppress("OPT_IN_USAGE")
         _events.drop(1).debounce(300).onEach { rxBus.send(EventWearUpdateTiles()) }.launchIn(newScope)
 
-        // Pick up definitions pushed from the master phone: the cold-key bidirectional sync writes
-        // [StringNonKey.AutomationEvents] via putRemote, which updates this observed StateFlow. Client
-        // only — the master is the authority and mutates its own in-memory list directly on edit, so
-        // it must not reload from the pref (that would clobber lastRun / btConnects runtime state).
-        if (config.AAPSCLIENT)
-            preferences.observe(StringNonKey.AutomationEvents).drop(1).onEach { loadFromSP() }.launchIn(newScope)
+        // Adopt definitions written behind our back via putRemote — BOTH directions:
+        //  • master→client cold-sync push (on the client),
+        //  • client→master push applied by ClientControlReceiver (on the master) — this restores the
+        //    master reload the old bespoke `onVerifiedAutomationUpdate`/`reloadInternalState()` did,
+        //    which the move to the generic pref channel dropped.
+        // Skip OUR OWN writes (storeToSP, incl. master last-run persists) via the value echo-check so
+        // the master doesn't re-parse on its own edits; loadFromSP preserves lastRun by id, so a real
+        // remote change doesn't reset run-timers for unchanged events.
+        preferences.observe(StringNonKey.AutomationEvents).drop(1).onEach { json ->
+            if (json != lastSelfWritten) loadFromSP()
+        }.launchIn(newScope)
 
         // Execution is master-only. On a client we only edit + sync definitions — no loop, no
         // location service, no event processing.
@@ -389,10 +394,19 @@ class AutomationRuntime @Inject constructor(
         }
     }
 
+    /**
+     * The exact JSON this runtime last wrote itself (edit or last-run persist). The self-observe below
+     * compares against it to skip OUR OWN writes — so the master doesn't re-parse (and clobber the
+     * runtime list) on its own edits / per-tick last-run persists, only on a genuine remote push.
+     */
+    @Volatile private var lastSelfWritten: String? = null
+
     // Pure compose — only ever reached from the EDIT-driven [_persist] trigger (never from a load), so
     // no band-aid is needed: a verbatim load doesn't persist, and an edit always changes content.
     private fun storeToSP() {
-        preferences.put(StringNonKey.AutomationEvents, eventsToJson())
+        val json = eventsToJson()
+        lastSelfWritten = json
+        preferences.put(StringNonKey.AutomationEvents, json)
     }
 
     /** Serialize the in-memory event list to the persisted JSON shape (what [storeToSP] writes). */
@@ -415,13 +429,20 @@ class AutomationRuntime @Inject constructor(
     @VisibleForTesting
     @Synchronized
     internal fun loadFromSP() {
+        // Carry run-timers across the re-parse: lastRun isn't serialized, so a naive reload would reset
+        // every event's timer and (on a master that executes) risk re-firing automations right after a
+        // remote push. Preserve it by id for events that still exist; new/changed ids start fresh.
+        val previousLastRun = automationEvents.associate { it.id to it.lastRun }
         automationEvents.clear()
         val data = preferences.get(StringNonKey.AutomationEvents)
         if (data != "")
             try {
                 val array = JSONArray(data)
-                for (i in 0 until array.length())
-                    automationEvents.add(AutomationEventObject(injector).fromJSON(array.getJSONObject(i).toString()))
+                for (i in 0 until array.length()) {
+                    val event = AutomationEventObject(injector).fromJSON(array.getJSONObject(i).toString())
+                    previousLastRun[event.id]?.let { event.lastRun = it }
+                    automationEvents.add(event)
+                }
             } catch (e: JSONException) {
                 e.printStackTrace()
             }

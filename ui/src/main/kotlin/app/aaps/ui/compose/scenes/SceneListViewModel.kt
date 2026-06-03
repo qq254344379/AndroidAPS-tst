@@ -74,8 +74,8 @@ class SceneListViewModel @Inject constructor(
     // Bumped on each runtime-state event so [activationReasons] recomputes.
     private val activationTick = MutableStateFlow(0)
 
-    /** "Master is reachable for scene operations" signal — see [masterReachableFlow]. */
-    private val masterReachable: StateFlow<Boolean> = masterReachableFlow(nsClient, config, viewModelScope)
+    /** "Master is reachable for scene operations" signal — see [NsClient.masterReachable]. */
+    private val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
 
     /**
      * Top-of-screen banner string when scene operations are globally locked, or null when

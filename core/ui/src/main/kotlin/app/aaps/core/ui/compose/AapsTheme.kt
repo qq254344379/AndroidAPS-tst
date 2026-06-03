@@ -63,6 +63,14 @@ val LocalDateUtil = compositionLocalOf<DateUtil> { error("No DateUtil provided")
 val LocalConfig = compositionLocalOf<Config> { error("No Config provided") }
 
 /**
+ * CompositionLocal exposing whether the master phone is currently reachable (see
+ * `NsClient.masterReachable`). Defaults to `true` so master, previews, and any non-client context
+ * are never gated; the main activity provides the live value on a client. Used to disable
+ * `Bidirectional` synced preference rows while the master is offline (their edits can't sync).
+ */
+val LocalMasterReachable = compositionLocalOf { true }
+
+/**
  * CompositionLocal providing access to ProfileUtil for glucose unit conversions.
  * Avoids threading profileUtil through multiple composable layers.
  */

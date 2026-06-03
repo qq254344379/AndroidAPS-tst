@@ -20,7 +20,6 @@ import app.aaps.core.interfaces.rx.events.EventRefreshOverview
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.ui.compose.scenes.SceneExecutor
 import app.aaps.ui.compose.scenes.SceneRepository
-import app.aaps.ui.compose.scenes.masterReachableFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -80,7 +79,7 @@ class ScenesViewModel @Inject constructor(
     val uiState: StateFlow<ScenesUiState> = _uiState.asStateFlow()
 
     /** AAPSCLIENT-only WS-reachability signal — overlays "Master disconnected" on every gate. */
-    private val masterReachable: StateFlow<Boolean> = masterReachableFlow(nsClient, config, viewModelScope)
+    private val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
 
     init {
         setupEventListeners()

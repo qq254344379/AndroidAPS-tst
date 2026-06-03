@@ -152,6 +152,41 @@ class AutomationRuntimeSyncTest : TestBaseWithProfile() {
     }
 
     @Test
+    fun `master adopts an external client push at runtime`() = runTest {
+        // Same scenario as the client self-observe test above, but on a MASTER (AAPSCLIENT=false).
+        // Regression guard: the self-observe was once gated `if (config.AAPSCLIENT)`, so a client→master
+        // push (applied by ClientControlReceiver via putRemote → observe) never reloaded the master's
+        // in-memory list — "message received, automations not updated". APS=false here only skips the
+        // processing loop; the observe/reload path is flavor-independent.
+        whenever(config.AAPSCLIENT).thenReturn(false)
+        val master = newRuntime()
+        val sutScope = CoroutineScope(StandardTestDispatcher(testScheduler))
+        master.start(sutScope)
+        advanceUntilIdle()
+
+        master.add(event("base"))
+        advanceUntilIdle()
+        val canonical = autoFlow.value
+        val baseSize = master.events.value.size
+
+        // Master diverges locally (e.g. a stale list before the push arrives).
+        master.add(event("local-extra"))
+        advanceUntilIdle()
+        assertThat(master.events.value.size).isEqualTo(baseSize + 1)
+        val writesBeforePush = localPutCount
+
+        // A client pushes its config; the receiver applies it via putRemote, feeding observe() without
+        // a local put. The master must re-parse and adopt it.
+        autoFlow.value = canonical
+        advanceUntilIdle()
+
+        assertThat(master.events.value.size).isEqualTo(baseSize)   // master reloaded and adopted the push
+        assertThat(localPutCount).isEqualTo(writesBeforePush)      // verbatim load — no echo write back
+
+        sutScope.cancel()
+    }
+
+    @Test
     fun `master bootstrap backfills missing ids and persists once via putRemote`() = runTest {
         // Build a canonical event JSON via the runtime, then strip its id to simulate legacy id-less data.
         val producerScope = CoroutineScope(StandardTestDispatcher(testScheduler))

@@ -72,7 +72,6 @@ import app.aaps.ui.compose.scenes.ActiveSceneManager
 import app.aaps.ui.compose.scenes.SceneChainTargetResolver
 import app.aaps.ui.compose.scenes.SceneExecutor
 import app.aaps.ui.compose.scenes.SceneRepository
-import app.aaps.ui.compose.scenes.masterReachableFlow
 import app.aaps.ui.compose.scenes.surfaceErrorDialog
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -142,7 +141,7 @@ class MainViewModel @Inject constructor(
      * affordance (e.g. the active-scene chip's End button) that would hit
      * [ClientControlSceneSender] under the hood.
      */
-    val masterReachable: StateFlow<Boolean> = masterReachableFlow(nsClient, config, viewModelScope)
+    val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
 
     /** Toolbar items as a separate StateFlow to avoid unnecessary recompositions of the main UI */
     private val _quickLaunchItems = MutableStateFlow<List<ResolvedQuickLaunchItem>>(emptyList())

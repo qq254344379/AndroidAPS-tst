@@ -35,6 +35,19 @@ interface NsClient : Sync {
         get() = MutableStateFlow(0L).asStateFlow()
 
     /**
+     * Derived "master is reachable for remote control / config edits" signal. Combines
+     * [wsConnectedFlow] (with a short falling-edge grace so brief WS flaps don't lock the UI) and
+     * [lastDevicestatusReceivedAt] freshness (master heartbeat), short-circuited to always-`true`
+     * on a master device. Consumers — scene gating and client→master config edits — read this
+     * instead of reassembling the two raw signals, and share one computed flow.
+     *
+     * Default exposes a static always-`true` flow: impls without a WS/heartbeat pipeline must never
+     * lock controls on its strength.
+     */
+    val masterReachable: StateFlow<Boolean>
+        get() = MutableStateFlow(true).asStateFlow()
+
+    /**
      * NS URL
      */
     val address: String
