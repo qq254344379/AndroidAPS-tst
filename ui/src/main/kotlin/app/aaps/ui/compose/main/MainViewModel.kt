@@ -183,7 +183,9 @@ class MainViewModel @Inject constructor(
         overviewDataCache.profileFlow,
         overviewDataCache.runningModeFlow,
         overviewDataCache.tbrFlow,
-        progressTicker
+        // Re-emit the latest tick whenever QuickWizard entries change (local edit or synced from the
+        // main phone) so the carousel rebuilds. changes is a StateFlow (initial 0) → never blocks.
+        combine(progressTicker, quickWizard.changes) { now, _ -> now }
     ) { ttData, profileData, rmData, tbrData, now ->
         buildChipState(ttData, profileData, rmData, tbrData, now)
     }

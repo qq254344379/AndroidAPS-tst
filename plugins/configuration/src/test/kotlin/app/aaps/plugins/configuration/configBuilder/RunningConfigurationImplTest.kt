@@ -17,7 +17,6 @@ import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
-import app.aaps.core.objects.wizard.QuickWizard
 import kotlinx.serialization.json.JsonObject
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -40,7 +39,6 @@ internal class RunningConfigurationImplTest {
 
     @Mock private lateinit var activePlugin: ActivePlugin
     @Mock private lateinit var insulin: Insulin
-    @Mock private lateinit var quickWizard: QuickWizard
     @Mock private lateinit var scenes: Scenes
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
     @Mock private lateinit var automation: Automation
@@ -60,7 +58,7 @@ internal class RunningConfigurationImplTest {
         MockitoAnnotations.openMocks(this)
         whenever(config.AAPSCLIENT).thenReturn(true)
         sut = RunningConfigurationImpl(
-            activePlugin, insulin, quickWizard, scenes, activeSceneSync, automation, configBuilder,
+            activePlugin, insulin, scenes, activeSceneSync, automation, configBuilder,
             preferences, aapsLogger, config, pumpSync, notificationManager, nsClientRepository, constraintsChecker
         )
     }

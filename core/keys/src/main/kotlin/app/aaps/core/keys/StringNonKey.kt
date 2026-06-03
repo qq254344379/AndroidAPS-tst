@@ -12,7 +12,7 @@ enum class StringNonKey(
     override val sync: SyncSpec? = null
 ) : StringNonPreferenceKey {
 
-    QuickWizard(key = "QuickWizard", defaultValue = "[]"),
+    QuickWizard(key = "QuickWizard", defaultValue = "[]", sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     WearCwfWatchfaceName(key = "wear_cwf_watchface_name", defaultValue = ""),
     WearCwfAuthorVersion(key = "wear_cwf_author_version", defaultValue = ""),
     WearCwfFileName(key = "wear_cwf_filename", defaultValue = ""),

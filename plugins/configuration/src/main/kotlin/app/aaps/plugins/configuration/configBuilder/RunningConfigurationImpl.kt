@@ -42,7 +42,6 @@ import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
 import app.aaps.core.objects.extensions.put
 import app.aaps.core.objects.extensions.store
-import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.plugins.configuration.R
 import dagger.Reusable
 import kotlinx.serialization.json.Json
@@ -55,7 +54,6 @@ import javax.inject.Inject
 class RunningConfigurationImpl @Inject constructor(
     private val activePlugin: ActivePlugin,
     private val insulin: Insulin,
-    private val quickWizard: QuickWizard,
     private val scenes: Scenes,
     private val activeSceneSync: ActiveSceneSync,
     private val automation: Automation,
@@ -98,7 +96,6 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("calibration", calibrationInterface.javaClass.simpleName)
             json.put("syncedPrefs", buildSyncedPrefs())
             json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
-            json.put("quickWizardConfiguration", JSONObject(buildFromPlugin(quickWizard).toString()))
             json.put("scenesConfiguration", JSONObject(buildFromPlugin(scenes).toString()))
             json.put("automationConfiguration", JSONObject(buildFromPlugin(automation).toString()))
             json.put("pump", pumpInterface.model().description)
@@ -148,10 +145,11 @@ class RunningConfigurationImpl @Inject constructor(
         activePlugin.getSpecificPluginsListByInterface(Safety::class.java).forEach {
             keys += (it as Safety).syncedKeys
         }
-        keys += quickWizard.syncedKeys
         keys += scenes.syncedKeys
         keys += automation.syncedKeys
         // Cold-channel keys declared via SyncSpec (single source of truth) — a change republishes.
+        // QuickWizard lives here now (StringNonKey.QuickWizard is Cold/Bidirectional), not on the
+        // document channel — its domain object self-reloads from the key, so no reloadInternalState.
         keys += coldSyncKeys()
         return keys.distinctBy { it.key }
     }
@@ -278,10 +276,6 @@ class RunningConfigurationImpl @Inject constructor(
 
         configuration.safetyConfiguration?.let { sc ->
             applyToPlugin(activePlugin.activeSafety, sc)
-        }
-
-        configuration.quickWizardConfiguration?.let { qc ->
-            applyToPlugin(quickWizard, qc)
         }
 
         configuration.scenesConfiguration?.let { sc ->

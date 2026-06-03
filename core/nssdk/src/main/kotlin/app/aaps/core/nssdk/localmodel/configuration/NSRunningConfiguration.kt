@@ -25,7 +25,6 @@ data class NSRunningConfiguration(
     val apsConfiguration: JsonObject? = null,
     val sensitivityConfiguration: JsonObject? = null,
     val safetyConfiguration: JsonObject? = null,
-    val quickWizardConfiguration: JsonObject? = null,
     val scenesConfiguration: JsonObject? = null,
     val automationConfiguration: JsonObject? = null,
     val activeScene: NSActiveScene? = null,
