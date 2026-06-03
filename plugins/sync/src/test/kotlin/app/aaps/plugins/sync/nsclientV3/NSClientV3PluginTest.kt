@@ -33,9 +33,11 @@ import app.aaps.core.interfaces.sync.DataSyncSelector
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.core.nssdk.remotemodel.LastModified
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientStringKey
 import app.aaps.plugins.sync.nsclientV3.services.NSClientV3Service
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -43,9 +45,13 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.BeforeEach
@@ -92,7 +98,7 @@ internal class NSClientV3PluginTest : TestBaseWithProfile() {
                 aapsLogger, rh, preferences, rxBus, context,
                 receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
                 nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel,
-                mock(), mock(), mock(), mock(), profileRepository
+                mock(), mock(), mock(), mock(), mock(), profileRepository
             )
         sut.nsAndroidClient = nsAndroidClient
         sut.nsClientV3Service = nsClientV3Service
@@ -124,6 +130,69 @@ internal class NSClientV3PluginTest : TestBaseWithProfile() {
         whenever(nsAndroidClient.createDeviceStatus(anyOrNull())).thenReturn(CreateUpdateResponse(200, "aaa"))
         sut.nsAdd("devicestatus", dataPair, "1/3")
         assertThat(storeDataForDb.nsIdDeviceStatuses).hasSize(2) // still only 1
+    }
+
+    // ---- masterReachable (client→master edit/control gating) ----
+
+    private fun buildPlugin(orphanDetector: OrphanDetector): NSClientV3Plugin =
+        NSClientV3Plugin(
+            aapsLogger, rh, preferences, rxBus, context,
+            receiverDelegate, config, dateUtil, dataSyncSelectorV3, persistenceLayer,
+            nsClientSource, storeDataForDb, decimalFormatter, l, nsClientRepository, uel,
+            mock(), mock(), orphanDetector, mock(), mock(), profileRepository
+        )
+
+    /** Poll the (WhileSubscribed) flow's value until it settles to [expected]; a live collector keeps it computing. */
+    private suspend fun awaitValue(flow: StateFlow<Boolean>, expected: Boolean) =
+        withTimeout(2_000) { while (flow.value != expected) delay(10) }
+
+    /** A master device is always reachable for control — the four client-side terms are short-circuited. */
+    @Test
+    fun masterReachableAlwaysReachableOnMaster() {
+        whenever(config.AAPSCLIENT).thenReturn(false)
+        val master = buildPlugin(orphanDetector = mock())
+        assertThat(master.masterReachable.value).isTrue()
+    }
+
+    /**
+     * On a client, masterReachable requires ALL of: live WS, a fresh master heartbeat, a current
+     * pairing, and not being orphaned. It FAILS CLOSED before the first heartbeat (no optimistic
+     * enable at boot) and times out to stale if heartbeats later stop.
+     */
+    @Test
+    fun masterReachableGatedByPairingAuthorizationAndFreshnessOnClient() {
+        val fixedNow = 1_700_000_000_000L
+        whenever(dateUtil.now()).thenReturn(fixedNow)
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        val pairedFlow = MutableStateFlow("")            // start UNPAIRED
+        val authorizedFlow = MutableStateFlow(true)
+        val orphanDetector = mock<OrphanDetector>()
+        whenever(orphanDetector.authorized).thenReturn(authorizedFlow)
+        whenever(preferences.observe(StringNonKey.NsClientControlClientId)).thenReturn(pairedFlow)
+
+        val client = buildPlugin(orphanDetector)
+        // Heartbeat stays 0L until the first batch — the gate FAILS CLOSED at boot (no optimistic enable).
+        assertThat(client.lastDevicestatusReceivedAt.value).isEqualTo(0L)
+        client.setWsConnected(true)                      // ws term true
+
+        runBlocking {
+            val collector = launch(Dispatchers.Default) { client.masterReachable.collect { } }
+            try {
+                awaitValue(client.masterReachable, false)                         // unpaired + no heartbeat → gated
+                pairedFlow.value = "client-id"
+                awaitValue(client.masterReachable, false)                         // paired but NO heartbeat yet → stays gated (fail-closed)
+                client.bumpDevicestatusHeartbeat(fixedNow - 10 * 60_000L)         // catch-up pulls a STALE historical devicestatus (created 10 min ago)
+                awaitValue(client.masterReachable, false)                         // stale heartbeat must NOT unlock (the app-restart-with-offline-master bug)
+                client.bumpDevicestatusHeartbeat(fixedNow)                        // a genuinely fresh master heartbeat confirms it alive
+                awaitValue(client.masterReachable, true)                          // ws + fresh + paired + authorized
+                authorizedFlow.value = false
+                awaitValue(client.masterReachable, false)                         // revoked / orphaned → gated
+                authorizedFlow.value = true
+                awaitValue(client.masterReachable, true)
+            } finally {
+                collector.cancel()
+            }
+        }
     }
 
     @Test

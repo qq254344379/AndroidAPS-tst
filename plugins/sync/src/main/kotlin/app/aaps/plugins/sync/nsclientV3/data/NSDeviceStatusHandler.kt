@@ -109,9 +109,13 @@ class NSDeviceStatusHandler @Inject constructor(
             }
         }
         if (config.AAPSCLIENT && deviceStatuses.isNotEmpty()) {
-            // Master-alive heartbeat — gates scene controls in the UI when master goes silent
-            // for longer than the staleness window, even while the local WS is still up.
-            nsClientV3Plugin.get().bumpDevicestatusHeartbeat(dateUtil.now())
+            // Master-alive heartbeat — gates scene/edit controls when master goes silent for longer than
+            // the staleness window, even while the local WS is still up. Stamp the NEWEST devicestatus's
+            // OWN created_at (master publish time), NOT the receipt time: at app start the catch-up worker
+            // pulls the master's last historical devicestatus off NS, and stamping receipt time would make
+            // a long-offline master look freshly alive and falsely unlock editing.
+            val newestCreatedAt = deviceStatuses.mapNotNull { it.createdAt?.let(dateUtil::fromISODateString) }.maxOrNull() ?: 0L
+            if (newestCreatedAt > 0L) nsClientV3Plugin.get().bumpDevicestatusHeartbeat(newestCreatedAt)
             rxBus.send(EventNsClientStatusUpdated())
         }
     }

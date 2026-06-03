@@ -13,6 +13,7 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.clientcontrol.MasterPairing
 import app.aaps.core.nssdk.localmodel.configuration.NSAuthorizedClients
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
+import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -141,5 +142,53 @@ internal class OrphanDetectorTest {
         pairedAt = 0L  // legacy install: never set pairedAt
         sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = 0L)
         verify(notificationManager).post(eq(NotificationId.NSCLIENT_PAIRING_ORPHAN), any<String>(), any<NotificationLevel>(), any<Int>(), anyOrNull(), any<List<NotificationAction>>(), anyOrNull())
+    }
+
+    // ---- authorized StateFlow (folded into NsClient.masterReachable to gate a revoked client's edits) ----
+
+    /** Optimistic default before any settings doc is seen — first-ever pairing must stay usable. */
+    @Test
+    fun authorizedDefaultsTrue() {
+        assertThat(sut.authorized.value).isTrue()
+    }
+
+    /** A confirmed orphan flips authorized to false so masterReachable disables editing. */
+    @Test
+    fun orphanFlipsAuthorizedFalse() {
+        sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now)
+        assertThat(sut.authorized.value).isFalse()
+    }
+
+    /** Being re-listed after an orphan restores authorized to true (recovery path). */
+    @Test
+    fun reauthorizationRestoresAuthorizedTrue() {
+        sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now)
+        assertThat(sut.authorized.value).isFalse()
+        sut.onSettingsDoc(configWithRoster(ourClientId), docSrvModified = now)
+        assertThat(sut.authorized.value).isTrue()
+    }
+
+    /** Block-absent (older master) must not flip authorized — the prior verdict is preserved. */
+    @Test
+    fun blockAbsentLeavesAuthorizedUnchanged() {
+        sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now)  // → false
+        sut.onSettingsDoc(configWithoutRosterField(), docSrvModified = now)    // absent block → no change
+        assertThat(sut.authorized.value).isFalse()
+    }
+
+    /** Within the post-pairing race window a missing roster must not flip authorized (optimistic). */
+    @Test
+    fun withinRaceWindowLeavesAuthorizedTrue() {
+        pairedAt = now
+        sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now - 4_000L)
+        assertThat(sut.authorized.value).isTrue()
+    }
+
+    /** An unpaired client makes no authorization claim — authorized stays at its optimistic default. */
+    @Test
+    fun unpairedLeavesAuthorizedTrue() {
+        whenever(pairingRepository.currentPairing()).thenReturn(null)
+        sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now)
+        assertThat(sut.authorized.value).isTrue()
     }
 }

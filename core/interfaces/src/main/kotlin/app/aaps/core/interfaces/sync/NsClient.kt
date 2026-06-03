@@ -35,11 +35,15 @@ interface NsClient : Sync {
         get() = MutableStateFlow(0L).asStateFlow()
 
     /**
-     * Derived "master is reachable for remote control / config edits" signal. Combines
-     * [wsConnectedFlow] (with a short falling-edge grace so brief WS flaps don't lock the UI) and
-     * [lastDevicestatusReceivedAt] freshness (master heartbeat), short-circuited to always-`true`
-     * on a master device. Consumers — scene gating and client→master config edits — read this
-     * instead of reassembling the two raw signals, and share one computed flow.
+     * Derived "master is reachable for remote control / config edits" signal. On a client it requires
+     * ALL of: [wsConnectedFlow] (with a short falling-edge grace so brief WS flaps don't lock the UI),
+     * [lastDevicestatusReceivedAt] freshness (master heartbeat), a current Client-Control pairing, and
+     * not being orphaned (master still authorizes this device). It is short-circuited to always-`true`
+     * on a master device. The pairing + authorization terms matter because client→master edits/commands
+     * ride the signed Client-Control channel: an unpaired client's writes are silently dropped and a
+     * revoked client's are rejected, so neither must look reachable. Consumers — scene gating and
+     * client→master config edits — read this instead of reassembling the raw signals, and share one
+     * computed flow.
      *
      * Default exposes a static always-`true` flow: impls without a WS/heartbeat pipeline must never
      * lock controls on its strength.

@@ -35,6 +35,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
@@ -47,6 +50,9 @@ import app.aaps.plugins.automation.R
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
+// Standard Material disabled opacity, applied to the whole row when editing is disabled.
+private const val DISABLED_ROW_ALPHA = 0.38f
+
 @Composable
 fun AutomationScreen(
     state: AutomationUiState,
@@ -56,7 +62,10 @@ fun AutomationScreen(
     onMove: (from: Int, to: Int) -> Unit,
     onMoveFinished: () -> Unit,
     onAddClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // When false (client whose master is unreachable) the whole list is greyed out and
+    // non-interactive and the add FAB is hidden — edits couldn't sync to the master right now.
+    editingEnabled: Boolean = true
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -74,6 +83,7 @@ fun AutomationScreen(
                         onDeleteEvent = onDeleteEvent,
                         onMove = onMove,
                         onMoveFinished = onMoveFinished,
+                        editingEnabled = editingEnabled,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -82,16 +92,18 @@ fun AutomationScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            AapsFab(
-                onClick = onAddClick,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(AapsSpacing.extraLarge)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = stringResource(R.string.add_automation)
-                )
+            if (editingEnabled) {
+                AapsFab(
+                    onClick = onAddClick,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(AapsSpacing.extraLarge)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = stringResource(R.string.add_automation)
+                    )
+                }
             }
         }
     }
@@ -127,6 +139,7 @@ private fun EventsList(
     onDeleteEvent: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
     onMoveFinished: () -> Unit,
+    editingEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
     val lazyListState = rememberLazyListState()
@@ -152,6 +165,7 @@ private fun EventsList(
                 AutomationEventCard(
                     event = event,
                     elevation = elevation,
+                    editingEnabled = editingEnabled,
                     dragModifier = Modifier.draggableHandle(onDragStopped = { onMoveFinished() }),
                     onToggleEnabled = { checked -> onToggleEnabled(event.position, checked) },
                     onEdit = { onEditEvent(event.position) },
@@ -167,6 +181,7 @@ private fun EventsList(
 private fun AutomationEventCard(
     event: AutomationEventUi,
     elevation: Dp,
+    editingEnabled: Boolean,
     dragModifier: Modifier,
     onToggleEnabled: (Boolean) -> Unit,
     onEdit: () -> Unit,
@@ -177,54 +192,73 @@ private fun AutomationEventCard(
     val nameColor = if (!event.actionsValid) MaterialTheme.colorScheme.error
     else MaterialTheme.colorScheme.onSurface
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = elevation)
-    ) {
-        Row(
+    Box {
+        ElevatedCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(AapsSpacing.large),
-            horizontalArrangement = Arrangement.spacedBy(AapsSpacing.small),
-            verticalAlignment = Alignment.CenterVertically
+                .then(if (editingEnabled) Modifier else Modifier.alpha(DISABLED_ROW_ALPHA)),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = elevation)
         ) {
-            Checkbox(
-                checked = event.isEnabled,
-                onCheckedChange = onToggleEnabled,
-                enabled = !event.readOnly
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = event.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = nameColor
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(AapsSpacing.large),
+                horizontalArrangement = Arrangement.spacedBy(AapsSpacing.small),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = event.isEnabled,
+                    onCheckedChange = onToggleEnabled,
+                    enabled = !event.readOnly
                 )
-                IconRow(event = event)
-            }
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = null)
-            }
-            if (event.readOnly) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = stringResource(R.string.system_automation),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = null)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = event.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = nameColor
+                    )
+                    IconRow(event = event)
+                }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                }
+                if (event.readOnly) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = stringResource(R.string.system_automation),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = null)
+                    }
+                }
+                IconButton(
+                    onClick = {},
+                    modifier = dragModifier,
+                    enabled = !event.readOnly
+                ) {
+                    Icon(
+                        Icons.Default.DragHandle,
+                        contentDescription = stringResource(app.aaps.core.ui.R.string.reorder)
+                    )
                 }
             }
-            IconButton(
-                onClick = {},
-                modifier = dragModifier,
-                enabled = !event.readOnly
-            ) {
-                Icon(
-                    Icons.Default.DragHandle,
-                    contentDescription = stringResource(app.aaps.core.ui.R.string.reorder)
-                )
-            }
+        }
+        // When editing is disabled, consume all pointer input over the card so the greyed
+        // row is fully non-interactive (blocks checkbox, edit/delete taps and the drag handle).
+        if (!editingEnabled) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+            )
         }
     }
 }

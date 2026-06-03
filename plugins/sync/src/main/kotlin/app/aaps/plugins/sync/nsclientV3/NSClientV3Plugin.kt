@@ -48,6 +48,7 @@ import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.NSAndroidClientImpl
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
@@ -57,6 +58,7 @@ import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.PreferencesClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
@@ -139,6 +141,7 @@ class NSClientV3Plugin @Inject constructor(
     private val uel: UserEntryLogger,
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
+    private val orphanDetector: OrphanDetector,
     private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
     private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
@@ -426,14 +429,20 @@ class NSClientV3Plugin @Inject constructor(
         _wsConnected.value = value
     }
 
-    // Heartbeat from master's devicestatus stream. Stays 0L until the first batch arrives so
-    // a freshly-paired AAPSCLIENT isn't false-locked before master has had a chance to publish.
-    // On AAPSCLIENT, NSDeviceStatusHandler bumps this for every non-empty batch — both the WS
-    // push and the catch-up worker land in the same handler, so a single update site suffices.
+    // Heartbeat from master's devicestatus stream. Stays 0L until the first batch arrives; combined
+    // with freshness(pristine=false) this FAILS CLOSED at boot — masterReachable stays false until a
+    // first master heartbeat positively confirms the master is alive, instead of optimistically
+    // enabling. (A 0L seed + pristine=true, or any non-zero seed, would let a client that boots while
+    // the master is offline edit for the whole stale window and silently lose those edits; the WS term
+    // can't catch that, since WS is client↔NS, not client↔master.) On AAPSCLIENT, NSDeviceStatusHandler
+    // bumps this to now() for every non-empty batch — both the WS push and the catch-up worker land in
+    // the same handler, so a single update site suffices.
     private val _lastDevicestatusReceivedAt = MutableStateFlow(0L)
     override val lastDevicestatusReceivedAt: StateFlow<Long> = _lastDevicestatusReceivedAt.asStateFlow()
-    internal fun bumpDevicestatusHeartbeat(now: Long) {
-        _lastDevicestatusReceivedAt.value = now
+    // [heartbeatAt] is the master's devicestatus created_at (publish time), not receipt time. Monotonic —
+    // keep the newest known heartbeat; a batch may deliver an older record after a newer one.
+    internal fun bumpDevicestatusHeartbeat(heartbeatAt: Long) {
+        if (heartbeatAt > _lastDevicestatusReceivedAt.value) _lastDevicestatusReceivedAt.value = heartbeatAt
     }
 
     // Grace before flagging offline on a WS drop — swallows brief flaps (reconnect storms during NS
@@ -446,9 +455,18 @@ class NSClientV3Plugin @Inject constructor(
     // signal (and its freshness ticker) survives service stop/start.
     private val reachableScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // See [NsClient.masterReachable]. Master: always reachable. Client: live WS (falling-edge grace)
-    // AND a fresh master devicestatus heartbeat. Single shared flow (WhileSubscribed) — consumers no
-    // longer each rebuild the combine on their own scope.
+    // See [NsClient.masterReachable]. Master: always reachable. Client: ALL of — live WS (falling-edge
+    // grace), a fresh master devicestatus heartbeat, a current Client-Control pairing, and not being
+    // orphaned (master still lists us in its authorizedClients roster). The pairing + authorized terms
+    // matter because a client→master edit rides the signed Client-Control channel: an unpaired (but
+    // NS-connected) client looks "reachable" yet has every edit dropped (nextSignedEnvelope returns null
+    // when unpaired), and a revoked/orphaned client would have its commands rejected by the master.
+    // NsClientControlClientId is the canonical paired marker (see ClientPairingRepository.isPaired),
+    // observed so pairing/unpairing updates live; OrphanDetector.authorized is the roster signal
+    // (optimistic until a doc proves us excluded). The heartbeat term uses pristine=false so a client
+    // FAILS CLOSED before its first master heartbeat (disabled until the master is positively confirmed
+    // alive — see the _lastDevicestatusReceivedAt seed above) and times out to stale if heartbeats later
+    // stop. Single shared flow (WhileSubscribed) — consumers no longer each rebuild the combine on their own scope.
     @OptIn(ExperimentalCoroutinesApi::class)
     override val masterReachable: StateFlow<Boolean> =
         if (!config.AAPSCLIENT) MutableStateFlow(true).asStateFlow()
@@ -456,8 +474,10 @@ class NSClientV3Plugin @Inject constructor(
             wsConnectedFlow.transformLatest { connected ->
                 if (connected) emit(true) else { delay(wsDisconnectGraceMs); emit(false) }
             },
-            lastDevicestatusReceivedAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = true)
-        ) { ws, fresh -> ws && fresh }
+            lastDevicestatusReceivedAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = false, now = dateUtil::now),
+            preferences.observe(StringNonKey.NsClientControlClientId).map { it.isNotEmpty() },
+            orphanDetector.authorized
+        ) { ws, fresh, paired, authorized -> ws && fresh && paired && authorized }
             .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), true)
 
     private fun setClient() {

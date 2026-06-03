@@ -10,6 +10,9 @@ import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
 import app.aaps.plugins.sync.R
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,6 +48,17 @@ class OrphanDetector @Inject constructor(
     private val aapsLogger: AAPSLogger
 ) {
 
+    private val _authorized = MutableStateFlow(true)
+
+    /**
+     * `true` while the master still lists this device in its `authorizedClients` roster (or no
+     * orphan signal is possible yet — older master, freshly paired within the race window, pristine).
+     * Flips to `false` only once a settings doc is seen that excludes this clientId past the race
+     * guard. Folded into [app.aaps.core.interfaces.sync.NsClient.masterReachable] so a revoked
+     * client's edits are gated, not just notified. Optimistic default keeps first-ever pairing usable.
+     */
+    val authorized: StateFlow<Boolean> = _authorized.asStateFlow()
+
     /**
      * Inspect a freshly-applied settings/aaps doc. Safe to call from any client load path
      * (catch-up worker, WS push) — no-op on master.
@@ -56,6 +70,7 @@ class OrphanDetector @Inject constructor(
         val roster = configuration.authorizedClients ?: return
         val pairing = pairingRepository.currentPairing() ?: return
         if (pairing.clientId in roster.clientIds) {
+            _authorized.value = true
             notificationManager.dismiss(NotificationId.NSCLIENT_PAIRING_ORPHAN)
             return
         }
@@ -67,6 +82,7 @@ class OrphanDetector @Inject constructor(
             )
             return
         }
+        _authorized.value = false
         aapsLogger.warn(LTag.NSCLIENT, "ClientControl: clientId=${pairing.clientId} not in master's authorizedClients — orphan")
         notificationManager.post(NotificationId.NSCLIENT_PAIRING_ORPHAN, rh.gs(R.string.clientcontrol_orphan_notification))
     }
