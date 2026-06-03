@@ -6,7 +6,7 @@ import app.aaps.core.interfaces.scenes.ClientControlSendResult
  * Outbound channel for pushing insulin-definition edits from a paired AAPSCLIENT device to its
  * master. Implemented in `:plugins:sync` (where the wire format + signing live) and consumed by the
  * insulin client publisher, so neither the implementation nor the sync module needs a project
- * dependency on the other. Mirrors [app.aaps.core.interfaces.automation.ClientControlAutomationSender].
+ * dependency on the other. Mirrors [app.aaps.core.interfaces.scenes.ClientControlSceneSender].
  */
 interface ClientControlInsulinSender {
 

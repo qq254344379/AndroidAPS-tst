@@ -2,6 +2,7 @@ package app.aaps.plugins.automation
 
 import android.Manifest
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.data.time.T
@@ -27,10 +28,8 @@ import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
-import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.StringNonKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.ComposablePluginContent
 import app.aaps.core.utils.DeferredForegroundStart
@@ -144,13 +143,7 @@ class AutomationRuntime @Inject constructor(
     private val sceneApi: SceneAutomationApi
 ) : Automation, PermissionProvider, BtConnectionSource {
 
-    override val syncedKeys: List<NonPreferenceKey> = listOf(StringNonKey.AutomationEvents)
-
     override val executionEnabled: Boolean get() = config.APS
-
-    override fun reloadInternalState() {
-        loadFromSP() // emits via notifyChanged() — both internal storeToSP debounce and external collectors see it.
-    }
 
     /**
      * Build the Compose screen content. Replaces the old plugin-descriptor `composeContent` lambda;
@@ -210,20 +203,12 @@ class AutomationRuntime @Inject constructor(
     }
 
     /**
-     * Bump the whole-list sync version to now(). Drives whole-list last-writer-wins for client→master
-     * sync: the publisher ships this value, the master applies a strictly-newer list and drops a
-     * stale one. Bumped only on real definition edits — NOT by loadFromSP (reload) or the
-     * processActions last-run persistence, so the version doesn't climb on reloads/execution.
+     * Definition edit from an in-place external editor (e.g. toggleEnabled): emit a fresh snapshot,
+     * which drives the debounced persistence. The client→master sync version is stamped automatically
+     * by PreferencesImpl when storeToSP writes the bidirectionally-synced AutomationEvents key.
      */
-    // Monotonic (max(stored+1, now())): strictly increases even on same-ms edits or a backwards wall
-    // clock, and lets the master out-version a client value it previously adopted despite clock skew.
-    private fun bumpModified() =
-        preferences.put(LongNonKey.AutomationEventsModified, maxOf(preferences.get(LongNonKey.AutomationEventsModified) + 1, dateUtil.now()))
-
-    /** Definition edit from an in-place external editor (e.g. toggleEnabled): bump version + emit. */
     @Synchronized
     fun markEdited() {
-        bumpModified()
         notifyChanged()
     }
 
@@ -284,11 +269,13 @@ class AutomationRuntime @Inject constructor(
      * Start the runtime. Called once from MainApp at boot. Definition load + persistence + tile
      * refresh run on every flavor; the processing loop and location service are master-only.
      */
-    fun start() {
+    fun start(externalScope: CoroutineScope? = null) {
         if (scope != null) return // idempotent — already started; avoid leaking a second scope + duplicate subscriptions
         loadFromSP()
 
-        val newScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        // externalScope is injected by tests to drive the debounced persistence deterministically;
+        // production passes nothing and gets the long-lived IO scope.
+        val newScope = externalScope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope = newScope
 
         // Persist on any config change. drop(1) skips the seed empty value; debounce coalesces
@@ -300,6 +287,13 @@ class AutomationRuntime @Inject constructor(
         // tile storms during reorder.
         @Suppress("OPT_IN_USAGE")
         _events.drop(1).debounce(300).onEach { rxBus.send(EventWearUpdateTiles()) }.launchIn(newScope)
+
+        // Pick up definitions pushed from the master phone: the cold-key bidirectional sync writes
+        // [StringNonKey.AutomationEvents] via putRemote, which updates this observed StateFlow. Client
+        // only — the master is the authority and mutates its own in-memory list directly on edit, so
+        // it must not reload from the pref (that would clobber lastRun / btConnects runtime state).
+        if (config.AAPSCLIENT)
+            preferences.observe(StringNonKey.AutomationEvents).drop(1).onEach { loadFromSP() }.launchIn(newScope)
 
         // Execution is master-only. On a client we only edit + sync definitions — no loop, no
         // location service, no event processing.
@@ -393,11 +387,20 @@ class AutomationRuntime @Inject constructor(
             e.printStackTrace()
         }
 
-        preferences.put(StringNonKey.AutomationEvents, array.toString())
+        val data = array.toString()
+        // Skip the redundant write when the serialized list already matches what's stored. This makes
+        // a sync-apply reload a fixed point: without it, self-observation (putRemote → observe →
+        // loadFromSP → notifyChanged → store) would re-write the same value and re-trigger the
+        // observer → an apply→observe→store echo loop.
+        if (data != preferences.get(StringNonKey.AutomationEvents))
+            preferences.put(StringNonKey.AutomationEvents, data)
     }
 
+    // internal + @VisibleForTesting: production reaches this only via start()/self-observe; tests drive
+    // it directly to assert the load → fixed-point behavior.
+    @VisibleForTesting
     @Synchronized
-    private fun loadFromSP() {
+    internal fun loadFromSP() {
         automationEvents.clear()
         val data = preferences.get(StringNonKey.AutomationEvents)
         var needsResave = false

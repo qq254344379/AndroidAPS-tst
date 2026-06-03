@@ -55,7 +55,6 @@ import app.aaps.core.nssdk.remotemodel.LastModified
 import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
-import app.aaps.plugins.sync.nsclientV3.clientcontrol.AutomationDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.InsulinDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.PreferencesClientPublisher
@@ -136,7 +135,6 @@ class NSClientV3Plugin @Inject constructor(
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
     private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
-    private val automationDefinitionsClientPublisher: AutomationDefinitionsClientPublisher,
     private val insulinDefinitionsClientPublisher: InsulinDefinitionsClientPublisher,
     private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
@@ -257,7 +255,6 @@ class NSClientV3Plugin @Inject constructor(
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         runningConfigurationPublisher.start(scope)
         sceneDefinitionsClientPublisher.start(scope)
-        automationDefinitionsClientPublisher.start(scope)
         insulinDefinitionsClientPublisher.start(scope)
         preferencesClientPublisher.start(scope)
         // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
@@ -407,7 +404,6 @@ class NSClientV3Plugin @Inject constructor(
         handler = null
         runningConfigurationPublisher.stop()
         sceneDefinitionsClientPublisher.stop()
-        automationDefinitionsClientPublisher.stop()
         insulinDefinitionsClientPublisher.stop()
         preferencesClientPublisher.stop()
         scope.cancel()

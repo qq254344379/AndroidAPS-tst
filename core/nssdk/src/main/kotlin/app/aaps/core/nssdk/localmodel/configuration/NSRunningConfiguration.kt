@@ -26,7 +26,6 @@ data class NSRunningConfiguration(
     val sensitivityConfiguration: JsonObject? = null,
     val safetyConfiguration: JsonObject? = null,
     val scenesConfiguration: JsonObject? = null,
-    val automationConfiguration: JsonObject? = null,
     val activeScene: NSActiveScene? = null,
     // Flat block of cold-channel synced preference values (key string → value serialized as string),
     // driven by each key's SyncSpec. Applied with "master wins" on the client; client→master edits

@@ -142,7 +142,7 @@ class InsulinImpl @Inject constructor(
         val existingNames = insulins.mapIndexed { idx, it ->
             if (idx == excludeIndex) null else it.insulinLabel
         }.filterNotNull()
-        var full = "$nickname $suffix".trim()
+        val full = "$nickname $suffix".trim()
         var candidate = full
         var counter = 1
         while (existingNames.any { it == candidate } && counter <= 100) {

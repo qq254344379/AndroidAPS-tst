@@ -1,9 +1,8 @@
 package app.aaps.core.interfaces.automation
 
-import app.aaps.core.interfaces.configuration.ConfigExportImport
 import kotlinx.coroutines.flow.StateFlow
 
-interface Automation : ConfigExportImport {
+interface Automation {
 
     /**
      * Live snapshot of the automation event list. Emits on user edits, ordering changes, and

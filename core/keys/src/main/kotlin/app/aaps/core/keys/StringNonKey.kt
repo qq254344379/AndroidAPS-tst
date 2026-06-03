@@ -29,7 +29,7 @@ enum class StringNonKey(
 
     // Standalone Automation runtime. In core/keys (not the automation module) so the client→master
     // sync publisher/receiver in :plugins:sync can observe it without an inter-module dependency.
-    AutomationEvents(key = "AUTOMATION_EVENTS", defaultValue = ""),
+    AutomationEvents(key = "AUTOMATION_EVENTS", defaultValue = "", sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     QuickLaunchActions(key = "quick_launch_actions", defaultValue = "[{\"type\":\"wizard\"},{\"type\":\"quick_launch_config\"}]"),
     InsulinConfiguration("insulin_configuration", "{}"),
     ComposeGraphConfig("compose_graphconfig", ""),

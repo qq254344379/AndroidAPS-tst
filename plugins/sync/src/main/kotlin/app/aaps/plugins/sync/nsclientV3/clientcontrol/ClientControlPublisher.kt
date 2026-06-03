@@ -1,6 +1,5 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
-import app.aaps.core.interfaces.automation.ClientControlAutomationSender
 import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -45,7 +44,7 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) : ClientControlSceneSender, ClientControlAutomationSender, ClientControlInsulinSender, ClientControlPreferencesSender {
+) : ClientControlSceneSender, ClientControlInsulinSender, ClientControlPreferencesSender {
 
     companion object {
 
@@ -110,7 +109,6 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
             is ClientControlMessage.SceneDefinitionsUpdate,
-            is ClientControlMessage.AutomationDefinitionsUpdate,
             is ClientControlMessage.InsulinConfigurationUpdate,
             is ClientControlMessage.InsulinActivate,
             is ClientControlMessage.PreferencesUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
@@ -126,9 +124,6 @@ class ClientControlPublisher @Inject constructor(
 
     override suspend fun sendScenesUpdate(scenesJson: String): ClientControlSendResult =
         publish(ClientControlMessage.SceneDefinitionsUpdate(scenesJson))
-
-    override suspend fun sendAutomationUpdate(automationJson: String, version: Long): ClientControlSendResult =
-        publish(ClientControlMessage.AutomationDefinitionsUpdate(automationJson, version))
 
     override suspend fun sendInsulinUpdate(insulinJson: String, version: Long): ClientControlSendResult =
         publish(ClientControlMessage.InsulinConfigurationUpdate(insulinJson, version))

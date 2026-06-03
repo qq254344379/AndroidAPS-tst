@@ -6,7 +6,6 @@ import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.interfaces.aps.APS
 import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.Sensitivity
-import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.calibration.Calibration
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
@@ -56,7 +55,6 @@ class RunningConfigurationImpl @Inject constructor(
     private val insulin: Insulin,
     private val scenes: Scenes,
     private val activeSceneSync: ActiveSceneSync,
-    private val automation: Automation,
     private val configBuilder: ConfigBuilder,
     private val preferences: Preferences,
     private val aapsLogger: AAPSLogger,
@@ -97,7 +95,6 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("syncedPrefs", buildSyncedPrefs())
             json.put("safetyConfiguration", JSONObject(buildFromPlugin(safetyInterface).toString()))
             json.put("scenesConfiguration", JSONObject(buildFromPlugin(scenes).toString()))
-            json.put("automationConfiguration", JSONObject(buildFromPlugin(automation).toString()))
             json.put("pump", pumpInterface.model().description)
             json.put("version", config.VERSION_NAME)
         } catch (e: JSONException) {
@@ -146,7 +143,6 @@ class RunningConfigurationImpl @Inject constructor(
             keys += (it as Safety).syncedKeys
         }
         keys += scenes.syncedKeys
-        keys += automation.syncedKeys
         // Cold-channel keys declared via SyncSpec (single source of truth) — a change republishes.
         // QuickWizard lives here now (StringNonKey.QuickWizard is Cold/Bidirectional), not on the
         // document channel — its domain object self-reloads from the key, so no reloadInternalState.
@@ -159,7 +155,8 @@ class RunningConfigurationImpl @Inject constructor(
         preferences.getSyncKeys().filter { it.sync?.channel == SyncChannel.Cold }
 
     // Flat {keyString: valueAsString} block of cold synced prefs. Values serialized as strings so the
-    // wire stays a Map<String, String> regardless of the key's underlying type. Boolean-only for now.
+    // wire stays a Map<String, String> regardless of the key's underlying type. Boolean/String/Int/
+    // UnitDouble are supported (see the `when` below); other types are skipped with a warning.
     //
     // We sync the RAW persisted value (via the BooleanNonPreferenceKey getter), NOT the mode-adjusted
     // effective value the BooleanPreferenceKey getter returns. Simple mode / defaultedBySM is a
@@ -280,10 +277,6 @@ class RunningConfigurationImpl @Inject constructor(
 
         configuration.scenesConfiguration?.let { sc ->
             applyToPlugin(scenes, sc)
-        }
-
-        configuration.automationConfiguration?.let { ac ->
-            applyToPlugin(automation, ac)
         }
     }
 

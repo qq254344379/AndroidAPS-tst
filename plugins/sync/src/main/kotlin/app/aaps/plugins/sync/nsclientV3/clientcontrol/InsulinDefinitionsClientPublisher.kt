@@ -19,7 +19,7 @@ import javax.inject.Singleton
 
 /**
  * Client-side publisher for insulin-definition edits — the insulin analogue of
- * [SceneDefinitionsClientPublisher] / [AutomationDefinitionsClientPublisher].
+ * [SceneDefinitionsClientPublisher].
  *
  * On an AAPSCLIENT device, observes the [StringNonKey.InsulinConfiguration] preference, debounces, and
  * pushes the current snapshot + its local edit version ([LongNonKey.InsulinConfigurationModified]) to

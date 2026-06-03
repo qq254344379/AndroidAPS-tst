@@ -4,7 +4,6 @@ import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -77,7 +76,6 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
     private val activeSceneSync: ActiveSceneSync,
-    private val automation: Automation,
     private val insulin: Insulin,
     private val profileFunction: ProfileFunction,
     private val offerPublisher: PairingOfferPublisher,
@@ -176,16 +174,15 @@ class ClientControlReceiver @Inject constructor(
             onVerifiedUndecodablePayload(entry, envelope, now)
         } else {
             when (message) {
-                is ClientControlMessage.Hello                       -> onVerifiedHello(entry, envelope, now)
+                is ClientControlMessage.Hello                      -> onVerifiedHello(entry, envelope, now)
                 // Hello handling already includes the Pending → Active transition; offer doc
                 // cleanup is inside onVerifiedHello so it can suspend on deleteOffer.
-                is ClientControlMessage.SceneStart                  -> onVerifiedSceneStart(entry, envelope, message, now)
-                is ClientControlMessage.SceneStop                   -> onVerifiedSceneStop(entry, envelope, message, now)
-                is ClientControlMessage.SceneDefinitionsUpdate      -> onVerifiedScenesUpdate(entry, envelope, message, now)
-                is ClientControlMessage.AutomationDefinitionsUpdate -> onVerifiedAutomationUpdate(entry, envelope, message, now)
-                is ClientControlMessage.InsulinConfigurationUpdate  -> onVerifiedInsulinUpdate(entry, envelope, message, now)
-                is ClientControlMessage.InsulinActivate             -> onVerifiedInsulinActivate(entry, envelope, message, now)
-                is ClientControlMessage.PreferencesUpdate           -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.SceneStart                 -> onVerifiedSceneStart(entry, envelope, message, now)
+                is ClientControlMessage.SceneStop                  -> onVerifiedSceneStop(entry, envelope, message, now)
+                is ClientControlMessage.SceneDefinitionsUpdate     -> onVerifiedScenesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.InsulinConfigurationUpdate -> onVerifiedInsulinUpdate(entry, envelope, message, now)
+                is ClientControlMessage.InsulinActivate            -> onVerifiedInsulinActivate(entry, envelope, message, now)
+                is ClientControlMessage.PreferencesUpdate          -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
             }
         }
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -301,34 +298,6 @@ class ClientControlReceiver @Inject constructor(
     }
 
     /**
-     * Apply a client-pushed automation-events JSON via whole-list last-writer-wins by version
-     * (the client's last local-edit wall clock). A strictly-newer push replaces the master's list
-     * and adopts its version; a stale one is dropped. The write to [StringNonKey.AutomationEvents]
-     * triggers `RunningConfigurationPublisher`'s debounce (events are in `automation.syncedKeys`),
-     * fanning the merged result out to every paired client; the master runtime is reloaded directly
-     * since it caches the list in memory rather than reading the pref live.
-     */
-    private fun onVerifiedAutomationUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.AutomationDefinitionsUpdate, now: Long) {
-        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        val localVersion = preferences.get(LongNonKey.AutomationEventsModified)
-        if (message.version <= localVersion) {
-            nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: stale (v=${message.version} <= local=$localVersion)")
-            return
-        }
-        val incoming = runCatching { JSONArray(message.automationJson) }.getOrNull()
-        if (incoming == null) {
-            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: automation.update from ${entry.name} has invalid JSON, ignoring")
-            nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: invalid JSON")
-            return
-        }
-        preferences.put(StringNonKey.AutomationEvents, message.automationJson)
-        preferences.put(LongNonKey.AutomationEventsModified, message.version)
-        automation.reloadInternalState()
-        nsClientRepository.addLog("◄ CLIENTCTL", "automation.update from ${entry.name}: applied v=${message.version} (${incoming.length()} events)")
-        uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: automation")
-    }
-
-    /**
      * Apply a client-pushed insulin-configuration JSON via whole-list last-writer-wins by version
      * (the client's last local-edit wall clock). A strictly-newer push replaces the master's config
      * and adopts its version; a stale one is dropped. The write to [StringNonKey.InsulinConfiguration]
@@ -386,8 +355,8 @@ class ClientControlReceiver @Inject constructor(
      * the modified time to the pushed version and suppresses re-publish (no echo). The running-config
      * publisher then republishes the cold doc, fanning the merged value out to all clients.
      *
-     * Value parsing is Boolean-only for now (the only bidirectional plain key so far); extend the
-     * `when` per type as new types are marked `Bidirectional`.
+     * Value parsing handles Boolean/String/Int/UnitDouble (see the `when` below); extend it per type
+     * as new types are marked `Bidirectional`.
      */
     private fun onVerifiedPreferencesUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.PreferencesUpdate, now: Long) {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)

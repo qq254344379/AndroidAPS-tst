@@ -2,7 +2,6 @@ package app.aaps.plugins.sync.di
 
 import android.content.Context
 import androidx.work.WorkManager
-import app.aaps.core.interfaces.automation.ClientControlAutomationSender
 import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -49,6 +48,7 @@ import dagger.hilt.components.SingletonComponent
 abstract class SyncModule {
 
     @ContributesAndroidInjector abstract fun contributesNSClientV3Service(): NSClientV3Service
+
     // NSClient / NSClientV3 / Xdrip sync workers migrated to @HiltWorker (constructed by HiltWorkerFactory).
     @ContributesAndroidInjector abstract fun contributesAuthFlowInActivity(): AuthFlowIn
     @ContributesAndroidInjector abstract fun contributesWearDataReceiver(): WearDataReceiver
@@ -80,7 +80,6 @@ abstract class SyncModule {
 
         @Binds fun bindClientControlSceneSender(publisher: ClientControlPublisher): ClientControlSceneSender
 
-        @Binds fun bindClientControlAutomationSender(publisher: ClientControlPublisher): ClientControlAutomationSender
         @Binds fun bindClientControlInsulinSender(publisher: ClientControlPublisher): ClientControlInsulinSender
         @Binds fun bindClientControlPreferencesSender(publisher: ClientControlPublisher): ClientControlPreferencesSender
     }

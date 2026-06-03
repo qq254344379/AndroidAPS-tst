@@ -1,6 +1,5 @@
 package app.aaps.plugins.configuration.configBuilder
 
-import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -14,6 +13,7 @@ import app.aaps.core.interfaces.scenes.ActiveSceneSnapshot
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.keys.BooleanNonKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
@@ -41,7 +41,6 @@ internal class RunningConfigurationImplTest {
     @Mock private lateinit var insulin: Insulin
     @Mock private lateinit var scenes: Scenes
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
-    @Mock private lateinit var automation: Automation
     @Mock private lateinit var configBuilder: ConfigBuilder
     @Mock private lateinit var preferences: Preferences
     @Mock private lateinit var aapsLogger: AAPSLogger
@@ -58,7 +57,7 @@ internal class RunningConfigurationImplTest {
         MockitoAnnotations.openMocks(this)
         whenever(config.AAPSCLIENT).thenReturn(true)
         sut = RunningConfigurationImpl(
-            activePlugin, insulin, scenes, activeSceneSync, automation, configBuilder,
+            activePlugin, insulin, scenes, activeSceneSync, configBuilder,
             preferences, aapsLogger, config, pumpSync, notificationManager, nsClientRepository, constraintsChecker
         )
     }
@@ -98,5 +97,18 @@ internal class RunningConfigurationImplTest {
         verify(activeSceneSync).applyActiveScene(
             eq(ActiveSceneSnapshot(sceneId = "scene-1", activatedAt = 1_000L, durationMs = 60_000L))
         )
+    }
+
+    /**
+     * A String cold-channel key carried in the cold doc's `syncedPrefs` (e.g. AutomationEvents, which
+     * moved onto the generic channel) must be adopted via `putRemote` — master-wins, version floored to
+     * 0, no client→master echo — not a plain `put`. Guards the downlink apply path at the config layer.
+     */
+    @Test
+    fun applyColdSyncedPrefsAdoptsStringColdKeyViaPutRemote() {
+        val json = """[{"id":"x","title":"from-master"}]"""
+        whenever(preferences.get(StringNonKey.AutomationEvents.key)).thenReturn(StringNonKey.AutomationEvents)
+        sut.applyCold(NSRunningConfiguration(syncedPrefs = mapOf(StringNonKey.AutomationEvents.key to json)))
+        verify(preferences).putRemote(StringNonKey.AutomationEvents, json, 0L)
     }
 }
