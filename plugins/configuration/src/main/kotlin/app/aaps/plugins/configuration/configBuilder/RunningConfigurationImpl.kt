@@ -83,7 +83,6 @@ class RunningConfigurationImpl @Inject constructor(
             val apsInterface = activePlugin.activeAPS
 
             json.put("insulin", insulin.id.value)
-            json.put("insulinConfiguration", JSONObject(buildFromPlugin(insulin).toString()))
             apsInterface?.let {
                 json.put("aps", it.algorithm.name)
                 json.put("apsConfiguration", JSONObject(buildFromPlugin(it).toString()))
@@ -132,7 +131,6 @@ class RunningConfigurationImpl @Inject constructor(
 
     override fun observableKeys(): List<NonPreferenceKey> {
         val keys = mutableListOf<NonPreferenceKey>()
-        keys += insulin.syncedKeys
         activePlugin.getSpecificPluginsListByInterface(APS::class.java).forEach {
             keys += (it as APS).syncedKeys
         }
@@ -204,10 +202,6 @@ class RunningConfigurationImpl @Inject constructor(
             if (config.VERSION_NAME.startsWith(it).not())
                 notificationManager.post(NotificationId.NSCLIENT_VERSION_DOES_NOT_MATCH, R.string.nsclient_version_does_not_match)
         }
-        configuration.insulinConfiguration?.let { ic ->
-            applyToPlugin(insulin, ic)
-        }
-
         configuration.aps?.let {
             val algorithm = APSResult.Algorithm.valueOf(it)
             for (p in activePlugin.getSpecificPluginsListByInterface(APS::class.java)) {

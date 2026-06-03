@@ -19,15 +19,16 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.collectResilient
-import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.HardLimits
-import app.aaps.core.keys.LongNonKey
+import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.StringNonKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.core.objects.extensions.toJsonObject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -51,14 +52,12 @@ class InsulinImpl @Inject constructor(
     val config: Config,
     val hardLimits: HardLimits,
     val uel: UserEntryLogger,
-    val dateUtil: DateUtil,
     @ApplicationScope private val appScope: CoroutineScope
 ) : Insulin, InsulinManager {
 
-    // True while loading/applying a config snapshot (local pref or master-pushed), so the
-    // re-store inside [applyConfiguration] does not bump [LongNonKey.InsulinConfigurationModified]
-    // — only genuine user edits advance the client→master last-writer-wins version.
-    @Volatile private var suppressVersionBump = false
+    // True while the one-time init normalization rebuilds the list via [applyConfiguration]; suppresses
+    // the per-insulin [storeSettings] so the normalize persists at most once (via putRemote) at the end.
+    @Volatile private var applying = false
 
     override val id get() = InsulinType.fromPeak(iCfg.insulinPeakTime) // Only used within Autotune Plugin
     override val friendlyName get() = iCfg.insulinNickname  // No more used to delete or a way to provide Nickname ?
@@ -75,9 +74,14 @@ class InsulinImpl @Inject constructor(
     override var currentInsulinIndex = 0
 
     init {
-        loadSettings()
+        bootstrap()
         persistenceLayer.observeChanges<EPS>()
             .collectResilient(appScope, aapsLogger, LTag.CORE) { updateCachedICfg() }
+        // Pick up master pushes: the cold-key bidirectional sync writes InsulinConfiguration via
+        // putRemote. Client only — the master owns the canonical config and edits its own list directly.
+        // Verbatim load → no re-store → no echo.
+        if (config.AAPSCLIENT)
+            preferences.observe(StringNonKey.InsulinConfiguration).drop(1).onEach { loadSettings() }.launchIn(appScope)
     }
 
     private suspend fun updateCachedICfg() {
@@ -124,6 +128,7 @@ class InsulinImpl @Inject constructor(
 
     @Synchronized
     override fun removeCurrentInsulin() {
+        if (insulins.size <= 1) return // invariant: the list keeps at least one insulin (iCfg falls back to insulins[0])
         val insulinRemoved = currentInsulin().insulinLabel
         insulins.removeAt(currentInsulinIndex)
         uel.log(Action.INSULIN_REMOVED, Sources.Insulin, value = ValueWithUnit.SimpleString(insulinRemoved))
@@ -177,32 +182,68 @@ class InsulinImpl @Inject constructor(
         return -1
     }
 
-    override val syncedKeys: List<NonPreferenceKey> = listOf(StringNonKey.InsulinConfiguration)
-
-    override fun reloadInternalState() = loadSettings()
-
+    // Verbatim mirror of the persisted config — parse only, NO normalization, NO store. Normalization
+    // happens once at init ([normalizeAndSeedOnce]) and at edit time ([addNewInsulin]); a master push is
+    // already normalized, so applying it is a pure re-parse → no re-store → no echo loop.
     @Synchronized
     override fun loadSettings() {
-        val jsonString = preferences.get(StringNonKey.InsulinConfiguration)
-        val jsonObject = runCatching {
-            Json.parseToJsonElement(jsonString) as? JsonObject
+        insulins.clear()
+        val insulinArray = runCatching {
+            (Json.parseToJsonElement(preferences.get(StringNonKey.InsulinConfiguration)) as? JsonObject)?.get("insulin") as? JsonArray
         }.getOrNull()
-        suppressVersionBump = true
-        try {
-            applyConfiguration(jsonObject ?: buildJsonObject {})
-        } finally {
-            suppressVersionBump = false
+        insulinArray?.forEach { element ->
+            runCatching { (element as? JsonObject)?.let { insulins.add(ICfg.fromJsonObject(it)) } }
+        }
+        currentInsulinIndex = currentInsulinIndex.coerceIn(0, (insulins.size - 1).coerceAtLeast(0))
+    }
+
+    // One-time at init.
+    // CLIENT: mirror the master's config verbatim, seeding a normalized default ONLY when empty (so
+    // iCfg's insulins[0] fallback is safe). The master owns the canonical form, so client never
+    // re-canonicalizes non-empty data — avoids cosmetically diverging from a master that serializes
+    // slightly differently (mixed app versions).
+    // MASTER: normalize legacy data (fill nicknames, dedup, regenerate labels, seed default) and persist
+    // the canonical form once.
+    // Either branch persists via putRemote: no client→master echo, stamp floored to the current value.
+    @Synchronized
+    private fun bootstrap() {
+        if (config.AAPSCLIENT) {
+            loadSettings() // verbatim — master data stays untouched
+            if (insulins.isEmpty()) {
+                applying = true
+                try {
+                    addNewInsulin(InsulinType.OREF_RAPID_ACTING.getICfg(rh))
+                } finally {
+                    applying = false
+                }
+                persistBootstrap()
+            }
+        } else {
+            val before = preferences.get(StringNonKey.InsulinConfiguration)
+            val jsonObject = runCatching { Json.parseToJsonElement(before) as? JsonObject }.getOrNull()
+            applying = true
+            try {
+                applyConfiguration(jsonObject ?: buildJsonObject {})
+            } finally {
+                applying = false
+            }
+            if (configuration().toString() != before) persistBootstrap()
         }
     }
 
+    /** Persist the bootstrapped config via putRemote — no echo, stamp floored to the current value. */
+    private fun persistBootstrap() =
+        preferences.putRemote(
+            StringNonKey.InsulinConfiguration, configuration().toString(),
+            preferences.get(LongComposedKey.SyncedPrefModified, StringNonKey.InsulinConfiguration.key)
+        )
+
     @Synchronized
     override fun storeSettings() {
+        if (applying) return // the one-time init normalize persists once at the end via putRemote
+        // Genuine edit → local put. The generic sync layer stamps SyncedPrefModified and signals the
+        // client→master publisher on this write; no manual version bump needed.
         preferences.put(StringNonKey.InsulinConfiguration, configuration().toString())
-        // Bump the client→master version only on genuine user edits, not while (re)loading a snapshot.
-        // Monotonic (max(stored+1, now())): strictly increases even on same-ms edits or a backwards wall
-        // clock, and lets the master out-version a client value it previously adopted despite clock skew.
-        if (!suppressVersionBump)
-            preferences.put(LongNonKey.InsulinConfigurationModified, maxOf(preferences.get(LongNonKey.InsulinConfigurationModified) + 1, dateUtil.now()))
     }
 
     @Synchronized

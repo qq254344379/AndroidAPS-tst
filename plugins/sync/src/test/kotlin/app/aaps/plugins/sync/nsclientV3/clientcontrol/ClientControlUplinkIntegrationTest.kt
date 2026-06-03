@@ -1,7 +1,6 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.interfaces.configuration.Config
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -93,7 +92,6 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var masterPrefs: Preferences
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
-    @Mock private lateinit var insulin: Insulin
     @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     private var masterAuthorizedClients = "[]"
@@ -150,7 +148,7 @@ class ClientControlUplinkIntegrationTest {
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            activeSceneSync, insulin, profileFunction, offerPublisher, masterPrefs, dateUtil, uel, aapsLogger
+            activeSceneSync, profileFunction, offerPublisher, masterPrefs, dateUtil, uel, aapsLogger
         )
 
         // ---------- pairing: same secret on both sides ----------

@@ -56,7 +56,6 @@ import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
-import app.aaps.plugins.sync.nsclientV3.clientcontrol.InsulinDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.PreferencesClientPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
@@ -135,7 +134,6 @@ class NSClientV3Plugin @Inject constructor(
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
     private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
-    private val insulinDefinitionsClientPublisher: InsulinDefinitionsClientPublisher,
     private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
 ) : NsClient, Sync, PluginBaseWithPreferences(
@@ -255,7 +253,6 @@ class NSClientV3Plugin @Inject constructor(
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         runningConfigurationPublisher.start(scope)
         sceneDefinitionsClientPublisher.start(scope)
-        insulinDefinitionsClientPublisher.start(scope)
         preferencesClientPublisher.start(scope)
         // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
         // WS settings-collection listener in NSClientV3Service that calls into
@@ -404,7 +401,6 @@ class NSClientV3Plugin @Inject constructor(
         handler = null
         runningConfigurationPublisher.stop()
         sceneDefinitionsClientPublisher.stop()
-        insulinDefinitionsClientPublisher.stop()
         preferencesClientPublisher.stop()
         scope.cancel()
         stopService()

@@ -28,6 +28,7 @@ import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -89,7 +90,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -196,20 +199,31 @@ class AutomationRuntime @Inject constructor(
     private val _events = MutableStateFlow<List<AutomationEventObject>>(IdentityList(emptyList()))
     override val events: StateFlow<List<AutomationEvent>> = _events.asStateFlow()
 
-    /** Emit a fresh snapshot. Called by every mutation and by external in-place editors. */
+    // Persistence is driven by EDITS only ([requestPersist]), never by [loadFromSP] — so applying a
+    // master push is a pure verbatim re-parse with no store, hence no echo. Deliberately decoupled from
+    // [_events] (the UI snapshot stream) so a load can refresh the UI/wear without persisting.
+    private val _persist = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Emit a fresh snapshot for UI/wear collectors. Does NOT persist (see [requestPersist]). */
     @Synchronized
     fun notifyChanged() {
         _events.value = IdentityList(automationEvents.toList())
     }
 
+    /** Request a debounced persist. Only genuine edits / last-run call this — never a load. */
+    private fun requestPersist() {
+        _persist.tryEmit(Unit)
+    }
+
     /**
-     * Definition edit from an in-place external editor (e.g. toggleEnabled): emit a fresh snapshot,
-     * which drives the debounced persistence. The client→master sync version is stamped automatically
-     * by PreferencesImpl when storeToSP writes the bidirectionally-synced AutomationEvents key.
+     * Definition edit from an in-place external editor (e.g. toggleEnabled): refresh the UI and request
+     * a persist. The client→master sync version is stamped automatically by PreferencesImpl when
+     * storeToSP writes the bidirectionally-synced AutomationEvents key.
      */
     @Synchronized
     fun markEdited() {
         notifyChanged()
+        requestPersist()
     }
 
     /**
@@ -271,17 +285,17 @@ class AutomationRuntime @Inject constructor(
      */
     fun start(externalScope: CoroutineScope? = null) {
         if (scope != null) return // idempotent — already started; avoid leaking a second scope + duplicate subscriptions
-        loadFromSP()
+        bootstrap()
 
         // externalScope is injected by tests to drive the debounced persistence deterministically;
         // production passes nothing and gets the long-lived IO scope.
         val newScope = externalScope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope = newScope
 
-        // Persist on any config change. drop(1) skips the seed empty value; debounce coalesces
-        // rapid edit-flow mutations (toggle/move/save all back-to-back) into a single write.
+        // Persist on EDITS only (never on a load — that's the whole point of the verbatim model).
+        // debounce coalesces rapid edit-flow mutations (toggle/move/save back-to-back) into a single write.
         @Suppress("OPT_IN_USAGE")
-        _events.drop(1).debounce(300).onEach { storeToSP() }.launchIn(newScope)
+        _persist.debounce(300).onEach { storeToSP() }.launchIn(newScope)
         // Refresh the wear UserAction tile on any cache change — fires for NS-synced edits too,
         // not only when the in-app Automation screen is open. debounce(300) prevents per-drag-tick
         // tile storms during reorder.
@@ -375,55 +389,67 @@ class AutomationRuntime @Inject constructor(
         }
     }
 
+    // Pure compose — only ever reached from the EDIT-driven [_persist] trigger (never from a load), so
+    // no band-aid is needed: a verbatim load doesn't persist, and an edit always changes content.
     private fun storeToSP() {
-        val array = JSONArray()
-        val iterator = synchronized(this) { automationEvents.toMutableList().iterator() }
-        try {
-            while (iterator.hasNext()) {
-                val event = iterator.next()
-                array.put(JSONObject(event.toJSON()))
-            }
-        } catch (e: JSONException) {
-            e.printStackTrace()
-        }
-
-        val data = array.toString()
-        // Skip the redundant write when the serialized list already matches what's stored. This makes
-        // a sync-apply reload a fixed point: without it, self-observation (putRemote → observe →
-        // loadFromSP → notifyChanged → store) would re-write the same value and re-trigger the
-        // observer → an apply→observe→store echo loop.
-        if (data != preferences.get(StringNonKey.AutomationEvents))
-            preferences.put(StringNonKey.AutomationEvents, data)
+        preferences.put(StringNonKey.AutomationEvents, eventsToJson())
     }
 
-    // internal + @VisibleForTesting: production reaches this only via start()/self-observe; tests drive
-    // it directly to assert the load → fixed-point behavior.
+    /** Serialize the in-memory event list to the persisted JSON shape (what [storeToSP] writes). */
+    private fun eventsToJson(): String {
+        val array = JSONArray()
+        synchronized(this) { automationEvents.toMutableList() }.forEach { event ->
+            try {
+                array.put(JSONObject(event.toJSON()))
+            } catch (e: JSONException) {
+                e.printStackTrace()
+            }
+        }
+        return array.toString()
+    }
+
+    // Verbatim mirror of the persisted definitions — parse only, NO store, NO seed, NO id-backfill-store.
+    // Id-backfill + the EMPTY_EVENT starter happen once in [bootstrap] (master); a master push is already
+    // canonical, so applying it is a pure re-parse → no store → no echo. @VisibleForTesting + internal:
+    // production reaches this only via start()/self-observe; tests drive it to assert the load behavior.
     @VisibleForTesting
     @Synchronized
     internal fun loadFromSP() {
         automationEvents.clear()
         val data = preferences.get(StringNonKey.AutomationEvents)
-        var needsResave = false
         if (data != "")
             try {
                 val array = JSONArray(data)
-                for (i in 0 until array.length()) {
-                    val o = array.getJSONObject(i)
-                    val hadId = o.has("id") && o.optString("id", "").isNotEmpty()
-                    val event = AutomationEventObject(injector).fromJSON(o.toString())
-                    if (!hadId) needsResave = true
-                    automationEvents.add(event)
-                }
+                for (i in 0 until array.length())
+                    automationEvents.add(AutomationEventObject(injector).fromJSON(array.getJSONObject(i).toString()))
             } catch (e: JSONException) {
                 e.printStackTrace()
             }
-        else
-            automationEvents.add(AutomationEventObject(injector).fromJSON(EMPTY_EVENT))
-        // Persist generated IDs for events that didn't have one
-        if (needsResave) storeToSP()
-        // Always emit after loading — initial cold start and reloadInternalState (NS sync) both
-        // need to fan out to UI collectors. notifyChanged() is the single emit channel.
+        notifyChanged() // fan out to UI/wear collectors; does NOT persist
+    }
+
+    // One-time at init (from [start]).
+    // CLIENT: pure verbatim mirror — the master owns the canonical definitions; never re-serialize or
+    // persist (no echo, no mixed-version cosmetic divergence).
+    // MASTER: id-backfill legacy id-less events (fromJSON assigns ids in-memory) and seed the EMPTY_EVENT
+    // starter on a fresh install (pref never initialized = ""), then persist once via putRemote if the
+    // canonical form changed. Idempotent for already-canonical data.
+    @Synchronized
+    private fun bootstrap() {
+        if (config.AAPSCLIENT) {
+            loadFromSP()
+            return
+        }
+        val before = preferences.get(StringNonKey.AutomationEvents)
+        loadFromSP()
+        if (before == "") automationEvents.add(AutomationEventObject(injector).fromJSON(EMPTY_EVENT))
         notifyChanged()
+        val after = eventsToJson()
+        if (after != before)
+            preferences.putRemote(
+                StringNonKey.AutomationEvents, after,
+                preferences.get(LongComposedKey.SyncedPrefModified, StringNonKey.AutomationEvents.key)
+            )
     }
 
     internal suspend fun processActions() {
@@ -486,7 +512,7 @@ class AutomationRuntime @Inject constructor(
          */
         btConnects.clear()
 
-        storeToSP() // save last run time
+        requestPersist() // persist last-run time (edit-driven trigger; master only)
     }
 
     override suspend fun processEvent(someEvent: AutomationEvent) {

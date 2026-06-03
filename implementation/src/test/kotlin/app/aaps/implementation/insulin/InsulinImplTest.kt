@@ -9,9 +9,7 @@ import app.aaps.core.interfaces.insulin.InsulinType
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.HardLimits
-import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.iobCalc
@@ -29,7 +27,6 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.eq
 import org.mockito.Mock
 import org.mockito.kotlin.any
-import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -48,7 +45,6 @@ class InsulinImplTest : TestBase() {
     @Mock lateinit var config: Config
     @Mock lateinit var hardLimits: HardLimits
     @Mock lateinit var uel: UserEntryLogger
-    @Mock lateinit var dateUtil: DateUtil
 
     @BeforeEach
     fun setup() {
@@ -59,7 +55,7 @@ class InsulinImplTest : TestBase() {
         // Mock rh.gs() for nickname resolution (OREF_FREE_PEAK template) and buildSuffix (U100 concentration)
         whenever(rh.gs(eq(R.string.free_peak_oref))).thenReturn("Free-Peak Oref")
         whenever(rh.gs(eq(R.string.u100))).thenReturn("U100")
-        sut = InsulinImpl(preferences, rh, profileFunction, persistenceLayer, aapsLogger, config, hardLimits, uel, dateUtil, testScope)
+        sut = InsulinImpl(preferences, rh, profileFunction, persistenceLayer, aapsLogger, config, hardLimits, uel, testScope)
     }
 
     @Test
@@ -83,7 +79,7 @@ class InsulinImplTest : TestBase() {
         whenever(profileFunction.getProfile())
             .thenThrow(RuntimeException("induced failure"))
             .thenReturn(null)
-        val localSut = InsulinImpl(preferences, rh, profileFunction, persistenceLayer, aapsLogger, config, hardLimits, uel, dateUtil, CoroutineScope(Dispatchers.Unconfined))
+        val localSut = InsulinImpl(preferences, rh, profileFunction, persistenceLayer, aapsLogger, config, hardLimits, uel, CoroutineScope(Dispatchers.Unconfined))
         assertThat(localSut).isNotNull() // keep reference; collector is launched in its init
 
         changes.tryEmit(emptyList()) // 1st: getProfile() throws, caught by collectResilient
@@ -119,22 +115,4 @@ class InsulinImplTest : TestBase() {
         assertThat(treatment.iobCalc(time).iobContrib).isWithin(0.01).of(0.0)
     }
 
-    @Test
-    fun storeSettingsBumpsClientMasterVersionOnUserEdit() {
-        // A genuine edit (storeSettings outside a load) must advance the client→master LWW version.
-        whenever(dateUtil.now()).thenReturn(12345L)
-        sut.storeSettings()
-        verify(preferences).put(LongNonKey.InsulinConfigurationModified, 12345L)
-    }
-
-    @Test
-    fun loadSettingsDoesNotBumpClientMasterVersion() {
-        // reloadInternalState() = loadSettings(), which re-stores the config but must NOT advance the
-        // version — otherwise applying a master-pushed config would bump the version and echo back,
-        // creating an infinite client↔master sync loop. (init already ran loadSettings once.)
-        sut.reloadInternalState()
-        // org.mockito.kotlin.eq fully-qualified: the file already imports org.mockito.ArgumentMatchers.eq,
-        // which returns null and NPEs on non-null Kotlin args.
-        verify(preferences, never()).put(org.mockito.kotlin.eq(LongNonKey.InsulinConfigurationModified), any<Long>())
-    }
 }

@@ -109,7 +109,6 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
             is ClientControlMessage.SceneDefinitionsUpdate,
-            is ClientControlMessage.InsulinConfigurationUpdate,
             is ClientControlMessage.InsulinActivate,
             is ClientControlMessage.PreferencesUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
@@ -124,9 +123,6 @@ class ClientControlPublisher @Inject constructor(
 
     override suspend fun sendScenesUpdate(scenesJson: String): ClientControlSendResult =
         publish(ClientControlMessage.SceneDefinitionsUpdate(scenesJson))
-
-    override suspend fun sendInsulinUpdate(insulinJson: String, version: Long): ClientControlSendResult =
-        publish(ClientControlMessage.InsulinConfigurationUpdate(insulinJson, version))
 
     override suspend fun sendInsulinActivate(iCfgJson: String): ClientControlSendResult =
         publish(ClientControlMessage.InsulinActivate(iCfgJson))

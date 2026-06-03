@@ -4,7 +4,6 @@ import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -15,7 +14,6 @@ import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.LongComposedKey
-import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.IntNonPreferenceKey
@@ -76,7 +74,6 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
     private val activeSceneSync: ActiveSceneSync,
-    private val insulin: Insulin,
     private val profileFunction: ProfileFunction,
     private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
@@ -174,15 +171,14 @@ class ClientControlReceiver @Inject constructor(
             onVerifiedUndecodablePayload(entry, envelope, now)
         } else {
             when (message) {
-                is ClientControlMessage.Hello                      -> onVerifiedHello(entry, envelope, now)
+                is ClientControlMessage.Hello                  -> onVerifiedHello(entry, envelope, now)
                 // Hello handling already includes the Pending → Active transition; offer doc
                 // cleanup is inside onVerifiedHello so it can suspend on deleteOffer.
-                is ClientControlMessage.SceneStart                 -> onVerifiedSceneStart(entry, envelope, message, now)
-                is ClientControlMessage.SceneStop                  -> onVerifiedSceneStop(entry, envelope, message, now)
-                is ClientControlMessage.SceneDefinitionsUpdate     -> onVerifiedScenesUpdate(entry, envelope, message, now)
-                is ClientControlMessage.InsulinConfigurationUpdate -> onVerifiedInsulinUpdate(entry, envelope, message, now)
-                is ClientControlMessage.InsulinActivate            -> onVerifiedInsulinActivate(entry, envelope, message, now)
-                is ClientControlMessage.PreferencesUpdate          -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.SceneStart             -> onVerifiedSceneStart(entry, envelope, message, now)
+                is ClientControlMessage.SceneStop              -> onVerifiedSceneStop(entry, envelope, message, now)
+                is ClientControlMessage.SceneDefinitionsUpdate -> onVerifiedScenesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.InsulinActivate        -> onVerifiedInsulinActivate(entry, envelope, message, now)
+                is ClientControlMessage.PreferencesUpdate      -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
             }
         }
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -295,34 +291,6 @@ class ClientControlReceiver @Inject constructor(
         if (changed > 0) preferences.put(StringNonKey.SceneDefinitions, existing.toString())
         nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: applied=$changed stale=$dropped")
         if (changed > 0) uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: scenes")
-    }
-
-    /**
-     * Apply a client-pushed insulin-configuration JSON via whole-list last-writer-wins by version
-     * (the client's last local-edit wall clock). A strictly-newer push replaces the master's config
-     * and adopts its version; a stale one is dropped. The write to [StringNonKey.InsulinConfiguration]
-     * triggers `RunningConfigurationPublisher`'s debounce (the key is in `insulin.syncedKeys`),
-     * fanning the merged result out to every paired client; the master service is reloaded directly
-     * since it caches the insulin list in memory rather than reading the pref live.
-     */
-    private fun onVerifiedInsulinUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.InsulinConfigurationUpdate, now: Long) {
-        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        val localVersion = preferences.get(LongNonKey.InsulinConfigurationModified)
-        if (message.version <= localVersion) {
-            nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: stale (v=${message.version} <= local=$localVersion)")
-            return
-        }
-        val incoming = runCatching { JSONObject(message.insulinJson) }.getOrNull()
-        if (incoming == null) {
-            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: insulin.update from ${entry.name} has invalid JSON, ignoring")
-            nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: invalid JSON")
-            return
-        }
-        preferences.put(StringNonKey.InsulinConfiguration, message.insulinJson)
-        preferences.put(LongNonKey.InsulinConfigurationModified, message.version)
-        insulin.reloadInternalState()
-        nsClientRepository.addLog("◄ CLIENTCTL", "insulin.update from ${entry.name}: applied v=${message.version}")
-        uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: insulin configuration")
     }
 
     /**

@@ -4,7 +4,6 @@ import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -19,7 +18,6 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.LongComposedKey
-import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
@@ -59,7 +57,6 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var nsAndroidClient: NSAndroidClient
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
-    @Mock private lateinit var insulin: Insulin
     @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
@@ -78,7 +75,6 @@ internal class ClientControlReceiverTest {
     private lateinit var sut: ClientControlReceiver
 
     private var stored = "[]"
-    private var insulinVersion = 0L
 
     // Per-key backing store — the scenes-update merge writes a different StringNonKey
     // (`SceneDefinitions`) than the authorized-clients repository, so a shared `stored`
@@ -106,14 +102,6 @@ internal class ClientControlReceiverTest {
                 else                              -> stored = value
             }
         }
-        whenever(preferences.get(LongNonKey.InsulinConfigurationModified)).thenAnswer { insulinVersion }
-        whenever(preferences.put(any<LongNonKey>(), any<Long>())).thenAnswer { invocation ->
-            when (invocation.arguments[0]) {
-                LongNonKey.InsulinConfigurationModified -> insulinVersion = invocation.arguments[1] as Long
-
-                else                                    -> {}
-            }
-        }
         authorizedRepository = AuthorizedClientsRepository(preferences, secureEncrypt, aapsLogger)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
         whenever(dateUtil.now()).thenReturn(now)
@@ -123,7 +111,6 @@ internal class ClientControlReceiverTest {
             nsClientRepository,
             sceneAutomationApi,
             activeSceneSync,
-            insulin,
             profileFunction,
             offerPublisher,
             preferences,
@@ -684,72 +671,6 @@ internal class ClientControlReceiverTest {
 
         // Garbled JSON from a verified-but-broken client must not corrupt the master's pref.
         assertThat(storage[StringNonKey.SceneDefinitions.key]).isEqualTo(before)
-    }
-
-    // -- insulin_configuration_update ----------------------------------------------------
-
-    private fun insulinJson(label: String): String =
-        """{"insulin":[{"insulinLabel":"$label","insulinPeakTime":75,"dia":6.0,"concentration":100.0}]}"""
-
-    private suspend fun sendInsulinUpdate(clientId: String, secret: ByteArray, json: String, version: Long, counter: Long = 5L) {
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}insulin_configuration_update_$clientId"
-        val msg = ClientControlMessage.InsulinConfigurationUpdate(json, version)
-        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
-    }
-
-    @Test
-    fun insulinUpdateAppliesWhenIncomingVersionIsNewer() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        insulinVersion = 1_000L
-        storage[StringNonKey.InsulinConfiguration.key] = insulinJson("old")
-
-        sendInsulinUpdate(clientId, secret, insulinJson("new"), version = 2_000L)
-
-        assertThat(storage[StringNonKey.InsulinConfiguration.key]).contains("\"insulinLabel\":\"new\"")
-        assertThat(insulinVersion).isEqualTo(2_000L)
-        verify(insulin).reloadInternalState()
-    }
-
-    @Test
-    fun insulinUpdateDropsStaleIncoming() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        insulinVersion = 5_000L
-        storage[StringNonKey.InsulinConfiguration.key] = insulinJson("master")
-
-        sendInsulinUpdate(clientId, secret, insulinJson("stale"), version = 1_000L)
-
-        assertThat(storage[StringNonKey.InsulinConfiguration.key]).contains("\"insulinLabel\":\"master\"")
-        assertThat(insulinVersion).isEqualTo(5_000L)
-        verify(insulin, never()).reloadInternalState()
-    }
-
-    @Test
-    fun insulinUpdateEqualVersionIsTreatedAsStale() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        insulinVersion = 3_000L
-        storage[StringNonKey.InsulinConfiguration.key] = insulinJson("master")
-
-        sendInsulinUpdate(clientId, secret, insulinJson("incoming"), version = 3_000L)
-
-        assertThat(storage[StringNonKey.InsulinConfiguration.key]).contains("\"insulinLabel\":\"master\"")
-        verify(insulin, never()).reloadInternalState()
-    }
-
-    @Test
-    fun insulinUpdateInvalidJsonLeavesPrefUntouched() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        insulinVersion = 1_000L
-        val before = insulinJson("x")
-        storage[StringNonKey.InsulinConfiguration.key] = before
-
-        sendInsulinUpdate(clientId, secret, "{not json", version = 9_000L)
-
-        assertThat(storage[StringNonKey.InsulinConfiguration.key]).isEqualTo(before)
-        verify(insulin, never()).reloadInternalState()
     }
 
     // -- insulin_activate -----------------------------------------------------------------

@@ -11,9 +11,7 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.profile.EffectiveProfile
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.HardLimits
-import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.shared.tests.TestBase
@@ -60,11 +58,9 @@ class InsulinImplMigrationTest : TestBase() {
     @Mock lateinit var config: Config
     @Mock lateinit var hardLimits: HardLimits
     @Mock lateinit var uel: UserEntryLogger
-    @Mock lateinit var dateUtil: DateUtil
 
-    // In-memory backing for the two keys InsulinImpl touches. put() updates these, get() reflects them.
+    // In-memory backing for InsulinConfiguration. put()/putRemote() update it, get() reflects it.
     private var storedConfig = "{}"
-    private var storedModified = 0L
 
     private val rapidPeakMs = InsulinType.OREF_RAPID_ACTING.insulinPeakTime   // 75 min
     private val rapidEndMs = InsulinType.OREF_RAPID_ACTING.insulinEndTime     // 8 h
@@ -81,18 +77,17 @@ class InsulinImplMigrationTest : TestBase() {
         whenever(rh.gs(any<Int>())).thenAnswer { "S" + it.getArgument<Int>(0) }
 
         whenever(preferences.get(StringNonKey.InsulinConfiguration)).thenAnswer { storedConfig }
-        whenever(preferences.get(LongNonKey.InsulinConfigurationModified)).thenAnswer { storedModified }
         doAnswer { storedConfig = it.getArgument(1); null }
             .whenever(preferences).put(eq(StringNonKey.InsulinConfiguration), any<String>())
-        doAnswer { storedModified = it.getArgument(1); null }
-            .whenever(preferences).put(eq(LongNonKey.InsulinConfigurationModified), any<Long>())
+        // The one-time init normalize persists via putRemote (master-wins, no echo) — route it to storage too.
+        doAnswer { storedConfig = it.getArgument(1); null }
+            .whenever(preferences).putRemote(eq(StringNonKey.InsulinConfiguration), any<String>(), any<Long>())
     }
 
     private fun create(initialConfig: String): InsulinImpl {
         storedConfig = initialConfig
-        storedModified = 0L
         return InsulinImpl(
-            preferences, rh, profileFunction, persistenceLayer, aapsLogger, config, hardLimits, uel, dateUtil,
+            preferences, rh, profileFunction, persistenceLayer, aapsLogger, config, hardLimits, uel,
             CoroutineScope(Dispatchers.Unconfined)
         )
     }
@@ -197,15 +192,16 @@ class InsulinImplMigrationTest : TestBase() {
     }
 
     @Test
-    fun alreadyNormalizedDuplicateEntryCollapses() {
-        // Load 2 distinct insulins → storedConfig is now the normalized form. Duplicating a normalized
-        // entry and reloading must collapse it (its label already equals the regenerated form → isEqual).
-        val sut = create(cfg(ins(label = "", peak = rapidPeakMs, endTime = rapidEndMs), ins(label = "", peak = lyumjevPeakMs, endTime = rapidEndMs)))
-        assertThat(sut.insulins).hasSize(2)
-
+    fun duplicateOfNormalizedEntryCollapsesAtInit() {
+        // Dedup now happens once at the init normalize, NOT on every load (load is verbatim). Construct
+        // once to get the normalized form, duplicate a normalized entry, then construct again over the
+        // duplicate-bearing config — the init normalize must collapse it (its label equals the
+        // regenerated form → isEqual).
+        create(cfg(ins(label = "", peak = rapidPeakMs, endTime = rapidEndMs), ins(label = "", peak = lyumjevPeakMs, endTime = rapidEndMs)))
         val arr = JSONObject(storedConfig).getJSONArray("insulin")
-        storedConfig = """{"insulin":[${arr.getJSONObject(0)},${arr.getJSONObject(0)},${arr.getJSONObject(1)}]}"""
-        sut.reloadInternalState()
+        val withDuplicate = """{"insulin":[${arr.getJSONObject(0)},${arr.getJSONObject(0)},${arr.getJSONObject(1)}]}"""
+
+        val sut = create(withDuplicate)
 
         assertThat(sut.insulins).hasSize(2)
     }
@@ -220,7 +216,7 @@ class InsulinImplMigrationTest : TestBase() {
         val sut = create(cfg(ins(nickname = null)))
         val snapshot = storedConfig
 
-        sut.reloadInternalState()
+        sut.loadSettings()
 
         assertThat(storedConfig).isEqualTo(snapshot)
         assertThat(sut.insulins).hasSize(1)
@@ -231,7 +227,7 @@ class InsulinImplMigrationTest : TestBase() {
         val sut = create(cfg(ins(peak = rapidPeakMs, endTime = rapidEndMs), ins(peak = lyumjevPeakMs, endTime = rapidEndMs)))
         val snapshot = storedConfig
 
-        sut.reloadInternalState()
+        sut.loadSettings()
 
         assertThat(storedConfig).isEqualTo(snapshot)
         assertThat(sut.insulins).hasSize(2)
@@ -250,41 +246,19 @@ class InsulinImplMigrationTest : TestBase() {
         assertThat(storedInsulinCount()).isEqualTo(2)
     }
 
-    // ── Client→master LWW version: the echo-loop guard (must stay intact through the migration) ──────
+    // ── Reload writes nothing (verbatim load is the echo guard) ──────────────────────────────────────
 
     @Test
-    fun storeSettingsBumpsVersionByAtLeastOneWhenClockIsBehind() {
-        val sut = create("{}")
-        storedModified = 100
-        whenever(dateUtil.now()).thenReturn(50)
-
-        sut.storeSettings()
-
-        assertThat(storedModified).isEqualTo(101) // max(100 + 1, 50)
-    }
-
-    @Test
-    fun storeSettingsUsesNowWhenClockIsAhead() {
-        val sut = create("{}")
-        storedModified = 100
-        whenever(dateUtil.now()).thenReturn(5_000)
-
-        sut.storeSettings()
-
-        assertThat(storedModified).isEqualTo(5_000) // max(100 + 1, 5000)
-    }
-
-    @Test
-    fun reloadDoesNotBumpVersion() {
-        // Applying a snapshot (local reload or master push) must NOT advance the version, or the apply
-        // would echo back to the master and form an infinite sync loop.
+    fun reloadWritesNothing() {
+        // Applying a snapshot (local reload or master push) is a pure verbatim re-parse — it must NOT
+        // write the config back, or it would echo to the master and form a sync loop.
         val sut = create(cfg(ins()))
-        storedModified = 0
+        val before = storedConfig
 
-        sut.reloadInternalState()
+        sut.loadSettings()
 
-        assertThat(storedModified).isEqualTo(0)
-        verify(preferences, never()).put(eq(LongNonKey.InsulinConfigurationModified), any<Long>())
+        assertThat(storedConfig).isEqualTo(before)
+        verify(preferences, never()).put(eq(StringNonKey.InsulinConfiguration), any<String>())
     }
 
     // ── add / remove / current selection ────────────────────────────────────────────────────────────
@@ -293,14 +267,12 @@ class InsulinImplMigrationTest : TestBase() {
     fun addNewInsulinAppendsSelectsItPersistsAndLogs() {
         val sut = create("{}")
         clearInvocations(uel) // the default-insulin bootstrap during create() already logged a NEW_INSULIN
-        whenever(dateUtil.now()).thenReturn(1_000)
 
         sut.addNewInsulin(ICfg(insulinLabel = "", insulinEndTime = rapidEndMs, insulinPeakTime = lyumjevPeakMs, concentration = 1.0), ue = true)
 
         assertThat(sut.insulins).hasSize(2)
         assertThat(sut.currentInsulinIndex).isEqualTo(1)
         assertThat(storedInsulinCount()).isEqualTo(2)
-        assertThat(storedModified).isEqualTo(1_000)
         verify(uel).log(eq(Action.NEW_INSULIN), any<Sources>(), any<String>(), any<ValueWithUnit>())
     }
 
@@ -315,6 +287,18 @@ class InsulinImplMigrationTest : TestBase() {
         assertThat(sut.currentInsulinIndex).isEqualTo(0)
         assertThat(storedInsulinCount()).isEqualTo(1)
         verify(uel).log(eq(Action.INSULIN_REMOVED), any<Sources>(), any<String>(), any<ValueWithUnit>())
+    }
+
+    @Test
+    fun removeCurrentInsulinKeepsAtLeastOneInsulin() {
+        // Invariant: the list is never emptied. With verbatim load there is no per-load prefill to
+        // recover an empty list, so removeCurrentInsulin must no-op on a single-element list.
+        val sut = create("{}") // one seeded default
+        assertThat(sut.insulins).hasSize(1)
+
+        sut.removeCurrentInsulin()
+
+        assertThat(sut.insulins).hasSize(1)
     }
 
     @Test
