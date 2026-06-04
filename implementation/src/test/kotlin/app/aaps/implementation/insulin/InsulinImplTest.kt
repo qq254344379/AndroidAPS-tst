@@ -59,11 +59,6 @@ class InsulinImplTest : TestBase() {
     }
 
     @Test
-    fun getIdTest() {
-        assertThat(sut.id).isEqualTo(InsulinType.OREF_FREE_PEAK)
-    }
-
-    @Test
     fun getFriendlyNameTest() {
         assertThat(sut.friendlyName).isEqualTo("Free-Peak Oref")
     }

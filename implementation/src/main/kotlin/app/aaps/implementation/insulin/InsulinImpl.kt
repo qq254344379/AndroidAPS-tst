@@ -59,7 +59,6 @@ class InsulinImpl @Inject constructor(
     // the per-insulin [storeSettings] so the normalize persists at most once (via putRemote) at the end.
     @Volatile private var applying = false
 
-    override val id get() = InsulinType.fromPeak(iCfg.insulinPeakTime) // Only used within Autotune Plugin
     override val friendlyName get() = iCfg.insulinNickname  // No more used to delete or a way to provide Nickname ?
 
     @Volatile private var cachedICfg: ICfg? = null

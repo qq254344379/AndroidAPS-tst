@@ -13,7 +13,6 @@ import app.aaps.core.interfaces.configuration.ConfigExportImport
 import app.aaps.core.interfaces.configuration.RunningConfigurationKeys
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.constraints.Safety
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationId
@@ -52,7 +51,6 @@ import javax.inject.Inject
 @Reusable
 class RunningConfigurationImpl @Inject constructor(
     private val activePlugin: ActivePlugin,
-    private val insulin: Insulin,
     private val scenes: Scenes,
     private val activeSceneSync: ActiveSceneSync,
     private val configBuilder: ConfigBuilder,
@@ -82,7 +80,6 @@ class RunningConfigurationImpl @Inject constructor(
             // APS interface is needed for dynamic sensitivity calculation
             val apsInterface = activePlugin.activeAPS
 
-            json.put("insulin", insulin.id.value)
             apsInterface?.let {
                 json.put("aps", it.algorithm.name)
                 json.put("apsConfiguration", JSONObject(buildFromPlugin(it).toString()))

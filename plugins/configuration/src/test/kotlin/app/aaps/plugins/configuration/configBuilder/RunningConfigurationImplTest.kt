@@ -3,7 +3,6 @@ package app.aaps.plugins.configuration.configBuilder
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -38,7 +37,6 @@ import org.mockito.kotlin.whenever
 internal class RunningConfigurationImplTest {
 
     @Mock private lateinit var activePlugin: ActivePlugin
-    @Mock private lateinit var insulin: Insulin
     @Mock private lateinit var scenes: Scenes
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
     @Mock private lateinit var configBuilder: ConfigBuilder
@@ -57,7 +55,7 @@ internal class RunningConfigurationImplTest {
         MockitoAnnotations.openMocks(this)
         whenever(config.AAPSCLIENT).thenReturn(true)
         sut = RunningConfigurationImpl(
-            activePlugin, insulin, scenes, activeSceneSync, configBuilder,
+            activePlugin, scenes, activeSceneSync, configBuilder,
             preferences, aapsLogger, config, pumpSync, notificationManager, nsClientRepository, constraintsChecker
         )
     }

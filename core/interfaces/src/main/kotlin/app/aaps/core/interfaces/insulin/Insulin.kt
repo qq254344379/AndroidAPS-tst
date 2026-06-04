@@ -4,7 +4,6 @@ import app.aaps.core.data.model.ICfg
 
 interface Insulin {
 
-    val id: InsulinType
     val friendlyName: String
 
     /**
