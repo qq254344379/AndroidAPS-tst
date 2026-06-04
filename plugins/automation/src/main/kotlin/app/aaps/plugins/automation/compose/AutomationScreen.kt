@@ -36,8 +36,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
@@ -45,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.text.HtmlCompat
 import app.aaps.core.ui.compose.AapsFab
 import app.aaps.core.ui.compose.AapsSpacing
+import app.aaps.core.ui.compose.MasterOfflineBanner
 import app.aaps.core.ui.compose.icons.IcAutomation
 import app.aaps.plugins.automation.R
 import sh.calvin.reorderable.ReorderableItem
@@ -73,6 +72,7 @@ fun AutomationScreen(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
+                MasterOfflineBanner(editingEnabled = editingEnabled)
                 if (state.events.isEmpty()) {
                     EmptyState(modifier = Modifier.weight(1f))
                 } else {
@@ -166,7 +166,7 @@ private fun EventsList(
                     event = event,
                     elevation = elevation,
                     editingEnabled = editingEnabled,
-                    dragModifier = Modifier.draggableHandle(onDragStopped = { onMoveFinished() }),
+                    dragModifier = if (editingEnabled && !event.readOnly) Modifier.draggableHandle(onDragStopped = { onMoveFinished() }) else Modifier,
                     onToggleEnabled = { checked -> onToggleEnabled(event.position, checked) },
                     onEdit = { onEditEvent(event.position) },
                     onDelete = { onDeleteEvent(event.position) }
@@ -192,73 +192,60 @@ private fun AutomationEventCard(
     val nameColor = if (!event.actionsValid) MaterialTheme.colorScheme.error
     else MaterialTheme.colorScheme.onSurface
 
-    Box {
-        ElevatedCard(
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (editingEnabled) Modifier else Modifier.alpha(DISABLED_ROW_ALPHA)),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = elevation)
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (editingEnabled) Modifier else Modifier.alpha(DISABLED_ROW_ALPHA)),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = elevation)
+                .padding(AapsSpacing.large),
+            horizontalArrangement = Arrangement.spacedBy(AapsSpacing.small),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(AapsSpacing.large),
-                horizontalArrangement = Arrangement.spacedBy(AapsSpacing.small),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = event.isEnabled,
-                    onCheckedChange = onToggleEnabled,
-                    enabled = !event.readOnly
+            // editingEnabled is folded into every control's `enabled` so the greyed row is both
+            // non-interactive AND accessibility-correct: a disabled control is skipped by TalkBack's
+            // activation but still readable. (A pointer-consuming overlay blocked touch only and leaked
+            // activation via accessibility services.) The drag handle is also disabled via dragModifier.
+            Checkbox(
+                checked = event.isEnabled,
+                onCheckedChange = onToggleEnabled,
+                enabled = !event.readOnly && editingEnabled
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = event.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = nameColor
                 )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = event.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = nameColor
-                    )
-                    IconRow(event = event)
-                }
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = null)
-                }
-                if (event.readOnly) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = stringResource(R.string.system_automation),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = null)
-                    }
-                }
-                IconButton(
-                    onClick = {},
-                    modifier = dragModifier,
-                    enabled = !event.readOnly
-                ) {
-                    Icon(
-                        Icons.Default.DragHandle,
-                        contentDescription = stringResource(app.aaps.core.ui.R.string.reorder)
-                    )
+                IconRow(event = event)
+            }
+            IconButton(onClick = onEdit, enabled = editingEnabled) {
+                Icon(Icons.Default.Edit, contentDescription = null)
+            }
+            if (event.readOnly) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = stringResource(R.string.system_automation),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                IconButton(onClick = onDelete, enabled = editingEnabled) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
                 }
             }
-        }
-        // When editing is disabled, consume all pointer input over the card so the greyed
-        // row is fully non-interactive (blocks checkbox, edit/delete taps and the drag handle).
-        if (!editingEnabled) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-                            }
-                        }
-                    }
-            )
+            IconButton(
+                onClick = {},
+                modifier = dragModifier,
+                enabled = !event.readOnly && editingEnabled
+            ) {
+                Icon(
+                    Icons.Default.DragHandle,
+                    contentDescription = stringResource(app.aaps.core.ui.R.string.reorder)
+                )
+            }
         }
     }
 }

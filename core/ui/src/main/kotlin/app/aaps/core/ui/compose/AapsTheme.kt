@@ -71,6 +71,17 @@ val LocalConfig = compositionLocalOf<Config> { error("No Config provided") }
 val LocalMasterReachable = compositionLocalOf { true }
 
 /**
+ * Whether the user may make changes that need the master *right now*. On a master always `true` (no
+ * gating). On a client, `true` only while [LocalMasterReachable] is `true` — i.e. the master is
+ * reachable for the signed Client-Control channel that carries both config edits and remote actions.
+ * Single source for the per-screen offline gate (`!(AAPSCLIENT && !masterReachable)`); gates BOTH
+ * synced-config edits AND master-bound action buttons, so screens call this instead of re-spelling it.
+ */
+@Composable
+fun masterEditingEnabled(): Boolean =
+    !(LocalConfig.current.AAPSCLIENT && !LocalMasterReachable.current)
+
+/**
  * CompositionLocal providing access to ProfileUtil for glucose unit conversions.
  * Avoids threading profileUtil through multiple composable layers.
  */

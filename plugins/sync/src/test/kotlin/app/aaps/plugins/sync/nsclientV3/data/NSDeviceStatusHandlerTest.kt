@@ -74,10 +74,17 @@ internal class NSDeviceStatusHandlerTest {
         verify(nsClientV3Plugin, never()).bumpDevicestatusHeartbeat(any())
     }
 
-    /** No parseable created_at → can't determine freshness → don't bump (stays fail-closed). */
+    /** created_at absent/unparseable but the numeric `date` (ms) is set → fall back to it. */
     @Test
-    fun doesNotBumpWhenNoCreatedAt() {
-        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null)))
+    fun bumpsWithDateWhenCreatedAtAbsent() {
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null, date = 7_000L)))
+        verify(nsClientV3Plugin).bumpDevicestatusHeartbeat(7_000L)
+    }
+
+    /** Neither a parseable created_at nor a date → can't determine freshness → don't bump (fail-closed). */
+    @Test
+    fun doesNotBumpWhenNoTimestamp() {
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null, date = null)))
         verify(nsClientV3Plugin, never()).bumpDevicestatusHeartbeat(any())
     }
 }

@@ -32,6 +32,8 @@ import app.aaps.core.ui.compose.ComposeScreenContent
 import app.aaps.core.ui.compose.LocalConfig
 import app.aaps.core.ui.compose.LocalPreferences
 import app.aaps.core.ui.compose.LocalSnackbarHostState
+import app.aaps.core.ui.compose.MasterOfflineBanner
+import app.aaps.core.ui.compose.masterEditingEnabled
 import app.aaps.core.ui.compose.preference.LocalNavigateToCompose
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.compose.preference.ProvidePreferenceTheme
@@ -174,6 +176,7 @@ fun AllPreferencesScreen(
                         .verticalScrollIndicators(listState),
                     state = listState
                 ) {
+                    item { MasterOfflineBanner(editingEnabled = masterEditingEnabled()) }
                     // Built-in: General settings (first)
                     addPreferenceContent(generalPreferences, onShowMessage, sectionState)
                     addPreferenceContent(appearancePreferences, onShowMessage, sectionState)

@@ -14,6 +14,9 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.MasterPairing
 import app.aaps.core.nssdk.localmodel.configuration.NSAuthorizedClients
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -40,6 +43,7 @@ internal class OrphanDetectorTest {
     private val ourClientId = "client-uuid"
     private val pairing = MasterPairing(masterInstallId = "master-uuid", clientId = ourClientId, masterSecretEnc = "ENC:x")
     private var pairedAt: Long = now - 60 * 60 * 1000L  // paired 1h ago by default — well past the race window
+    private val clientIdFlow = MutableStateFlow(ourClientId)  // the pairing-change signal the init observer watches
 
     @BeforeEach
     fun setUp() {
@@ -48,8 +52,9 @@ internal class OrphanDetectorTest {
         whenever(pairingRepository.currentPairing()).thenReturn(pairing)
         whenever(preferences.get(LongNonKey.NsClientControlPairedAt)).thenAnswer { pairedAt }
         whenever(preferences.get(any<StringNonKey>())).thenAnswer { (it.arguments[0] as StringNonKey).defaultValue }
+        whenever(preferences.observe(StringNonKey.NsClientControlClientId)).thenReturn(clientIdFlow)
         whenever(rh.gs(any<Int>())).thenReturn("orphan")
-        sut = OrphanDetector(pairingRepository, preferences, notificationManager, rh, config, aapsLogger)
+        sut = OrphanDetector(pairingRepository, preferences, notificationManager, rh, config, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
     }
 
     private fun configWithRoster(vararg clientIds: String) =
@@ -190,5 +195,15 @@ internal class OrphanDetectorTest {
         whenever(pairingRepository.currentPairing()).thenReturn(null)
         sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now)
         assertThat(sut.authorized.value).isTrue()
+    }
+
+    /** A pairing change (re-pair writes a new clientId) clears a prior orphan verdict, so masterReachable
+     *  isn't left locked after re-pairing within the same process. */
+    @Test
+    fun rePairResetsAuthorizedTrue() {
+        sut.onSettingsDoc(configWithRoster("stranger"), docSrvModified = now)
+        assertThat(sut.authorized.value).isFalse()        // orphaned
+        clientIdFlow.value = "new-client-uuid"            // user re-pairs → new NsClientControlClientId
+        assertThat(sut.authorized.value).isTrue()         // optimistically authorized again
     }
 }

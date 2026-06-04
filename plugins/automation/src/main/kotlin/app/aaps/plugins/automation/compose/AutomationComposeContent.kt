@@ -38,9 +38,8 @@ import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.ui.compose.ComposablePluginContent
-import app.aaps.core.ui.compose.LocalConfig
-import app.aaps.core.ui.compose.LocalMasterReachable
 import app.aaps.core.ui.compose.ToolbarConfig
+import app.aaps.core.ui.compose.masterEditingEnabled
 import app.aaps.plugins.automation.AutomationRuntime
 import app.aaps.plugins.automation.R
 import app.aaps.plugins.automation.compose.actions.ActionOption
@@ -146,8 +145,8 @@ class AutomationComposeContent(
 
         // On a client whose master is unreachable, edits can't sync right now — grey out the
         // whole list and hide the add FAB (mirrors the offline-gating of synced preference rows).
-        // Master short-circuits masterReachable to true, so it is never gated.
-        val editingEnabled = !(LocalConfig.current.AAPSCLIENT && !LocalMasterReachable.current)
+        // Master short-circuits to true, so it is never gated.
+        val editingEnabled = masterEditingEnabled()
 
         AutomationScreen(
             state = state,

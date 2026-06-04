@@ -439,6 +439,7 @@ class NSClientV3Plugin @Inject constructor(
     // the same handler, so a single update site suffices.
     private val _lastDevicestatusReceivedAt = MutableStateFlow(0L)
     override val lastDevicestatusReceivedAt: StateFlow<Long> = _lastDevicestatusReceivedAt.asStateFlow()
+
     // [heartbeatAt] is the master's devicestatus created_at (publish time), not receipt time. Monotonic —
     // keep the newest known heartbeat; a batch may deliver an older record after a newer one.
     internal fun bumpDevicestatusHeartbeat(heartbeatAt: Long) {
@@ -448,9 +449,11 @@ class NSClientV3Plugin @Inject constructor(
     // Grace before flagging offline on a WS drop — swallows brief flaps (reconnect storms during NS
     // restarts), short enough that a real outage surfaces in seconds.
     private val wsDisconnectGraceMs = 5_000L
+
     // Heartbeat staleness threshold (~1.8 loop cycles): one missed devicestatus publication of grace.
     private val heartbeatStaleMs = 9 * 60_000L
     private val heartbeatTickMs = 60_000L
+
     // App-lifetime scope for [masterReachable] — independent of the restartable [scope] so the derived
     // signal (and its freshness ticker) survives service stop/start.
     private val reachableScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -472,13 +475,24 @@ class NSClientV3Plugin @Inject constructor(
         if (!config.AAPSCLIENT) MutableStateFlow(true).asStateFlow()
         else combine(
             wsConnectedFlow.transformLatest { connected ->
-                if (connected) emit(true) else { delay(wsDisconnectGraceMs); emit(false) }
+                if (connected) emit(true) else {
+                    delay(wsDisconnectGraceMs); emit(false)
+                }
             },
             lastDevicestatusReceivedAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = false, now = dateUtil::now),
             preferences.observe(StringNonKey.NsClientControlClientId).map { it.isNotEmpty() },
             orphanDetector.authorized
-        ) { ws, fresh, paired, authorized -> ws && fresh && paired && authorized }
-            .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), true)
+        ) { ws, fresh, paired, authorized ->
+            val reachable = ws && fresh && paired && authorized
+            // Diagnostic (lazy — string built only when NSCLIENT logging is on): shows WHICH term gates.
+            // heartbeatAgeMs > heartbeatStaleMs (9 min) ⇒ fresh=false.
+            aapsLogger.debug(LTag.NSCLIENT) { "masterReachable=$reachable (ws=$ws fresh=$fresh paired=$paired authorized=$authorized heartbeatAgeMs=${dateUtil.now() - lastDevicestatusReceivedAt.value})" }
+            reachable
+        }
+            // Seed FALSE (fail-closed): before the combine first computes — and on a cold start / WS
+            // resubscribe — the client must not momentarily report the master "reachable" and flash edit
+            // controls open. The combine settles to the real value within a tick of subscription.
+            .stateIn(reachableScope, SharingStarted.WhileSubscribed(5000), false)
 
     private fun setClient() {
         if (nsAndroidClient == null)

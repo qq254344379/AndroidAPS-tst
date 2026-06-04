@@ -1,18 +1,24 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.keys.LongNonKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
 import app.aaps.plugins.sync.R
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector.Companion.POST_PAIRING_GRACE_MS
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,10 +51,23 @@ class OrphanDetector @Inject constructor(
     private val notificationManager: NotificationManager,
     private val rh: ResourceHelper,
     private val config: Config,
-    private val aapsLogger: AAPSLogger
+    private val aapsLogger: AAPSLogger,
+    @ApplicationScope private val appScope: CoroutineScope
 ) {
 
     private val _authorized = MutableStateFlow(true)
+
+    init {
+        // A pairing change (pair / re-pair / unpair writes NsClientControlClientId) clears the orphan
+        // verdict: a freshly (re-)paired client is optimistically authorized again until a roster doc
+        // proves otherwise. Without this, a once-orphaned Singleton stays authorized=false across a
+        // re-pair within the same process and keeps masterReachable locked until the next roster doc.
+        if (config.AAPSCLIENT) appScope.launch {
+            // Reset only on a (re-)pair (non-empty clientId). Unpair writes an EMPTY clientId — don't
+            // optimistically mark an unpaired device authorized (it's only masked today by the paired term).
+            preferences.observe(StringNonKey.NsClientControlClientId).drop(1).collect { if (it.isNotEmpty()) _authorized.value = true }
+        }
+    }
 
     /**
      * `true` while the master still lists this device in its `authorizedClients` roster (or no

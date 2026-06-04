@@ -114,7 +114,13 @@ class NSDeviceStatusHandler @Inject constructor(
             // OWN created_at (master publish time), NOT the receipt time: at app start the catch-up worker
             // pulls the master's last historical devicestatus off NS, and stamping receipt time would make
             // a long-offline master look freshly alive and falsely unlock editing.
-            val newestCreatedAt = deviceStatuses.mapNotNull { it.createdAt?.let(dateUtil::fromISODateString) }.maxOrNull() ?: 0L
+            // runCatching: fromISODateString throws on a non-ISO created_at (the model documents some arrive
+            // as long-timestamp strings). Skip an unparseable/absent record rather than crashing the batch —
+            // and deliberately do NOT fall back to now() (receipt time), which would re-introduce the
+            // stale-historical-devicestatus-looks-fresh bug.
+            val newestCreatedAt = deviceStatuses
+                .mapNotNull { ds -> ds.createdAt?.let { runCatching { dateUtil.fromISODateString(it) }.getOrNull() } ?: ds.date }
+                .maxOrNull() ?: 0L
             if (newestCreatedAt > 0L) nsClientV3Plugin.get().bumpDevicestatusHeartbeat(newestCreatedAt)
             rxBus.send(EventNsClientStatusUpdated())
         }
