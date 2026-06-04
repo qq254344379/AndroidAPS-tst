@@ -121,7 +121,7 @@ class AutomationDownlinkIntegrationTest : TestBaseWithProfile() {
             uel, profileRepository, sceneApi
         )
         runningConfig = RunningConfigurationImpl(
-            activePlugin, insulin, scenes, activeSceneSync, configBuilder, preferences, aapsLogger, config,
+            activePlugin, scenes, activeSceneSync, configBuilder, preferences, aapsLogger, config,
             pumpSync, notificationManager, nsClientRepository, constraintsChecker
         )
     }
