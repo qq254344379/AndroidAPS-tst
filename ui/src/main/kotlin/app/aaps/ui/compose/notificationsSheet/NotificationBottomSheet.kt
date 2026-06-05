@@ -140,8 +140,9 @@ private fun RowScope.ActionButton(textRes: Int, onClick: () -> Unit) {
 
 @Composable
 fun NotificationLevel.toColor(): Color = when (this) {
-    NotificationLevel.IMPORTANT -> AapsTheme.generalColors.notificationUrgent
-    NotificationLevel.NORMAL    -> AapsTheme.generalColors.notificationNormal
+    NotificationLevel.URGENT       -> AapsTheme.generalColors.notificationUrgent
+    NotificationLevel.IMPORTANT    -> AapsTheme.generalColors.notificationUrgent
+    NotificationLevel.NORMAL       -> AapsTheme.generalColors.notificationNormal
     NotificationLevel.LOW          -> AapsTheme.generalColors.notificationLow
     NotificationLevel.INFO         -> AapsTheme.generalColors.notificationInfo
     NotificationLevel.ANNOUNCEMENT -> AapsTheme.generalColors.notificationAnnouncement

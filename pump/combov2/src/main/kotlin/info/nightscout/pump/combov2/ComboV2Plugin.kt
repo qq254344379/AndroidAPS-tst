@@ -836,7 +836,7 @@ class ComboV2Plugin @Inject constructor(
         } catch (e: Exception) {
             aapsLogger.error("Exception thrown during basal profile update: $e")
 
-            notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile, level = NotificationLevel.IMPORTANT)
+            notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile)
 
             pumpEnactResult.apply {
                 success = false
