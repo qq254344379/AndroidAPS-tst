@@ -34,7 +34,6 @@ import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.target
@@ -92,10 +91,6 @@ open class TestOpenAPSSMBPlugin @Inject constructor(
     // last values
     override var lastAPSRun: Long = 0
     override val algorithm = APSResult.Algorithm.SMB
-
-    override val syncedKeys: List<NonPreferenceKey> = emptyList()
-
-    override fun reloadInternalState() {}
 
     override var lastAPSResult: DetermineBasalResultSMBFromJS? = null
 
