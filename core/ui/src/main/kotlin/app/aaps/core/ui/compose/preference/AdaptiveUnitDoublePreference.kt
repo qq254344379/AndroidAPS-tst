@@ -79,7 +79,7 @@ fun AdaptiveUnitDoublePreferenceItem(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(theme.listItemPadding)
+            .padding(theme.padding)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(

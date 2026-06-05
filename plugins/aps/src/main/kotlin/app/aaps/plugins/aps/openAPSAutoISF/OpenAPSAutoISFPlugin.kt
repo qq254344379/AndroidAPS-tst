@@ -148,7 +148,7 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
     override suspend fun onStart() {
         super.onStart()
         var count = 0
-        val apsResults = runBlocking { persistenceLayer.getApsResults(dateUtil.now() - T.days(1).msecs(), dateUtil.now()) }
+        val apsResults = persistenceLayer.getApsResults(dateUtil.now() - T.days(1).msecs(), dateUtil.now())
         apsResults.forEach {
             val glucose = it.glucoseStatus?.glucose ?: return@forEach
             val variableSens = it.variableSens ?: return@forEach
@@ -218,8 +218,7 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
     private val autoIsfCache = LongSparseArray<Double>()
 
     private suspend fun calculateVariableIsf(timestamp: Long): Pair<String, Double?> {
-        val profile = profileFunction.getProfile(timestamp)
-        if (profile == null) return Pair("OFF", null)
+        val profile = profileFunction.getProfile(timestamp) ?: return Pair("OFF", null)
         val glucose = glucoseStatusProvider.glucoseStatusData?.glucose ?: return Pair("GLUC", null)
         // Round down to minutesClass min and use it as a key for caching
         // Add BG to key as it affects calculation
