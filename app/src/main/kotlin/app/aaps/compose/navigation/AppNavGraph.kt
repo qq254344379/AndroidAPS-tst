@@ -9,9 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -25,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -541,7 +538,8 @@ fun NavGraphBuilder.appNavGraph(
 
     composable(AppRoute.AuthorizedClients.route) {
         AuthorizedClientsScreen(
-            onNavigateBack = { navController.popBackStack() }
+            onNavigateBack = { navController.popBackStack() },
+            onOpenSettings = { navController.navigate(AppRoute.PreferenceScreen.createRoute("ns_client_v3_settings")) }
         )
     }
 
@@ -821,6 +819,7 @@ private fun NavigationErrorFallback(
         onDismiss()
     }
 }
+
 /**
  * Host for the standalone Automation screen — mirrors [PluginContentRoute] but sources its content
  * from [AutomationRuntime.composeContent] instead of a plugin, and opens the settings subscreen via

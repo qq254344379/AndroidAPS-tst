@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
@@ -45,6 +46,9 @@ class AuthorizedClientsViewModel @Inject constructor(
     val clients: StateFlow<List<AuthorizedClient>> = repository.observe()
         .map { list -> list.sortedByDescending { it.createdAt } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /** Whether the master-side client-control feature is turned on. Gates the screen's active UI. */
+    val clientControlEnabled: StateFlow<Boolean> = preferences.observe(BooleanKey.NsClientAllowClientControl)
 
     private val _dialogState = MutableStateFlow<DialogState?>(null)
     val dialogState: StateFlow<DialogState?> = _dialogState.asStateFlow()

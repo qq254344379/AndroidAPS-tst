@@ -61,6 +61,7 @@ private class ReactiveVisibilityContext(
     override val isPumpPaired: Boolean get() = delegate.isPumpPaired
     override val isPumpInitialized: Boolean get() = delegate.isPumpInitialized
     override val isConcentrationEnabled: Boolean get() = delegate.isConcentrationEnabled
+    override val isClient: Boolean get() = delegate.isClient
 
     // Return a reactive preferences wrapper
     override val preferences: Preferences get() = ReactivePreferencesWrapper(delegatePreferences, sharedStates)

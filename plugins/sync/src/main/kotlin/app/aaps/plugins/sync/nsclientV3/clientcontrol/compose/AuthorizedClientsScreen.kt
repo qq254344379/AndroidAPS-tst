@@ -58,11 +58,13 @@ import kotlinx.coroutines.delay
 @Composable
 fun AuthorizedClientsScreen(
     onNavigateBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: AuthorizedClientsViewModel = hiltViewModel()
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogState.collectAsStateWithLifecycle()
     val pairingOffer by viewModel.pairingOffer.collectAsStateWithLifecycle()
+    val featureEnabled by viewModel.clientControlEnabled.collectAsStateWithLifecycle()
 
     // Re-prune expired pending entries every second while any are pending,
     // so the countdown ticks down and expired ones drop without a manual refresh.
@@ -109,12 +111,21 @@ fun AuthorizedClientsScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = viewModel::requestAdd) {
-                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.authorized_clients_add))
+            if (featureEnabled) {
+                FloatingActionButton(onClick = viewModel::requestAdd) {
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.authorized_clients_add))
+                }
             }
         }
     ) { paddingValues ->
-        if (clients.isEmpty()) {
+        if (!featureEnabled) {
+            FeatureDisabledState(
+                onOpenSettings = onOpenSettings,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            )
+        } else if (clients.isEmpty()) {
             EmptyState(
                 modifier = Modifier
                     .fillMaxSize()
@@ -199,6 +210,35 @@ private fun StateBadgeAndTimeRow(
         Text(text = stateLabel, style = MaterialTheme.typography.labelSmall, color = stateColor)
         Text(text = "•", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(text = timeText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun FeatureDisabledState(
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(AapsSpacing.xxLarge),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = stringResource(R.string.authorized_clients_disabled_title),
+            style = MaterialTheme.typography.headlineSmall
+        )
+        Text(
+            text = stringResource(R.string.authorized_clients_disabled_subtitle),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = AapsSpacing.medium)
+        )
+        Button(
+            onClick = onOpenSettings,
+            modifier = Modifier.padding(top = AapsSpacing.large)
+        ) {
+            Text(stringResource(R.string.authorized_clients_open_settings))
+        }
     }
 }
 

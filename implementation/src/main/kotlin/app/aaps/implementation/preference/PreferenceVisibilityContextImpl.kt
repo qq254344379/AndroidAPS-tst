@@ -1,5 +1,6 @@
 package app.aaps.implementation.preference
 
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.plugin.ActivePlugin
@@ -21,8 +22,12 @@ class PreferenceVisibilityContextImpl @Inject constructor(
     private val activePlugin: ActivePlugin,
     private val persistenceLayer: PersistenceLayer,
     private val constraintsChecker: ConstraintsChecker,
+    private val config: Config,
     override val preferences: Preferences
 ) : PreferenceVisibilityContext {
+
+    override val isClient: Boolean
+        get() = config.AAPSCLIENT
 
     override val isPatchPump: Boolean
         get() = activePlugin.activePump.pumpDescription.isPatchPump

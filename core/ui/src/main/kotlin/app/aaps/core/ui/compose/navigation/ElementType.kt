@@ -1,6 +1,7 @@
 package app.aaps.core.ui.compose.navigation
 
 import app.aaps.core.interfaces.protection.ProtectionCheck
+import app.aaps.core.keys.interfaces.PreferenceVisibility
 
 /**
  * Unified visual identity for UI elements.
@@ -10,11 +11,13 @@ import app.aaps.core.interfaces.protection.ProtectionCheck
  * @param category Logical grouping for configuration screens and bottom sheets
  * @param searchable Whether this element appears in global search results
  * @param protection Protection level required for navigation
+ * @param visibility Runtime condition gating where this element may surface (e.g. in search)
  */
 enum class ElementType(
     val category: ElementCategory = ElementCategory.INTERNAL,
     val searchable: Boolean = false,
-    val protection: ProtectionCheck.Protection = ProtectionCheck.Protection.NONE
+    val protection: ProtectionCheck.Protection = ProtectionCheck.Protection.NONE,
+    val visibility: PreferenceVisibility = PreferenceVisibility.ALWAYS
 ) {
 
     // Treatment dialogs
@@ -81,8 +84,8 @@ enum class ElementType(
     SCENE_MANAGEMENT(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
 
     // NSCv3 client control — paired devices that can issue signed commands
-    AUTHORIZED_CLIENTS(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
-    PAIR_WITH_MASTER(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
+    AUTHORIZED_CLIENTS(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES, visibility = PreferenceVisibility.MASTER_ONLY),
+    PAIR_WITH_MASTER(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES, visibility = PreferenceVisibility.CLIENT_ONLY),
 
     // Running mode / loop (used by UserEntry)
     RUNNING_MODE(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.BOLUS),
