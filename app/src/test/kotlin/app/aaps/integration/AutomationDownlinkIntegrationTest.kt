@@ -2,14 +2,12 @@ package app.aaps.integration
 
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.configuration.Config
-import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.interfaces.receivers.ReceiverStatusStore
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
-import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
@@ -55,9 +53,7 @@ class AutomationDownlinkIntegrationTest : TestBaseWithProfile() {
 
     // RunningConfigurationImpl deps (client side) not provided by the base.
     // insulin / notificationManager / constraintsChecker come from TestBaseWithProfile.
-    @Mock private lateinit var scenes: Scenes
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
-    @Mock private lateinit var configBuilder: ConfigBuilder
     @Mock private lateinit var pumpSync: PumpSync
     @Mock private lateinit var nsClientRepository: NSClientRepository
 
@@ -121,7 +117,7 @@ class AutomationDownlinkIntegrationTest : TestBaseWithProfile() {
             uel, profileRepository, sceneApi
         )
         runningConfig = RunningConfigurationImpl(
-            activePlugin, scenes, activeSceneSync, configBuilder, preferences, aapsLogger, config,
+            activePlugin, activeSceneSync, preferences, aapsLogger, config,
             pumpSync, notificationManager, nsClientRepository, constraintsChecker
         )
     }
