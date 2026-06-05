@@ -21,7 +21,6 @@ import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.DetailedBolusInfoStorage
 import app.aaps.core.interfaces.pump.PumpInsulin
 import app.aaps.core.interfaces.pump.PumpSync
-import app.aaps.core.interfaces.queue.Callback
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
@@ -318,7 +317,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
             notificationManager.post(
                 NotificationId.PUMP_TIMEZONE_UPDATE_FAILED,
                 R.string.pump_time_update_failed,
-                level = NotificationLevel.URGENT,
+                level = NotificationLevel.IMPORTANT,
             )
         }
     }
@@ -606,7 +605,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                         notificationManager.post(
                             NotificationId.PUMP_SYNC_ERROR,
                             R.string.pump_sync_error,
-                            level = NotificationLevel.URGENT,
+                            level = NotificationLevel.IMPORTANT,
                             soundRes = app.aaps.core.ui.R.raw.alarm
                         )
                     } else if (failureCount >= 2) {
@@ -664,7 +663,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                 notificationManager.post(
                     NotificationId.PATCH_NOT_ACTIVE,
                     R.string.patch_not_active,
-                    level = NotificationLevel.URGENT,
+                    level = NotificationLevel.IMPORTANT,
                 )
                 medtrumPump.setFakeTBRIfNotSet()
                 medtrumPump.clearAlarmState()
@@ -694,7 +693,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                     notificationManager.post(
                         NotificationId.PUMP_ERROR,
                         R.string.patch_reset_after_primed_error,
-                        level = NotificationLevel.URGENT,
+                        level = NotificationLevel.IMPORTANT,
                         soundRes = app.aaps.core.ui.R.raw.alarm
                     )
                 }
@@ -734,7 +733,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                 notificationManager.post(
                     NotificationId.PUMP_SUSPENDED,
                     R.string.pump_is_suspended_hour_max,
-                    level = NotificationLevel.URGENT,
+                    level = NotificationLevel.IMPORTANT,
                     soundRes = app.aaps.core.ui.R.raw.alarm
                 )
                 // Pump will report proper TBR for this from loadEvents()
@@ -745,7 +744,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                 notificationManager.post(
                     NotificationId.PUMP_SUSPENDED,
                     R.string.pump_is_suspended_day_max,
-                    level = NotificationLevel.URGENT,
+                    level = NotificationLevel.IMPORTANT,
                     soundRes = app.aaps.core.ui.R.raw.alarm
                 )
                 // Pump will report proper TBR for this from loadEvents()

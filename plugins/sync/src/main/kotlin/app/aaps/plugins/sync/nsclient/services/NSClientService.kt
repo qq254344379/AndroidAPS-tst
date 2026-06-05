@@ -203,7 +203,7 @@ class NSClientService : DaggerService() {
             nsClientRepository.addLog("◄ ERROR", "Write treatment permission not granted ")
         }
         if (!hasWriteAuth) {
-            notificationManager.post(NotificationId.NSCLIENT_NO_WRITE_PERMISSION, R.string.no_write_permission, level = NotificationLevel.URGENT)
+            notificationManager.post(NotificationId.NSCLIENT_NO_WRITE_PERMISSION, R.string.no_write_permission, level = NotificationLevel.IMPORTANT)
         } else {
             notificationManager.dismiss(NotificationId.NSCLIENT_NO_WRITE_PERMISSION)
         }
@@ -673,7 +673,7 @@ class NSClientService : DaggerService() {
             2    -> notificationManager.post(
                 id = NotificationId.NS_URGENT_ALARM,
                 text = nsAlarm.title,
-                level = NotificationLevel.URGENT,
+                level = NotificationLevel.IMPORTANT,
                 soundRes = app.aaps.core.ui.R.raw.urgentalarm,
                 actions = snoozeActions(nsAlarm)
             )

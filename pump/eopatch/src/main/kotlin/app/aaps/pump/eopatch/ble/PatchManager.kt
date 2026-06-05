@@ -5,7 +5,6 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.notifications.NotificationManager
-import android.content.Intent
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
@@ -108,7 +107,7 @@ class PatchManager @Inject constructor(
                     notificationManager.post(
                         id = NotificationId.EOFLOW_PATCH_ALERT,
                         text = rh.gs(R.string.patch_activate_reminder_desc),
-                        level = NotificationLevel.URGENT,
+                        level = NotificationLevel.IMPORTANT,
                         soundRes = app.aaps.core.ui.R.raw.alarm
                     )
                 })

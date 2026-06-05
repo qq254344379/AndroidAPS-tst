@@ -181,7 +181,7 @@ class NotificationManagerImpl @Inject constructor(
         // When sound is requested, this replaces the legacy raiseSystemNotification path so
         // the user sees a single notification instead of two.
         if (soundRes != null && soundRes != 0) {
-            val title = if (level == NotificationLevel.URGENT)
+            val title = if (level == NotificationLevel.IMPORTANT)
                 rh.gs(app.aaps.core.ui.R.string.urgent_alarm)
             else
                 rh.gs(app.aaps.core.ui.R.string.info)
@@ -190,7 +190,7 @@ class NotificationManagerImpl @Inject constructor(
                 soundId = soundRes,
                 title = title,
                 body = text,
-                urgent = level == NotificationLevel.URGENT
+                urgent = level == NotificationLevel.IMPORTANT
             )
         } else if (preferences.get(BooleanKey.AlertUrgentAsAndroidNotification) && actions.isEmpty()) {
             // No-sound visual-only path (preference-gated).
@@ -286,7 +286,7 @@ class NotificationManagerImpl @Inject constructor(
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDeleteIntent(deleteIntent(n.id.legacyId))
             .setContentIntent(notificationHolder.openAppIntent(context))
-        if (n.level == NotificationLevel.URGENT) {
+        if (n.level == NotificationLevel.IMPORTANT) {
             notificationBuilder.setVibrate(longArrayOf(1000, 1000, 1000, 1000))
                 .setContentTitle(rh.gs(app.aaps.core.ui.R.string.urgent_alarm))
                 .setSound(sound, AudioManager.STREAM_ALARM)

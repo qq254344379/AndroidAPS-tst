@@ -250,7 +250,7 @@ class MedtrumPlugin @Inject constructor(
             notificationManager.post(NotificationId.PROFILE_SET_OK, app.aaps.core.ui.R.string.profile_set_ok, validMinutes = 60)
             pumpEnactResultProvider.get().success(true).enacted(true)
         } else {
-            notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile, level = NotificationLevel.URGENT)
+            notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile, level = NotificationLevel.IMPORTANT)
             pumpEnactResultProvider.get()
         }
     }

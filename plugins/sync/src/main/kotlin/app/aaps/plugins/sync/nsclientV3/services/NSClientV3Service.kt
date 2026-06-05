@@ -399,7 +399,7 @@ class NSClientV3Service : DaggerService() {
             2    -> notificationManager.post(
                 id = NotificationId.NS_URGENT_ALARM,
                 text = nsAlarm.title,
-                level = NotificationLevel.URGENT,
+                level = NotificationLevel.IMPORTANT,
                 soundRes = app.aaps.core.ui.R.raw.urgentalarm,
                 actions = snoozeActions(nsAlarm)
             )
