@@ -94,7 +94,11 @@ class NSDeviceStatusHandler @Inject constructor(
     private val nsClientV3Plugin: Provider<NSClientV3Plugin>
 ) {
 
-    fun handleNewData(deviceStatuses: Array<NSDeviceStatus>) {
+    /**
+     * @param live true only for a real-time WS push (a devicestatus the master just created), false for the
+     *   REST catch-up/initial batch load. Only a live push bumps the master-alive heartbeat — see below.
+     */
+    fun handleNewData(deviceStatuses: Array<NSDeviceStatus>, live: Boolean = false) {
         for (i in deviceStatuses.size - 1 downTo 0) {
             val nsDeviceStatus = deviceStatuses[i]
             if (config.AAPSCLIENT) {
@@ -109,19 +113,20 @@ class NSDeviceStatusHandler @Inject constructor(
             }
         }
         if (config.AAPSCLIENT && deviceStatuses.isNotEmpty()) {
-            // Master-alive heartbeat — gates scene/edit controls when master goes silent for longer than
-            // the staleness window, even while the local WS is still up. Stamp the NEWEST devicestatus's
-            // OWN created_at (master publish time), NOT the receipt time: at app start the catch-up worker
-            // pulls the master's last historical devicestatus off NS, and stamping receipt time would make
-            // a long-offline master look freshly alive and falsely unlock editing.
-            // runCatching: fromISODateString throws on a non-ISO created_at (the model documents some arrive
-            // as long-timestamp strings). Skip an unparseable/absent record rather than crashing the batch —
-            // and deliberately do NOT fall back to now() (receipt time), which would re-introduce the
-            // stale-historical-devicestatus-looks-fresh bug.
-            val newestCreatedAt = deviceStatuses
-                .mapNotNull { ds -> ds.createdAt?.let { runCatching { dateUtil.fromISODateString(it) }.getOrNull() } ?: ds.date }
-                .maxOrNull() ?: 0L
-            if (newestCreatedAt > 0L) nsClientV3Plugin.get().bumpDevicestatusHeartbeat(newestCreatedAt)
+            // Master-alive heartbeat — gates scene/edit controls when master goes silent, even while the
+            // local WS to NS is still up. Bump ONLY for a live WS push: a brand-new devicestatus arriving in
+            // real time proves the master is online NOW. The catch-up/initial worker load must NOT bump — at
+            // app start it pulls the master's LAST historical devicestatus off NS, which can be only a few
+            // minutes old (inside the 9-min window) yet the master may already be offline. Per the agreed
+            // design the client fails closed after start and waits for the first live ping.
+            // (created_at, not receipt time, is still used as a second guard: skip an unparseable/absent
+            // record rather than crashing, and never fall back to now().)
+            if (live) {
+                val newestCreatedAt = deviceStatuses
+                    .mapNotNull { ds -> ds.createdAt?.let { runCatching { dateUtil.fromISODateString(it) }.getOrNull() } ?: ds.date }
+                    .maxOrNull() ?: 0L
+                if (newestCreatedAt > 0L) nsClientV3Plugin.get().bumpDevicestatusHeartbeat(newestCreatedAt)
+            }
             rxBus.send(EventNsClientStatusUpdated())
         }
     }

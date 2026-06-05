@@ -108,7 +108,6 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.Hello -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
-            is ClientControlMessage.SceneDefinitionsUpdate,
             is ClientControlMessage.InsulinActivate,
             is ClientControlMessage.PreferencesUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
@@ -120,9 +119,6 @@ class ClientControlPublisher @Inject constructor(
 
     override suspend fun sendSceneStop(triggerChain: Boolean): ClientControlSendResult =
         publish(ClientControlMessage.SceneStop(triggerChain))
-
-    override suspend fun sendScenesUpdate(scenesJson: String): ClientControlSendResult =
-        publish(ClientControlMessage.SceneDefinitionsUpdate(scenesJson))
 
     override suspend fun sendInsulinActivate(iCfgJson: String): ClientControlSendResult =
         publish(ClientControlMessage.InsulinActivate(iCfgJson))

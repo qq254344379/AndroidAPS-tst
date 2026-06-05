@@ -60,31 +60,44 @@ internal class NSDeviceStatusHandlerTest {
         whenever(dateUtil.fromISODateString("old")).thenReturn(1_000L)
         whenever(dateUtil.fromISODateString("new")).thenReturn(5_000L)
 
-        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = "old"), NSDeviceStatus(createdAt = "new")))
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = "old"), NSDeviceStatus(createdAt = "new")), live = true)
 
         verify(nsClientV3Plugin).bumpDevicestatusHeartbeat(5_000L)
         verify(nsClientV3Plugin, never()).bumpDevicestatusHeartbeat(9_999L)
     }
 
-    /** A master device must not stamp a client heartbeat. */
+    /**
+     * Core of the agreed design: only a LIVE WS push proves the master is online now. The catch-up/initial
+     * batch load (live = false, the default) must NOT bump — otherwise the master's last historical
+     * devicestatus pulled at app start (a few minutes old, still inside the 9-min window) would mark the
+     * master reachable before any live ping and falsely unlock client editing.
+     */
+    @Test
+    fun doesNotBumpOnBatchLoad() {
+        whenever(dateUtil.fromISODateString("new")).thenReturn(5_000L)
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = "new")))   // live defaults to false
+        verify(nsClientV3Plugin, never()).bumpDevicestatusHeartbeat(any())
+    }
+
+    /** A master device must not stamp a client heartbeat — even for a live push. */
     @Test
     fun doesNotBumpOnMaster() {
         whenever(config.AAPSCLIENT).thenReturn(false)
-        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = "new")))
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = "new")), live = true)
         verify(nsClientV3Plugin, never()).bumpDevicestatusHeartbeat(any())
     }
 
     /** created_at absent/unparseable but the numeric `date` (ms) is set → fall back to it. */
     @Test
     fun bumpsWithDateWhenCreatedAtAbsent() {
-        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null, date = 7_000L)))
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null, date = 7_000L)), live = true)
         verify(nsClientV3Plugin).bumpDevicestatusHeartbeat(7_000L)
     }
 
     /** Neither a parseable created_at nor a date → can't determine freshness → don't bump (fail-closed). */
     @Test
     fun doesNotBumpWhenNoTimestamp() {
-        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null, date = null)))
+        sut.handleNewData(arrayOf(NSDeviceStatus(createdAt = null, date = null)), live = true)
         verify(nsClientV3Plugin, never()).bumpDevicestatusHeartbeat(any())
     }
 }

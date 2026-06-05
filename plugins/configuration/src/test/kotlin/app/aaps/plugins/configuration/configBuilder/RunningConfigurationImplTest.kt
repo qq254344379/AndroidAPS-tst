@@ -1,7 +1,6 @@
 package app.aaps.plugins.configuration.configBuilder
 
 import app.aaps.core.interfaces.configuration.Config
-import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.notifications.NotificationManager
@@ -10,13 +9,15 @@ import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.interfaces.scenes.ActiveSceneSnapshot
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
-import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.keys.BooleanNonKey
+import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.SyncChannel
+import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.nssdk.localmodel.configuration.NSActiveScene
 import app.aaps.core.nssdk.localmodel.configuration.NSRunningConfiguration
-import kotlinx.serialization.json.JsonObject
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -37,9 +38,7 @@ import org.mockito.kotlin.whenever
 internal class RunningConfigurationImplTest {
 
     @Mock private lateinit var activePlugin: ActivePlugin
-    @Mock private lateinit var scenes: Scenes
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
-    @Mock private lateinit var configBuilder: ConfigBuilder
     @Mock private lateinit var preferences: Preferences
     @Mock private lateinit var aapsLogger: AAPSLogger
     @Mock private lateinit var config: Config
@@ -55,7 +54,7 @@ internal class RunningConfigurationImplTest {
         MockitoAnnotations.openMocks(this)
         whenever(config.AAPSCLIENT).thenReturn(true)
         sut = RunningConfigurationImpl(
-            activePlugin, scenes, activeSceneSync, configBuilder,
+            activePlugin, activeSceneSync,
             preferences, aapsLogger, config, pumpSync, notificationManager, nsClientRepository, constraintsChecker
         )
     }
@@ -68,14 +67,15 @@ internal class RunningConfigurationImplTest {
     }
 
     /**
-     * Cold doc carrying scene *definitions* still must not clear the running scene — definitions
-     * (cold) and active-scene state (hot) are independent.
+     * Scene *definitions* now ride the cold `syncedPrefs` block (StringNonKey.SceneDefinitions, Bidirectional).
+     * Adopting them must NOT clear the running scene — definitions (cold) and active-scene state (hot) are
+     * independent; SceneRepository.scenesFlow reloads from the key.
      */
     @Test
-    fun applyColdWithScenesDefinitionsDoesNotTouchActiveScene() {
-        whenever(scenes.syncedKeys).thenReturn(emptyList())
-        sut.applyCold(NSRunningConfiguration(scenesConfiguration = JsonObject(emptyMap())))
-        verify(scenes).reloadInternalState()
+    fun applyColdWithSceneDefinitionsDoesNotTouchActiveScene() {
+        whenever(preferences.get(StringNonKey.SceneDefinitions.key)).thenReturn(StringNonKey.SceneDefinitions)
+        sut.applyCold(NSRunningConfiguration(syncedPrefs = mapOf(StringNonKey.SceneDefinitions.key to "[]")))
+        verify(preferences).putRemote(StringNonKey.SceneDefinitions, "[]", 0L)
         verify(activeSceneSync, never()).applyActiveScene(anyOrNull())
     }
 
@@ -108,5 +108,20 @@ internal class RunningConfigurationImplTest {
         whenever(preferences.get(StringNonKey.AutomationEvents.key)).thenReturn(StringNonKey.AutomationEvents)
         sut.applyCold(NSRunningConfiguration(syncedPrefs = mapOf(StringNonKey.AutomationEvents.key to json)))
         verify(preferences).putRemote(StringNonKey.AutomationEvents, json, 0L)
+    }
+
+    /**
+     * Plugin settings ride ONLY the generic cold `syncedPrefs` block now (flagged `SyncSpec(Cold, Bidirectional)`
+     * — the legacy `apsConfiguration`/`sensitivityConfiguration`/`safetyConfiguration` sub-docs were deleted).
+     * Representative guard that a plugin-settings key is flagged for the cold path, and that — carried in
+     * `syncedPrefs` — it is adopted on the client via `putRemote` (master-wins, version floored).
+     */
+    @Test
+    fun applyColdSyncedPrefsAdoptsPluginSettingDoubleViaPutRemote() {
+        assertEquals(SyncChannel.Cold, DoubleKey.AutosensMin.sync?.channel)
+        assertEquals(SyncDirection.Bidirectional, DoubleKey.AutosensMin.sync?.direction)
+        whenever(preferences.get(DoubleKey.AutosensMin.key)).thenReturn(DoubleKey.AutosensMin)
+        sut.applyCold(NSRunningConfiguration(syncedPrefs = mapOf(DoubleKey.AutosensMin.key to "0.85")))
+        verify(preferences).putRemote(DoubleKey.AutosensMin, 0.85, 0L)
     }
 }

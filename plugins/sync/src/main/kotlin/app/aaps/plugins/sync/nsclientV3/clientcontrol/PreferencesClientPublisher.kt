@@ -7,6 +7,7 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
+import app.aaps.core.keys.interfaces.DoubleNonPreferenceKey
 import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -82,6 +83,7 @@ class PreferencesClientPublisher @Inject constructor(
             is BooleanNonPreferenceKey -> preferences.get(key).toString()
             is StringNonPreferenceKey  -> preferences.get(key)
             is IntNonPreferenceKey     -> preferences.get(key).toString()
+            is DoubleNonPreferenceKey  -> preferences.get(key).toString()   // raw (DoubleNonPreferenceKey getter)
             is UnitDoublePreferenceKey -> preferences.getRaw(key).toString()   // raw mg/dl, 1:1
 
             else                       -> {

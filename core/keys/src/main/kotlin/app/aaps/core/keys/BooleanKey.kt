@@ -70,8 +70,8 @@ enum class BooleanKey(
     BgSourceCreateSensorChange("dexcom_lognssensorchange", true, R.string.pref_title_bg_source_create_sensor_change, R.string.pref_summary_bg_source_create_sensor_change, defaultedBySM = true),
     BgSourceRandomBgRandomize("randombg_randomize", true, R.string.pref_title_random_bg_randomize, R.string.pref_summary_random_bg_randomize, defaultedBySM = true),
 
-    ApsUseDynamicSensitivity("use_dynamic_sensitivity", false, R.string.pref_title_aps_use_dynamic_sensitivity, R.string.pref_summary_aps_use_dynamic_sensitivity),
-    ApsUseAutosens("openapsama_useautosens", true, R.string.pref_title_aps_use_autosens, defaultedBySM = true, negativeDependency = ApsUseDynamicSensitivity),
+    ApsUseDynamicSensitivity("use_dynamic_sensitivity", false, R.string.pref_title_aps_use_dynamic_sensitivity, R.string.pref_summary_aps_use_dynamic_sensitivity, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
+    ApsUseAutosens("openapsama_useautosens", true, R.string.pref_title_aps_use_autosens, defaultedBySM = true, negativeDependency = ApsUseDynamicSensitivity, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     ApsUseSmb("use_smb", true, R.string.pref_title_aps_use_smb, R.string.pref_summary_aps_use_smb, defaultedBySM = true),
     ApsUseSmbWithHighTt("enableSMB_with_high_temptarget", false, R.string.pref_title_aps_use_smb_with_high_tt, R.string.pref_summary_aps_use_smb_with_high_tt, defaultedBySM = true, dependency = ApsUseSmb),
     ApsUseSmbAlways(

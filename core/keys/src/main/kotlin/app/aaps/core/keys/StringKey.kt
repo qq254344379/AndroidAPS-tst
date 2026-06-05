@@ -128,7 +128,7 @@ enum class StringKey(
         visibility = PreferenceVisibility.intEquals({ IntKey.ProtectionTypeBolus }, ProtectionType.CUSTOM_PIN.ordinal)
     ),
 
-    SafetyAge(key = "age", defaultValue = "adult", titleResId = R.string.pref_title_patient_age, preferenceType = PreferenceType.LIST),
+    SafetyAge(key = "age", defaultValue = "adult", titleResId = R.string.pref_title_patient_age, preferenceType = PreferenceType.LIST, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     MaintenanceEmail(
         key = "maintenance_logs_email",
         defaultValue = "logs@aaps.app",

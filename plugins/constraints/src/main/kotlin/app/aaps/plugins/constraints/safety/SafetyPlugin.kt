@@ -28,7 +28,6 @@ import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.StringKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.withEntries
 import app.aaps.core.objects.constraints.ConstraintObject
@@ -161,14 +160,6 @@ class SafetyPlugin @Inject constructor(
         carbs.setIfSmaller(maxCarbs, rh.gs(R.string.limitingcarbs, maxCarbs, rh.gs(R.string.maxvalueinpreferences)), this)
         return carbs
     }
-
-    override val syncedKeys: List<NonPreferenceKey> = listOf(
-        StringKey.SafetyAge,
-        DoubleKey.SafetyMaxBolus,
-        IntKey.SafetyMaxCarbs,
-    )
-
-    override fun reloadInternalState() {}
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "safety_settings",

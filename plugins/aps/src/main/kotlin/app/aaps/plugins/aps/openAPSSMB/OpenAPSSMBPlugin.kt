@@ -47,7 +47,6 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.UnitDoubleKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.convertedToAbsolute
@@ -114,7 +113,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
         .pluginName(R.string.openapssmb)
         .shortName(app.aaps.core.ui.R.string.smb_shortname)
         .preferencesVisibleInSimpleMode(false)
-        .showInList(showInList = { config.APS })
+        .showInList(showInList = { config.APS || config.AAPSCLIENT })   // AAPSCLIENT: visible so a client can select the master's APS
         .description(R.string.description_smb)
         .setDefault(),
     ownPreferences = listOf(ApsIntentKey::class.java),
@@ -572,15 +571,6 @@ open class OpenAPSSMBPlugin @Inject constructor(
         }
         return value
     }
-
-    override val syncedKeys: List<NonPreferenceKey> = listOf(
-        BooleanKey.ApsUseDynamicSensitivity,
-        IntKey.ApsDynIsfAdjustmentFactor,
-        // ApsUseAutosens gates autosens; affects sensitivity ratio fed into COB calc.
-        BooleanKey.ApsUseAutosens,
-    )
-
-    override fun reloadInternalState() {}
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "openapssmb_settings",

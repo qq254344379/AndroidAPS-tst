@@ -12,10 +12,9 @@ import app.aaps.core.keys.interfaces.NonPreferenceKey
 interface RunningConfigurationKeys {
 
     /**
-     * "Cold" preference keys — values published in the rarely-changing config doc.
-     * Combines plugin-owned keys (via `ConfigExportImport.syncedKeys` of all installed
-     * Insulin / APS / Sensitivity / Safety / QuickWizard sources) with free-floating
-     * overview keys. Excludes runtime state (see [hotKeys]).
+     * "Cold" preference keys — values published in the rarely-changing config doc. The keys whose
+     * `SyncSpec.channel` is Cold (plugin selection, plugin settings, scene/quick-wizard/automation/insulin
+     * definitions, overview keys). Excludes runtime state (see [hotKeys]).
      */
     fun observableKeys(): List<NonPreferenceKey>
 

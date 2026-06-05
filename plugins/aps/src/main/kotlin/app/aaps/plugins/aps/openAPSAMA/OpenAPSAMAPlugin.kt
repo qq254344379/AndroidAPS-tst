@@ -33,7 +33,6 @@ import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.convertedToAbsolute
@@ -91,7 +90,7 @@ class OpenAPSAMAPlugin @Inject constructor(
         .pluginName(R.string.openapsama)
         .shortName(R.string.oaps_shortname)
         .preferencesVisibleInSimpleMode(false)
-        .showInList { config.APS }
+        .showInList { config.APS || config.AAPSCLIENT }   // AAPSCLIENT: visible so a client can select the master's APS
         .description(R.string.description_ama),
     ownPreferences = listOf(ApsIntentKey::class.java),
     aapsLogger, rh, preferences
@@ -311,15 +310,6 @@ class OpenAPSAMAPlugin @Inject constructor(
     }
 
     // ApsUseAutosens gates whether autosens runs and feeds the sensitivity ratio into COB.
-    // (ApsAmaMin5MinCarbsImpact lives on the AMA preference screen but is consumed by COB
-    // calc whenever the active sensitivity is non-Oref1, regardless of which APS is active —
-    // so it's owned by the AAPS / WeightedAverage sensitivity plugins, not by AMA.)
-    override val syncedKeys: List<NonPreferenceKey> = listOf(
-        BooleanKey.ApsUseAutosens
-    )
-
-    override fun reloadInternalState() {}
-
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "openapsma_settings",
         titleResId = R.string.openapsama,

@@ -1,7 +1,6 @@
 package app.aaps.core.nssdk.localmodel.configuration
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
 
 /**
  * Typed payload of the NS `settings/aaps` doc's `runningConfig` block.
@@ -17,14 +16,6 @@ data class NSRunningConfiguration(
     val pump: String? = null,
     val version: String? = null,
     val insulin: Int? = null,
-    val aps: String? = null,
-    val sensitivity: Int? = null,
-    val smoothing: String? = null,
-    val calibration: String? = null,
-    val apsConfiguration: JsonObject? = null,
-    val sensitivityConfiguration: JsonObject? = null,
-    val safetyConfiguration: JsonObject? = null,
-    val scenesConfiguration: JsonObject? = null,
     val activeScene: NSActiveScene? = null,
     // Flat block of cold-channel synced preference values (key string → value serialized as string),
     // driven by each key's SyncSpec. Applied with "master wins" on the client; client→master edits

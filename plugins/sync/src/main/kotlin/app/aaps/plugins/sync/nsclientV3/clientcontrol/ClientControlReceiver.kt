@@ -14,8 +14,8 @@ import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.LongComposedKey
-import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
+import app.aaps.core.keys.interfaces.DoubleNonPreferenceKey
 import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
@@ -30,7 +30,6 @@ import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Provider
@@ -171,14 +170,13 @@ class ClientControlReceiver @Inject constructor(
             onVerifiedUndecodablePayload(entry, envelope, now)
         } else {
             when (message) {
-                is ClientControlMessage.Hello                  -> onVerifiedHello(entry, envelope, now)
+                is ClientControlMessage.Hello             -> onVerifiedHello(entry, envelope, now)
                 // Hello handling already includes the Pending → Active transition; offer doc
                 // cleanup is inside onVerifiedHello so it can suspend on deleteOffer.
-                is ClientControlMessage.SceneStart             -> onVerifiedSceneStart(entry, envelope, message, now)
-                is ClientControlMessage.SceneStop              -> onVerifiedSceneStop(entry, envelope, message, now)
-                is ClientControlMessage.SceneDefinitionsUpdate -> onVerifiedScenesUpdate(entry, envelope, message, now)
-                is ClientControlMessage.InsulinActivate        -> onVerifiedInsulinActivate(entry, envelope, message, now)
-                is ClientControlMessage.PreferencesUpdate      -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
+                is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
+                is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
+                is ClientControlMessage.InsulinActivate   -> onVerifiedInsulinActivate(entry, envelope, message, now)
+                is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
             }
         }
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -240,57 +238,6 @@ class ClientControlReceiver @Inject constructor(
         }
         if (isFailure)
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.stop failed for ${entry.name}: ${result.tag()}")
-    }
-
-    /**
-     * Apply a client-pushed scenes JSON to the master's `SceneDefinitions` pref via per-scene
-     * last-writer-wins on `lastModified`. JSON-level merge — keeps this module free of a
-     * `:ui` dependency on the Scene model. Writing the merged JSON back to the pref triggers
-     * `RunningConfigurationPublisher`'s debounce, which fans the result out to all paired
-     * clients via the running-config doc.
-     *
-     * Tombstones (`isValid = false`) are merged as-is; the editor's load-time purge handles
-     * physical removal lazily — consistent with how local deletes on master behave.
-     */
-    private fun onVerifiedScenesUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneDefinitionsUpdate, now: Long) {
-        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        val incoming = runCatching { JSONArray(message.scenesJson) }.getOrNull()
-        if (incoming == null) {
-            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scenes_update from ${entry.name} has invalid JSON, ignoring")
-            nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: invalid JSON")
-            return
-        }
-        val existing = runCatching { JSONArray(preferences.get(StringNonKey.SceneDefinitions)) }.getOrNull() ?: JSONArray()
-        // Build id → (index, lastModified) over the existing array so we can apply LWW
-        // per scene without rebuilding the array structure (preserves any unknown fields).
-        val existingIndex = HashMap<String, Int>()
-        for (i in 0 until existing.length()) {
-            existing.optJSONObject(i)?.optString("id")?.takeIf { it.isNotEmpty() }?.let { existingIndex[it] = i }
-        }
-        var changed = 0
-        var dropped = 0
-        for (i in 0 until incoming.length()) {
-            val inc = incoming.optJSONObject(i) ?: continue
-            val id = inc.optString("id").takeIf { it.isNotEmpty() } ?: continue
-            val incLm = inc.optLong("lastModified", 0L)
-            val existIdx = existingIndex[id]
-            if (existIdx == null) {
-                existing.put(inc)
-                existingIndex[id] = existing.length() - 1
-                changed++
-            } else {
-                val existLm = existing.optJSONObject(existIdx)?.optLong("lastModified", 0L) ?: 0L
-                if (incLm > existLm) {
-                    existing.put(existIdx, inc)
-                    changed++
-                } else {
-                    dropped++
-                }
-            }
-        }
-        if (changed > 0) preferences.put(StringNonKey.SceneDefinitions, existing.toString())
-        nsClientRepository.addLog("◄ CLIENTCTL", "scenes.update from ${entry.name}: applied=$changed stale=$dropped")
-        if (changed > 0) uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: scenes")
     }
 
     /**
@@ -356,6 +303,16 @@ class ClientControlReceiver @Inject constructor(
                     val value = pushed.value.toIntOrNull()
                     if (value == null) {
                         aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} bad int for $keyString: '${pushed.value}'")
+                        return@forEach
+                    }
+                    preferences.putRemote(key, value, pushed.lastModified)
+                    applied += "$keyString=$value"
+                }
+
+                is DoubleNonPreferenceKey  -> {
+                    val value = pushed.value.toDoubleOrNull()
+                    if (value == null) {
+                        aapsLogger.warn(LTag.NSCLIENT, "ClientControl: preferences.update from ${entry.name} bad double for $keyString: '${pushed.value}'")
                         return@forEach
                     }
                     preferences.putRemote(key, value, pushed.lastModified)

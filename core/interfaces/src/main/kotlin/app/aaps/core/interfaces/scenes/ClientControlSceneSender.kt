@@ -26,11 +26,4 @@ interface ClientControlSceneSender {
      * are met. `false` is a plain stop.
      */
     suspend fun sendSceneStop(triggerChain: Boolean): ClientControlSendResult
-
-    /**
-     * Push the client's full scenes JSON to the master after a local scene edit. Master merges
-     * per-scene by `lastModified` (last-writer-wins) and republishes via the running-config doc,
-     * so other paired clients converge. `scenesJson` is the same array shape the local pref holds.
-     */
-    suspend fun sendScenesUpdate(scenesJson: String): ClientControlSendResult
 }

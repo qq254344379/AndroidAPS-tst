@@ -16,7 +16,6 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.icons.IcAs
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -147,18 +146,6 @@ class SensitivityAAPSPlugin @Inject constructor(
 
     override val id: SensitivityType
         get() = SensitivityType.SENSITIVITY_AAPS
-
-    override val syncedKeys: List<NonPreferenceKey> = listOf(
-        IntKey.AutosensPeriod,
-        DoubleKey.AbsorptionMaxTime,
-        DoubleKey.AutosensMin,
-        DoubleKey.AutosensMax,
-        // COB calc reads ApsAmaMin5MinCarbsImpact whenever isOref1=false (this plugin) —
-        // ownership is here even though the UI for it lives on the AMA APS screen.
-        DoubleKey.ApsAmaMin5MinCarbsImpact,
-    )
-
-    override fun reloadInternalState() {}
 
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "sensitivity_aaps_settings",

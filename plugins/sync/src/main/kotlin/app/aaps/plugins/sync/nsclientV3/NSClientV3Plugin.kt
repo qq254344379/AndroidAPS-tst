@@ -60,7 +60,6 @@ import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.PreferencesClientPublisher
-import app.aaps.plugins.sync.nsclientV3.clientcontrol.SceneDefinitionsClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolus
 import app.aaps.plugins.sync.nsclientV3.extensions.toNSBolusWizard
@@ -142,7 +141,6 @@ class NSClientV3Plugin @Inject constructor(
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
     private val orphanDetector: OrphanDetector,
-    private val sceneDefinitionsClientPublisher: SceneDefinitionsClientPublisher,
     private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
 ) : NsClient, Sync, PluginBaseWithPreferences(
@@ -261,7 +259,6 @@ class NSClientV3Plugin @Inject constructor(
         receiverDelegate.grabReceiversState()
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         runningConfigurationPublisher.start(scope)
-        sceneDefinitionsClientPublisher.start(scope)
         preferencesClientPublisher.start(scope)
         // Master-side: fallback poll for inbound client-control envelopes. Primary path is the
         // WS settings-collection listener in NSClientV3Service that calls into
@@ -409,7 +406,6 @@ class NSClientV3Plugin @Inject constructor(
         handler?.looper?.quit()
         handler = null
         runningConfigurationPublisher.stop()
-        sceneDefinitionsClientPublisher.stop()
         preferencesClientPublisher.stop()
         scope.cancel()
         stopService()
@@ -435,8 +431,9 @@ class NSClientV3Plugin @Inject constructor(
     // enabling. (A 0L seed + pristine=true, or any non-zero seed, would let a client that boots while
     // the master is offline edit for the whole stale window and silently lose those edits; the WS term
     // can't catch that, since WS is client↔NS, not client↔master.) On AAPSCLIENT, NSDeviceStatusHandler
-    // bumps this to now() for every non-empty batch — both the WS push and the catch-up worker land in
-    // the same handler, so a single update site suffices.
+    // bumps this from the newest devicestatus's own created_at — but ONLY for a LIVE WS push (live=true),
+    // never the catch-up/initial worker load, so a stale historical devicestatus pulled at boot can't mark
+    // a long-offline master alive. So the client waits for the master's first real-time devicestatus.
     private val _lastDevicestatusReceivedAt = MutableStateFlow(0L)
     override val lastDevicestatusReceivedAt: StateFlow<Long> = _lastDevicestatusReceivedAt.asStateFlow()
 

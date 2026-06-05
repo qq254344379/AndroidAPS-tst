@@ -59,9 +59,9 @@ class SceneListViewModel @Inject constructor(
     private val nsClient: NsClient
 ) : ViewModel() {
 
-    /** All defined scenes (tombstones excluded — sync layer is the only consumer that needs them). */
+    /** All defined scenes. */
     val scenes: StateFlow<List<Scene>> = sceneRepository.scenesFlow
-        .map { it.toScenes().validOnly() }
+        .map { it.toScenes() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), sceneRepository.getScenes())
 
     /** Currently active scene state */
@@ -116,10 +116,6 @@ class SceneListViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     init {
-        // GC any soft-deleted scenes that are still hanging around locally — by the time the
-        // editor opens, the master has had every opportunity to apply our delete and republish a
-        // clean snapshot, so any `isValid = false` entries we still hold are safe to drop.
-        sceneRepository.purgeInvalid()
         // Re-validate whenever scenes change
         viewModelScope.launch {
             scenes.collect { sceneList ->

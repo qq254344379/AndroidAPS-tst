@@ -19,16 +19,15 @@ import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.LocalConfig
 
 /**
- * Small badge marking a preference that two-way syncs with the master ("main phone").
+ * Small badge marking something that two-way syncs with the master ("main phone").
  *
- * Shown ONLY on a client (AAPSCLIENT) and ONLY for keys declared [SyncDirection.Bidirectional]
- * (read from the key's [NonPreferenceKey.sync] — the single source of truth). Renders nothing
- * otherwise, so it's safe to drop into any preference title.
+ * The raw marker — renders nothing when [visible] is false, so it's safe to drop anywhere. Use the
+ * [SyncBadge] key overload for preference titles (it computes visibility from the key); pass an explicit
+ * flag here for callers that already know (e.g. a synced Configuration category).
  */
 @Composable
-fun SyncBadge(key: NonPreferenceKey?, modifier: Modifier = Modifier) {
-    if (!LocalConfig.current.AAPSCLIENT) return
-    if (key?.sync?.direction != SyncDirection.Bidirectional) return
+fun SyncBadge(visible: Boolean, modifier: Modifier = Modifier) {
+    if (!visible) return
     // PhonelinkRing ("linked to another phone"), muted/small so it reads as a passive status marker,
     // NOT a tappable refresh/sync control.
     Icon(
@@ -38,6 +37,17 @@ fun SyncBadge(key: NonPreferenceKey?, modifier: Modifier = Modifier) {
         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     )
 }
+
+/**
+ * Preference-title overload: shown ONLY on a client (AAPSCLIENT) and ONLY for keys declared
+ * [SyncDirection.Bidirectional] (read from the key's [NonPreferenceKey.sync] — the single source of truth).
+ */
+@Composable
+fun SyncBadge(key: NonPreferenceKey?, modifier: Modifier = Modifier) =
+    SyncBadge(
+        visible = LocalConfig.current.AAPSCLIENT && key?.sync?.direction == SyncDirection.Bidirectional,
+        modifier = modifier
+    )
 
 /**
  * Preference title text with a trailing [SyncBadge]. Drop-in replacement for `Text(stringResource(id))`

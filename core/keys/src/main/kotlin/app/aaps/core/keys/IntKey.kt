@@ -297,7 +297,7 @@ enum class IntKey(
         ),
         visibility = PreferenceVisibility.stringNotEmpty { StringKey.ProtectionMasterPassword }
     ),
-    SafetyMaxCarbs(key = "treatmentssafety_maxcarbs", defaultValue = 48, min = 1, max = 200, titleResId = R.string.pref_title_max_carbs, unitType = UnitType.GRAMS),
+    SafetyMaxCarbs(key = "treatmentssafety_maxcarbs", defaultValue = 48, min = 1, max = 200, titleResId = R.string.pref_title_max_carbs, unitType = UnitType.GRAMS, sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)),
     LoopOpenModeMinChange(
         key = "loop_openmode_min_change",
         defaultValue = 30,
@@ -353,7 +353,8 @@ enum class IntKey(
         titleResId = R.string.pref_title_dynisf_adjustment_factor,
         summaryResId = R.string.dyn_isf_adjust_summary,
         dependency = BooleanKey.ApsUseDynamicSensitivity,
-        unitType = UnitType.PERCENT
+        unitType = UnitType.PERCENT,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     AutosensPeriod(
         key = "openapsama_autosens_period",
@@ -363,7 +364,8 @@ enum class IntKey(
         titleResId = R.string.pref_title_autosens_period,
         summaryResId = R.string.openapsama_autosens_period_summary,
         calculatedDefaultValue = true,
-        unitType = UnitType.HOURS
+        unitType = UnitType.HOURS,
+        sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
     MaintenanceLogsAmount(key = "maintenance_logs_amount", defaultValue = 2, min = 1, max = 10, titleResId = R.string.pref_title_logs_amount, defaultedBySM = true),
     AlertsStaleDataThreshold(

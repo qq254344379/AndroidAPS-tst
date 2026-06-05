@@ -45,7 +45,6 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.UnitDoubleKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.convertedToAbsolute
@@ -111,7 +110,7 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
         .pluginName(R.string.openaps_auto_isf)
         .shortName(R.string.autoisf_shortname)
         .preferencesVisibleInSimpleMode(false)
-        .showInList { config.APS && config.isEngineeringMode() && config.isDev() }
+        .showInList { (config.APS || config.AAPSCLIENT) && config.isEngineeringMode() && config.isDev() }   // AAPSCLIENT: visible so a client can select the master's APS (still eng+dev only)
         .description(R.string.description_auto_isf),
     ownPreferences = listOf(ApsIntentKey::class.java),
     aapsLogger, rh, preferences
@@ -519,15 +518,6 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
         if (!enabled) value.set(false, rh.gs(R.string.autosens_disabled_in_preferences), this)
         return value
     }
-
-    override val syncedKeys: List<NonPreferenceKey> = listOf(
-        BooleanKey.ApsUseDynamicSensitivity,
-        IntKey.ApsDynIsfAdjustmentFactor,
-        // ApsUseAutosens gates autosens; affects sensitivity ratio fed into COB calc.
-        BooleanKey.ApsUseAutosens,
-    )
-
-    override fun reloadInternalState() {}
 
     // Rounds value to 'digits' decimal places
     // different for negative numbers fun round(value: Double, digits: Int): Double = BigDecimal(value).setScale(digits, RoundingMode.HALF_EVEN).toDouble()

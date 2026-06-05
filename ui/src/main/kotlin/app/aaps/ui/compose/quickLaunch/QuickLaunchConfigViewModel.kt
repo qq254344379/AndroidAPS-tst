@@ -12,6 +12,7 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.objects.wizard.QuickWizard
+import app.aaps.core.ui.compose.pluginCategoryTitleRes
 import app.aaps.ui.compose.scenes.SceneRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -173,18 +174,6 @@ class QuickLaunchConfigViewModel @Inject constructor(
             PluginType.CONSTRAINTS,
             PluginType.SYNC, PluginType.GENERAL
         )
-        val typeLabelMap = mapOf(
-            PluginType.PUMP to app.aaps.core.ui.R.string.configbuilder_pump,
-            PluginType.BGSOURCE to app.aaps.core.ui.R.string.configbuilder_bgsource,
-            PluginType.APS to app.aaps.core.ui.R.string.configbuilder_aps,
-            PluginType.LOOP to app.aaps.core.ui.R.string.configbuilder_loop,
-            PluginType.SENSITIVITY to app.aaps.core.ui.R.string.configbuilder_sensitivity,
-            PluginType.SMOOTHING to app.aaps.core.ui.R.string.configbuilder_smoothing,
-            PluginType.CALIBRATION to app.aaps.core.ui.R.string.configbuilder_calibration,
-            PluginType.CONSTRAINTS to app.aaps.core.ui.R.string.constraints,
-            PluginType.SYNC to app.aaps.core.ui.R.string.configbuilder_sync,
-            PluginType.GENERAL to app.aaps.core.ui.R.string.configbuilder_general
-        )
 
         val plugins = activePlugin.getPluginsList()
             .filter { it.isEnabled(it.pluginDescription.mainType) && it.hasComposeContent() }
@@ -194,7 +183,7 @@ class QuickLaunchConfigViewModel @Inject constructor(
                 .filter { it.pluginDescription.mainType == type }
                 .map { plugin -> resolver.resolvePluginItem(plugin) }
                 .filter { actionKey(it.action) !in selectedSet }
-            if (items.isNotEmpty()) PluginGroup(type, typeLabelMap[type] ?: 0, items) else null
+            if (items.isNotEmpty()) PluginGroup(type, pluginCategoryTitleRes(type), items) else null
         }
     }
 

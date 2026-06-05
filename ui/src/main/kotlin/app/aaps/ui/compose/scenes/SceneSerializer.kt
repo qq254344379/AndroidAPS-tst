@@ -24,8 +24,6 @@ fun List<Scene>.toJson(): String {
             put("isDeletable", scene.isDeletable)
             put("isEnabled", scene.isEnabled)
             put("sortOrder", scene.sortOrder)
-            put("lastModified", scene.lastModified)
-            put("isValid", scene.isValid)
             put("actions", scene.actions.toJsonArray())
             put("endAction", scene.endAction.toJson())
         }
@@ -54,8 +52,6 @@ fun String.toScenes(): List<Scene> {
                     isDeletable = obj.optBoolean("isDeletable", true),
                     isEnabled = obj.optBoolean("isEnabled", true),
                     sortOrder = obj.optInt("sortOrder", 0),
-                    lastModified = obj.optLong("lastModified", 0L),
-                    isValid = obj.optBoolean("isValid", true),
                     actions = obj.optJSONArray("actions")?.toSceneActions() ?: emptyList(),
                     endAction = obj.optJSONObject("endAction")?.toSceneEndAction() ?: SceneEndAction.Notification
                 )

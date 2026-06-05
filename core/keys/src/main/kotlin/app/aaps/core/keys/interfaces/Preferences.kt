@@ -43,6 +43,9 @@ interface Preferences {
     /** [Int] variant of [putRemote] — applied-from-sync write, stamps [version], does not re-publish. */
     fun putRemote(key: IntNonPreferenceKey, value: Int, version: Long) = put(key, value)
 
+    /** [DoubleNonPreferenceKey] variant of [putRemote] — applied-from-sync (raw value, 1:1). */
+    fun putRemote(key: DoubleNonPreferenceKey, value: Double, version: Long) = put(key, value)
+
     /**
      * [UnitDoublePreferenceKey] variant of [putRemote]. [value] is the **raw stored** value (mg/dl),
      * written 1:1 (the normal `put` already stores raw; the unit conversion is only on read/UI).

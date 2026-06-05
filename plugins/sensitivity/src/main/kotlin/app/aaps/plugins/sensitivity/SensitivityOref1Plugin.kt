@@ -15,7 +15,6 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.DoubleKey
-import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.icons.IcAs
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -204,15 +203,6 @@ class SensitivityOref1Plugin @Inject constructor(
     override fun maxAbsorptionHours(): Double = preferences.get(DoubleKey.AbsorptionCutOff)
     override val isMinCarbsAbsorptionDynamic: Boolean = false
     override val isOref1: Boolean = true
-
-    override val syncedKeys: List<NonPreferenceKey> = listOf(
-        DoubleKey.ApsSmbMin5MinCarbsImpact,
-        DoubleKey.AbsorptionCutOff,
-        DoubleKey.AutosensMin,
-        DoubleKey.AutosensMax,
-    )
-
-    override fun reloadInternalState() {}
 
     override val id: SensitivityType
         get() = SensitivityType.SENSITIVITY_OREF1
