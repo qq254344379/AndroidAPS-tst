@@ -135,8 +135,13 @@ class ClientControlUplinkIntegrationTest {
         // ---------- NS bridge: capture what the client publishes ----------
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
         whenever(nsAndroidClient.updateSettings(any<String>(), any<JSONObject>())).thenAnswer {
-            bridgeIdentifier = it.getArgument(0)
-            bridgeDoc = it.getArgument(1)
+            val id = it.getArgument<String>(0)
+            // The master now writes two-step ACK docs through this same NS bridge; ignore them here so
+            // the capture reflects only the client's command publish (the uplink under test).
+            if (!id.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX)) {
+                bridgeIdentifier = id
+                bridgeDoc = it.getArgument(1)
+            }
             CreateUpdateResponse(response = 200, identifier = null, isDeduplication = false, deduplicatedIdentifier = null, lastModified = null, errorResponse = null)
         }
 

@@ -23,6 +23,7 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
@@ -147,7 +148,9 @@ internal class ClientControlReceiverTest {
         secret: ByteArray,
         message: ClientControlMessage = ClientControlMessage.Hello(),
         counter: Long = 1L,
-        timestamp: Long = now
+        timestamp: Long = now,
+        validUntil: Long = Long.MAX_VALUE,
+        wantsAck: Boolean = false
     ): SignedEnvelope {
         val payload = publisherJson.encodeToString(ClientControlMessage.serializer(), message)
         val type = publisherJson.parseToJsonElement(payload).jsonObject["type"]!!.jsonPrimitive.content
@@ -157,15 +160,17 @@ internal class ClientControlReceiverTest {
             type = type,
             payload = payload,
             counter = counter,
-            timestamp = timestamp
+            timestamp = timestamp,
+            validUntil = validUntil,
+            wantsAck = wantsAck
         )
     }
 
     /** Lower-level helper for tests that need to forge a non-decodable payload while keeping a valid signature. */
-    private fun signedEnvelope(clientId: String, secret: ByteArray, type: String, payload: String, counter: Long = 1L, timestamp: Long = now): SignedEnvelope =
+    private fun signedEnvelope(clientId: String, secret: ByteArray, type: String, payload: String, counter: Long = 1L, timestamp: Long = now, validUntil: Long = Long.MAX_VALUE, wantsAck: Boolean = false): SignedEnvelope =
         ClientControlCrypto.signEnvelope(
             secret,
-            SignedEnvelope(clientId = clientId, counter = counter, timestamp = timestamp, type = type, payload = payload, signature = "")
+            SignedEnvelope(clientId = clientId, counter = counter, timestamp = timestamp, type = type, payload = payload, signature = "", validUntil = validUntil, wantsAck = wantsAck)
         )
 
     private fun wrap(envelope: SignedEnvelope): JSONObject =
@@ -562,10 +567,10 @@ internal class ClientControlReceiverTest {
     private fun iCfgJson(label: String): String =
         """{"insulinLabel":"$label","insulinEndTime":360,"insulinPeakTime":75,"concentration":100.0,"insulinNickname":"$label"}"""
 
-    private suspend fun sendInsulinActivate(clientId: String, secret: ByteArray, json: String, counter: Long = 5L) {
+    private suspend fun sendInsulinActivate(clientId: String, secret: ByteArray, json: String, counter: Long = 5L, wantsAck: Boolean = false) {
         val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}insulin_activate_$clientId"
         val msg = ClientControlMessage.InsulinActivate(json)
-        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter)))
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = counter, wantsAck = wantsAck)))
     }
 
     @Test
@@ -590,6 +595,79 @@ internal class ClientControlReceiverTest {
         sendInsulinActivate(clientId, secret, "{not json")
 
         verify(profileFunction, never()).createProfileSwitchWithNewInsulin(any(), any())
+    }
+
+    // -- two-step ACK -----------------------------------------------------------------------
+
+    /** Captures the ACK envelopes the master writes to this client's ack identifier. */
+    private suspend fun captureAcks(clientId: String): MutableList<AckEnvelope> {
+        val acks = mutableListOf<AckEnvelope>()
+        whenever(nsAndroidClient.updateSettings(eq(ClientControlPublisher.IDENTIFIER_ACK_PREFIX + clientId), any())).thenAnswer {
+            val doc = it.getArgument<JSONObject>(1)
+            acks += Json.decodeFromString<AckEnvelope>(doc.getJSONObject("ack").toString())
+            deleteOk
+        }
+        return acks
+    }
+
+    @Test
+    fun insulinActivateWritesExecutingThenOkAck() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(profileFunction.createProfileSwitchWithNewInsulin(any(), any())).thenReturn(true)
+        val acks = captureAcks(clientId)
+
+        sendInsulinActivate(clientId, secret, iCfgJson("remote"), wantsAck = true)
+
+        assertThat(acks.map { it.phase.name to it.status.name }).containsExactly(
+            "Executing" to "Pending",
+            "Done" to "Ok"
+        ).inOrder()
+        assertThat(acks.all { it.commandCounter == 5L }).isTrue()
+    }
+
+    @Test
+    fun fireAndForgetCommandWritesNoAck() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(profileFunction.createProfileSwitchWithNewInsulin(any(), any())).thenReturn(true)
+        val acks = captureAcks(clientId)
+
+        // wantsAck = false (default) → executed but no ACK doc written.
+        sendInsulinActivate(clientId, secret, iCfgJson("remote"))
+
+        verify(profileFunction).createProfileSwitchWithNewInsulin(any(), any())
+        assertThat(acks).isEmpty()
+    }
+
+    @Test
+    fun insulinActivateNoActiveProfileAcksFailed() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(profileFunction.createProfileSwitchWithNewInsulin(any(), any())).thenReturn(false)
+        val acks = captureAcks(clientId)
+
+        sendInsulinActivate(clientId, secret, iCfgJson("remote"), wantsAck = true)
+
+        assertThat(acks.last().phase.name).isEqualTo("Done")
+        assertThat(acks.last().status.name).isEqualTo("Failed")
+    }
+
+    @Test
+    fun expiredCommandIsNotExecutedAndAcksExpired() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}insulin_activate_$clientId"
+        // Timestamp within skew, but validUntil already elapsed → master must NOT execute.
+        val env = envelope(clientId, secret, message = ClientControlMessage.InsulinActivate(iCfgJson("remote")), counter = 5L, validUntil = now - 1L, wantsAck = true)
+
+        sut.onSettingsDocChanged(identifier, wrap(env))
+
+        verify(profileFunction, never()).createProfileSwitchWithNewInsulin(any(), any())
+        assertThat(acks.single().status.name).isEqualTo("Expired")
+        // Counter consumed so a late replay can't fire it.
+        assertThat(authorizedRepository.current(now).single { it.clientId == clientId }.counterReceived).isEqualTo(5L)
     }
 
     // -- preferences_update (generic synced-pref channel) ---------------------------------

@@ -55,7 +55,17 @@ class ClientControlPublisher @Inject constructor(
         // Master-published pairing offers (PIN-wrapped PairingPayload). Not envelopes — the
         // receiver must skip these so it does not try to verify its own offer as a hello/cmd.
         const val IDENTIFIER_OFFER_PREFIX = "${IDENTIFIER_PREFIX}offer_"
+
+        // Master→client command ACK (one per client, overwritten in place). The master writes here;
+        // the client reads here. Shares IDENTIFIER_PREFIX, so the master receiver MUST skip it (it is
+        // not an inbound command envelope) — see ClientControlReceiver.
+        const val IDENTIFIER_ACK_PREFIX = "${IDENTIFIER_PREFIX}ack_"
         const val SCHEMA_VERSION = 1
+
+        // Fire-and-forget commands keep the historical ±5 min skew window as their validity, so adding
+        // validUntil does not change their master-side drop behaviour. The round-trip path overrides
+        // with a much shorter value (see ClientControlRoundTrip).
+        const val FIRE_AND_FORGET_TTL_MS = 5L * 60L * 1000L
 
         // 1 ms past NS APIv3 MIN_TIMESTAMP (946684800000 = 2000-01-01 UTC). validateCommon
         // requires `date` and the server rejects any modification on subsequent PUTs to the
@@ -88,21 +98,31 @@ class ClientControlPublisher @Inject constructor(
      * The identifier selector is an exhaustive `when` so adding a new [ClientControlMessage]
      * variant forces a hello-vs-command classification at compile time.
      */
-    suspend fun publish(message: ClientControlMessage): ClientControlSendResult {
+    suspend fun publish(message: ClientControlMessage): ClientControlSendResult =
+        publishTracked(message, dateUtil.now() + FIRE_AND_FORGET_TTL_MS, wantsAck = false).result
+
+    /**
+     * Like [publish], but carries an explicit [validUntil] (command expiry the master enforces) and
+     * returns the envelope's `counter` on success so a round-trip caller can correlate the master's
+     * ACK. The counter is null on any non-Success result (nothing was signed/sent). [wantsAck]
+     * defaults true (the round-trip use); [publish] passes false so the master writes no ACK doc for
+     * fire-and-forget commands.
+     */
+    suspend fun publishTracked(message: ClientControlMessage, validUntil: Long, wantsAck: Boolean = true): TrackedPublish {
         val pairing = pairingRepository.currentPairing() ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: publish called while unpaired")
-            return ClientControlSendResult.NotPaired
+            return TrackedPublish(ClientControlSendResult.NotPaired, null)
         }
         val payload = json.encodeToString(ClientControlMessage.serializer(), message)
         // Derive envelope.type from the payload's polymorphic discriminator so the two cannot
         // drift — there is exactly one source of truth (the variant's @SerialName).
         val type = json.parseToJsonElement(payload).jsonObject["type"]?.jsonPrimitive?.content ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: serializer produced no discriminator for $message")
-            return ClientControlSendResult.PublishFailed("no discriminator")
+            return TrackedPublish(ClientControlSendResult.PublishFailed("no discriminator"), null)
         }
-        val envelope = pairingRepository.nextSignedEnvelope(type, payload, dateUtil.now()) ?: run {
+        val envelope = pairingRepository.nextSignedEnvelope(type, payload, dateUtil.now(), validUntil, wantsAck) ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: failed to sign envelope for type=$type")
-            return ClientControlSendResult.PublishFailed("sign failed")
+            return TrackedPublish(ClientControlSendResult.PublishFailed("sign failed"), null)
         }
         val identifier = when (message) {
             is ClientControlMessage.Hello -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
@@ -111,8 +131,12 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.InsulinActivate,
             is ClientControlMessage.PreferencesUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
-        return uploadEnvelope(identifier, envelope)
+        val result = uploadEnvelope(identifier, envelope)
+        return TrackedPublish(result, if (result is ClientControlSendResult.Success) envelope.counter else null)
     }
+
+    /** Result of [publishTracked]: the send outcome plus the correlation counter (non-null only on Success). */
+    data class TrackedPublish(val result: ClientControlSendResult, val counter: Long?)
 
     override suspend fun sendSceneStart(sceneId: String, durationMinutes: Int?): ClientControlSendResult =
         publish(ClientControlMessage.SceneStart(sceneId, durationMinutes))

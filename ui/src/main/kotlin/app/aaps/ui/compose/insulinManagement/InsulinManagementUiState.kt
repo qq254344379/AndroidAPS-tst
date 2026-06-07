@@ -2,6 +2,7 @@ package app.aaps.ui.compose.insulinManagement
 
 import androidx.compose.runtime.Immutable
 import app.aaps.core.data.model.ICfg
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.insulin.ConcentrationType
 import app.aaps.core.interfaces.insulin.InsulinType
 import app.aaps.core.ui.compose.ScreenMode
@@ -31,6 +32,10 @@ data class InsulinManagementUiState(
 
     // Activation dialog
     val activationMessage: String? = null,
+
+    // Round-trip client→master activation progress (client only). Non-null while the pending dialog
+    // should show; terminal values (Applied/Rejected/Unconfirmed) drive the final UX then clear.
+    val clientControlProgress: ActionProgress? = null,
 
     // External (client→master sync) update arrived while the user has unsaved edits — master asks
     val externalUpdatePending: Boolean = false,

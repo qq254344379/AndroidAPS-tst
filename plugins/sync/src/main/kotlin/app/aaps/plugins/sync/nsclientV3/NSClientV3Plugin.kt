@@ -58,6 +58,7 @@ import app.aaps.core.ui.compose.icons.IcPluginNsClient
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlReceiver
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.PreferencesClientPublisher
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientComposeContent
@@ -140,6 +141,7 @@ class NSClientV3Plugin @Inject constructor(
     private val uel: UserEntryLogger,
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val clientControlReceiver: ClientControlReceiver,
+    private val clientControlRoundTrip: ClientControlRoundTrip,
     private val orphanDetector: OrphanDetector,
     private val preferencesClientPublisher: PreferencesClientPublisher,
     private val profileRepository: ProfileRepository,
@@ -382,6 +384,16 @@ class NSClientV3Plugin @Inject constructor(
             runCatching { clientControlReceiver.onSettingsDocChanged(identifier, doc) }
                 .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl WS dispatch failed for $identifier: ${it.message}", it) }
         }
+    }
+
+    /**
+     * WS-push entry for a master→client command ACK (client side). NSClientV3Service routes
+     * `aaps_clientcontrol_ack_<clientId>` settings events here. Synchronous parse/verify/emit — the
+     * round-trip coordinator only re-publishes to an in-process flow, no IO.
+     */
+    fun handleClientControlAckEvent(doc: JSONObject) {
+        runCatching { clientControlRoundTrip.onAckDoc(doc) }
+            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl ACK dispatch failed: ${it.message}", it) }
     }
 
     fun scheduleIrregularExecution(refreshToken: Boolean = false) {

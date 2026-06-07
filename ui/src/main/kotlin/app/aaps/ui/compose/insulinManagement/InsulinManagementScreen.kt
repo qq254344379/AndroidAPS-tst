@@ -74,6 +74,7 @@ import app.aaps.core.ui.compose.icons.IcPluginInsulin
 import app.aaps.core.ui.compose.insulin.ConcentrationDropdown
 import app.aaps.core.ui.compose.masterEditingEnabled
 import app.aaps.ui.R
+import app.aaps.ui.compose.clientcontrol.ClientControlPendingDialog
 import kotlin.math.absoluteValue
 import app.aaps.core.keys.R as KeysR
 import app.aaps.core.ui.R as CoreUiR
@@ -178,6 +179,15 @@ fun InsulinManagementScreen(
             icon = IcPluginInsulin,
             onConfirm = { viewModel.executeActivation() },
             onDismiss = { viewModel.dismissActivation() }
+        )
+    }
+
+    // Client→master activation round-trip: pending spinner + terminal Rejected/Unconfirmed states.
+    // Applied is handled in the VM (dismiss + snackbar), so it never reaches this dialog.
+    uiState.clientControlProgress?.let { progress ->
+        ClientControlPendingDialog(
+            progress = progress,
+            onDismiss = { viewModel.dismissClientControlProgress() }
         )
     }
 

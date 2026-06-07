@@ -1,5 +1,8 @@
 package app.aaps.core.nssdk.utils
 
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
@@ -134,7 +137,76 @@ class ClientControlCryptoTest {
 
     @Test
     fun canonicalStringMatchesPipeFormat() {
-        val env = draft(clientId = "c", counter = 7L, timestamp = 12345L, type = "hello", payload = "p")
-        assertThat(env.canonicalString()).isEqualTo("c|7|12345|hello|p")
+        val env = draft(clientId = "c", counter = 7L, timestamp = 12345L, type = "hello", payload = "p").copy(validUntil = 99999L, wantsAck = true)
+        assertThat(env.canonicalString()).isEqualTo("c|7|12345|99999|true|hello|p")
+    }
+
+    @Test
+    fun verifyRejectsTamperedWantsAck() {
+        val secret = ClientControlCrypto.newSecretBytes()
+        val signed = ClientControlCrypto.signEnvelope(secret, draft().copy(wantsAck = false))
+        val tampered = signed.copy(wantsAck = true)
+        assertThat(ClientControlCrypto.verifyEnvelope(secret, tampered)).isFalse()
+    }
+
+    @Test
+    fun verifyRejectsTamperedValidUntil() {
+        val secret = ClientControlCrypto.newSecretBytes()
+        val signed = ClientControlCrypto.signEnvelope(secret, draft().copy(validUntil = 1_000L))
+        val tampered = signed.copy(validUntil = 9_999_999L)
+        assertThat(ClientControlCrypto.verifyEnvelope(secret, tampered)).isFalse()
+    }
+
+    // ---- ACK (master → client) ----
+
+    private fun ackDraft(
+        clientId: String = "client-1",
+        commandCounter: Long = 7L,
+        phase: AckPhase = AckPhase.Done,
+        status: AckStatus = AckStatus.Ok,
+        reason: String? = null,
+        timestamp: Long = 1_700_000_000_000L
+    ) = AckEnvelope(clientId, commandCounter, phase, status, reason, timestamp, signature = "")
+
+    @Test
+    fun ackSignVerifyRoundtrip() {
+        val secret = ClientControlCrypto.newSecretBytes()
+        val signed = ClientControlCrypto.signAck(secret, ackDraft(status = AckStatus.Failed, reason = "no active profile"))
+        assertThat(signed.signature).isNotEmpty()
+        assertThat(ClientControlCrypto.verifyAck(secret, signed)).isTrue()
+    }
+
+    @Test
+    fun ackVerifyRejectsWrongSecret() {
+        val signed = ClientControlCrypto.signAck(ClientControlCrypto.newSecretBytes(), ackDraft())
+        assertThat(ClientControlCrypto.verifyAck(ClientControlCrypto.newSecretBytes(), signed)).isFalse()
+    }
+
+    @Test
+    fun ackVerifyRejectsTamperedStatus() {
+        val secret = ClientControlCrypto.newSecretBytes()
+        val signed = ClientControlCrypto.signAck(secret, ackDraft(status = AckStatus.Failed))
+        val tampered = signed.copy(status = AckStatus.Ok)
+        assertThat(ClientControlCrypto.verifyAck(secret, tampered)).isFalse()
+    }
+
+    @Test
+    fun ackVerifyRejectsTamperedCounter() {
+        val secret = ClientControlCrypto.newSecretBytes()
+        val signed = ClientControlCrypto.signAck(secret, ackDraft(commandCounter = 7L))
+        val tampered = signed.copy(commandCounter = 8L)
+        assertThat(ClientControlCrypto.verifyAck(secret, tampered)).isFalse()
+    }
+
+    @Test
+    fun ackCanonicalStringMatchesPipeFormat() {
+        val ack = ackDraft(clientId = "c", commandCounter = 7L, phase = AckPhase.Done, status = AckStatus.Failed, reason = "x", timestamp = 12345L)
+        assertThat(ack.canonicalString()).isEqualTo("c|7|Done|Failed|x|12345")
+    }
+
+    @Test
+    fun ackCanonicalStringNullReasonIsEmpty() {
+        val ack = ackDraft(clientId = "c", commandCounter = 7L, phase = AckPhase.Executing, status = AckStatus.Pending, reason = null, timestamp = 12345L)
+        assertThat(ack.canonicalString()).isEqualTo("c|7|Executing|Pending||12345")
     }
 }

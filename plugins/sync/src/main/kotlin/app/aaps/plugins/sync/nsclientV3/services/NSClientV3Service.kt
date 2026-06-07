@@ -302,6 +302,11 @@ class NSClientV3Service : DaggerService() {
                     // Kept distinct from the cold branch so this never clears a running scene.
                     config.AAPSCLIENT && identifier == SettingsIdentifiers.STATE    ->
                         docString.toRunningConfiguration()?.let { runningConfiguration.applyHot(it) }
+                    // Client-side: master→client command ACK. Must be checked BEFORE the generic
+                    // IDENTIFIER_PREFIX branch (ack identifiers share that prefix) so the master
+                    // receiver never tries to verify an ack as an inbound command envelope.
+                    config.AAPSCLIENT && identifier.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX) ->
+                        nsClientV3Plugin.handleClientControlAckEvent(docJson)
                     // Master-side: route client-control envelopes (paired-client → master commands)
                     // to the receiver. The plugin gates on the master toggle internally.
                     identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX) ->

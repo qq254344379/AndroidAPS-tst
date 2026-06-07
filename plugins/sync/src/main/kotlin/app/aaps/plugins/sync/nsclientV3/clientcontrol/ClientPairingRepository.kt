@@ -94,7 +94,7 @@ class ClientPairingRepository @Inject constructor(
      * Each `null` path is logged separately so a backup-restore failure produces a diagnostic
      * instead of silent send drops.
      */
-    fun nextSignedEnvelope(type: String, payloadJson: String, timestamp: Long): SignedEnvelope? = synchronized(lock) {
+    fun nextSignedEnvelope(type: String, payloadJson: String, timestamp: Long, validUntil: Long = Long.MAX_VALUE, wantsAck: Boolean = false): SignedEnvelope? = synchronized(lock) {
         val pairing = currentPairing() ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: nextSignedEnvelope called while unpaired")
             return@synchronized null
@@ -121,8 +121,29 @@ class ClientPairingRepository @Inject constructor(
             timestamp = timestamp,
             type = type,
             payload = payloadJson,
-            signature = ""
+            signature = "",
+            validUntil = validUntil,
+            wantsAck = wantsAck
         )
         ClientControlCrypto.signEnvelope(secretBytes, draft)
+    }
+
+    /**
+     * Decrypted HMAC secret bytes for the current pairing, or null when not paired / the stored blob
+     * is corrupt / KeyStore was reset. Used by the round-trip coordinator to verify master ACKs are
+     * authentic. Logs each null path so a backup-restore failure is diagnosable rather than silent.
+     */
+    fun secretBytesOrNull(): ByteArray? = synchronized(lock) {
+        val pairing = currentPairing() ?: return@synchronized null
+        if (!secureEncrypt.isValidDataString(pairing.masterSecretEnc)) {
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: stored secret blob is corrupted (re-pair required)")
+            return@synchronized null
+        }
+        val secretHex = secureEncrypt.decrypt(pairing.masterSecretEnc)
+        if (secretHex.isEmpty()) {
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: secret decrypt failed (KeyStore reset?) — re-pair required")
+            return@synchronized null
+        }
+        runCatching { ClientControlCrypto.hexToBytes(secretHex) }.getOrNull()
     }
 }

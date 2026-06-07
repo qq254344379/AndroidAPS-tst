@@ -1,5 +1,6 @@
 package app.aaps.core.nssdk.utils
 
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto.timestampWithinSkew
 import java.security.MessageDigest
@@ -69,6 +70,16 @@ object ClientControlCrypto {
     fun verifyEnvelope(secret: ByteArray, env: SignedEnvelope): Boolean {
         val expected = sign(secret, env.canonicalString())
         return constantTimeEquals(expected, env.signature)
+    }
+
+    /** Master-side: sign a drafted [AckEnvelope] (signature field ignored on input). */
+    fun signAck(secret: ByteArray, draft: AckEnvelope): AckEnvelope =
+        draft.copy(signature = sign(secret, draft.canonicalString()))
+
+    /** Client-side: verify an [AckEnvelope] came from the paired master (same shared secret). */
+    fun verifyAck(secret: ByteArray, ack: AckEnvelope): Boolean {
+        val expected = sign(secret, ack.canonicalString())
+        return constantTimeEquals(expected, ack.signature)
     }
 
     /**

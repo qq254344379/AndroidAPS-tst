@@ -2,6 +2,7 @@ package app.aaps.plugins.sync.di
 
 import android.content.Context
 import androidx.work.WorkManager
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -18,6 +19,7 @@ import app.aaps.plugins.sync.garmin.LoopHubImpl
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.StoreDataForDbImpl
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientRepositoryImpl
 import app.aaps.plugins.sync.nsclientV3.data.NSSettingsStatusImpl
 import app.aaps.plugins.sync.nsclientV3.data.ProcessedDeviceStatusDataImpl
@@ -82,6 +84,8 @@ abstract class SyncModule {
 
         @Binds fun bindClientControlInsulinSender(publisher: ClientControlPublisher): ClientControlInsulinSender
         @Binds fun bindClientControlPreferencesSender(publisher: ClientControlPublisher): ClientControlPreferencesSender
+
+        @Binds fun bindClientControlActionDispatcher(roundTrip: ClientControlRoundTrip): ClientControlActionDispatcher
     }
 
 }

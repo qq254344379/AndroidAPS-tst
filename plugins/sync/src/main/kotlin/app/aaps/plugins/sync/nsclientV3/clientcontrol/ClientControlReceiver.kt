@@ -21,6 +21,10 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import app.aaps.core.keys.interfaces.SyncDirection
 import app.aaps.core.keys.interfaces.UnitDoublePreferenceKey
+import app.aaps.core.nssdk.interfaces.NSAndroidClient
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
+import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
@@ -103,6 +107,8 @@ class ClientControlReceiver @Inject constructor(
             // so verifyAndAck would log them as "malformed envelope, deleting" and wipe a still-
             // valid offer out from under the client mid-pairing.
             if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_OFFER_PREFIX)) continue
+            // Skip our own command ACKs (master-written, for clients). Same reason as offers.
+            if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX)) continue
             verifyAndAck(identifier, doc, now)
         }
     }
@@ -114,6 +120,8 @@ class ClientControlReceiver @Inject constructor(
     suspend fun onSettingsDocChanged(identifier: String, doc: JSONObject) {
         if (!identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX)) return
         if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_OFFER_PREFIX)) return
+        // Command ACKs are master-written, consumed by clients — never an inbound command here.
+        if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX)) return
         verifyAndAck(identifier, doc, dateUtil.now())
     }
 
@@ -161,24 +169,44 @@ class ClientControlReceiver @Inject constructor(
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: $identifier timestamp outside skew window")
             return
         }
+        // Hard expiry: a command that sat past its validity must NOT fire late (e.g. a profile switch
+        // requested 15 min ago and only now picked up). Consume the counter so it can't replay, and
+        // tell the client definitively rather than leaving it to time out.
+        if (now > envelope.validUntil) {
+            authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+            nsClientRepository.addLog("◄ CLIENTCTL", "expired ${envelope.type} from ${entry.name}")
+            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: $identifier expired (validUntil=${envelope.validUntil} < now=$now), not executing")
+            if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, AckStatus.Expired, "expired before master applied it", now)
+            return
+        }
         // Decode the payload into the sealed message family. A failure here means the verified
         // sender wrote a payload this master cannot interpret — older master vs newer client,
         // typically. Treat it the same as an unknown type: advance the counter so the next
-        // envelope can be processed, and delete the doc to avoid replay storms.
+        // envelope can be processed.
         val message = runCatching { json.decodeFromString(ClientControlMessage.serializer(), envelope.payload) }.getOrNull()
-        if (message == null) {
-            onVerifiedUndecodablePayload(entry, envelope, now)
-        } else {
-            when (message) {
-                is ClientControlMessage.Hello             -> onVerifiedHello(entry, envelope, now)
-                // Hello handling already includes the Pending → Active transition; offer doc
-                // cleanup is inside onVerifiedHello so it can suspend on deleteOffer.
-                is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
-                is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
-                is ClientControlMessage.InsulinActivate   -> onVerifiedInsulinActivate(entry, envelope, message, now)
-                is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
-            }
+        // Hello is the pairing handshake, not a user action — no ACK round-trip. Its handling
+        // includes the Pending → Active transition + offer-doc cleanup (suspends on deleteOffer).
+        if (message is ClientControlMessage.Hello) {
+            onVerifiedHello(entry, envelope, now)
+            return
         }
+        // Round-trip commands (wantsAck) get the two-step ACK: Executing before dispatch, then the
+        // result. Fire-and-forget commands (scenes, pref sync) skip it — no client is waiting, so the
+        // ACK doc would be pure write amplification.
+        if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Executing, AckStatus.Pending, null, now)
+        val outcome = when (message) {
+            null                                      -> {
+                onVerifiedUndecodablePayload(entry, envelope, now)
+                AckOutcome(AckStatus.Failed, "unsupported command type ${envelope.type}")
+            }
+
+            is ClientControlMessage.Hello             -> AckOutcome(AckStatus.Ok, null) // unreachable (handled above)
+            is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
+            is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
+            is ClientControlMessage.InsulinActivate   -> onVerifiedInsulinActivate(entry, envelope, message, now)
+            is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
+        }
+        if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, now)
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
         // legitimate same-type command from the same client would PUT to that identifier and
         // hit HTTP 410. Counter dedup (line above) prevents replay; the doc just lingers in
@@ -202,15 +230,16 @@ class ClientControlReceiver @Inject constructor(
         nsClientRepository.addLog("◄ CLIENTCTL", "hello accepted for ${entry.name} (${entry.clientId})")
     }
 
-    private suspend fun onVerifiedSceneStart(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStart, now: Long) {
+    private suspend fun onVerifiedSceneStart(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStart, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         val result = sceneAutomationApi.runScene(message.sceneId, message.durationMinutes)
         nsClientRepository.addLog("◄ CLIENTCTL", "scene.start sceneId=${message.sceneId} from ${entry.name}: ${result.tag()}")
         if (result !is SceneAutomationResult.Success)
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.start failed for ${entry.name} sceneId=${message.sceneId}: ${result.tag()}")
+        return if (result is SceneAutomationResult.Success) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, result.tag())
     }
 
-    private suspend fun onVerifiedSceneStop(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStop, now: Long) {
+    private suspend fun onVerifiedSceneStop(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStop, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         // triggerChain=true means "Skip to <ChainTarget>". Read the active scene's currently
         // configured chain target FRESH at receipt time (not from the wire) so a stale client
@@ -238,6 +267,7 @@ class ClientControlReceiver @Inject constructor(
         }
         if (isFailure)
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.stop failed for ${entry.name}: ${result.tag()}")
+        return if (isFailure) AckOutcome(AckStatus.Failed, result.tag()) else AckOutcome(AckStatus.Ok, null)
     }
 
     /**
@@ -246,7 +276,7 @@ class ClientControlReceiver @Inject constructor(
      * client's view may be stale), so only the iCfg travels; the resulting EPS syncs back normally.
      * No-op (logged) if the master has no active profile switch to re-apply.
      */
-    private suspend fun onVerifiedInsulinActivate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.InsulinActivate, now: Long) {
+    private suspend fun onVerifiedInsulinActivate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.InsulinActivate, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         val iCfg = runCatching {
             (Json.parseToJsonElement(message.iCfgJson) as? JsonObject)?.let { ICfg.fromJsonObject(it) }
@@ -254,13 +284,14 @@ class ClientControlReceiver @Inject constructor(
         if (iCfg == null) {
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: insulin.activate from ${entry.name} has invalid iCfg JSON, ignoring")
             nsClientRepository.addLog("◄ CLIENTCTL", "insulin.activate from ${entry.name}: invalid JSON")
-            return
+            return AckOutcome(AckStatus.Failed, "invalid insulin config")
         }
         val applied = profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)
         nsClientRepository.addLog(
             "◄ CLIENTCTL",
             "insulin.activate from ${entry.name}: " + if (applied) "applied ${iCfg.insulinLabel}" else "no active profile"
         )
+        return if (applied) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, "no active profile to re-apply")
     }
 
     /**
@@ -273,7 +304,7 @@ class ClientControlReceiver @Inject constructor(
      * Value parsing handles Boolean/String/Int/UnitDouble (see the `when` below); extend it per type
      * as new types are marked `Bidirectional`.
      */
-    private fun onVerifiedPreferencesUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.PreferencesUpdate, now: Long) {
+    private fun onVerifiedPreferencesUpdate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.PreferencesUpdate, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         val applied = mutableListOf<String>()
         message.prefs.forEach { (keyString, pushed) ->
@@ -335,6 +366,9 @@ class ClientControlReceiver @Inject constructor(
         }
         nsClientRepository.addLog("◄ CLIENTCTL", "preferences.update from ${entry.name}: " + if (applied.isEmpty()) "nothing applied" else "applied ${applied.joinToString()}")
         if (applied.isNotEmpty()) uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: ${applied.joinToString()}")
+        // Best-effort merge: per-key rejects (unknown/stale/bad-type) are logged but the batch as a
+        // whole is acknowledged Ok — the client's pref sync is fire-and-forget, not a single action.
+        return AckOutcome(AckStatus.Ok, null)
     }
 
     private fun SceneAutomationResult.tag(): String = when (this) {
@@ -348,11 +382,46 @@ class ClientControlReceiver @Inject constructor(
     }
 
     private fun onVerifiedUndecodablePayload(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long) {
-        // Advance counter + delete: the secret-holder sent this intentionally, this master just
-        // doesn't have a ClientControlMessage variant for type=${envelope.type}. Not advancing
-        // would let the same doc replay every WS update.
+        // Advance counter: the secret-holder sent this intentionally, this master just doesn't have a
+        // ClientControlMessage variant for type=${envelope.type}. Not advancing would let the same doc
+        // replay every WS update.
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         nsClientRepository.addLog("◄ CLIENTCTL", "type=${envelope.type} undecodable for ${entry.name}")
         aapsLogger.warn(LTag.NSCLIENT, "ClientControl: ${entry.clientId} verified envelope type=${envelope.type} has no decoder on this master, advancing counter and acking")
     }
+
+    /**
+     * Write a signed [AckEnvelope] to the per-client ACK identifier (overwritten in place). Signed
+     * with the same shared secret as the inbound command so the client can prove it came from us.
+     * Exception-safe: a failed ACK write must never abort command processing (the command already
+     * applied) — it just degrades the client to its timeout/sync-back fallback.
+     */
+    private suspend fun writeAck(
+        client: NSAndroidClient,
+        secret: ByteArray,
+        clientId: String,
+        commandCounter: Long,
+        phase: AckPhase,
+        status: AckStatus,
+        reason: String?,
+        now: Long
+    ) {
+        val ack = ClientControlCrypto.signAck(
+            secret,
+            AckEnvelope(clientId = clientId, commandCounter = commandCounter, phase = phase, status = status, reason = reason, timestamp = now, signature = "")
+        )
+        val identifier = ClientControlPublisher.IDENTIFIER_ACK_PREFIX + clientId
+        val doc = JSONObject().apply {
+            put("date", ClientControlPublisher.DOC_DATE)
+            put("utcOffset", 0)
+            put("app", "AAPS")
+            put("schemaVersion", ClientControlPublisher.SCHEMA_VERSION)
+            put("ack", JSONObject(json.encodeToString(AckEnvelope.serializer(), ack)))
+        }
+        runCatching { client.updateSettings(identifier, doc) }
+            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl: ack write failed for $identifier: ${it.message}") }
+    }
+
+    /** Result a command handler reports back so [verifyAndAck] can write the terminal Done ack. */
+    private data class AckOutcome(val status: AckStatus, val reason: String?)
 }

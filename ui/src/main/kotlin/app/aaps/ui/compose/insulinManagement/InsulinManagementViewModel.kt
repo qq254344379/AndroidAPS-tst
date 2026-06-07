@@ -8,11 +8,12 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.compensateForClockSkew
 import app.aaps.core.interfaces.db.observeChanges
-import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.insulin.ConcentrationType
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.insulin.InsulinType
@@ -22,7 +23,6 @@ import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowSnackbar
-import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.keys.BooleanKey
@@ -33,8 +33,8 @@ import app.aaps.core.objects.extensions.toJsonObject
 import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.ui.R
-import app.aaps.ui.compose.scenes.surfaceErrorDialog
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,8 +63,11 @@ class InsulinManagementViewModel @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val profileRepository: ProfileRepository,
     private val config: Config,
-    private val clientControlInsulinSender: ClientControlInsulinSender
+    private val clientControlDispatcher: ClientControlActionDispatcher
 ) : ViewModel() {
+
+    // Tracks the in-flight client→master activation round-trip so the "stop waiting" action can cancel it.
+    private var clientControlJob: Job? = null
 
     private val _uiState = MutableStateFlow(InsulinManagementUiState())
     val uiState: StateFlow<InsulinManagementUiState> = _uiState.asStateFlow()
@@ -482,29 +485,48 @@ class InsulinManagementViewModel @Inject constructor(
 
     fun executeActivation() {
         _uiState.update { it.copy(activationMessage = null) }
-        viewModelScope.launch {
-            val state = uiState.value
-            val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return@launch
-            if (config.AAPSCLIENT) {
-                // Follower: the master runs the loop and owns the active profile. Send only the iCfg as a
-                // signed Client-Control command; the master re-applies its OWN current profile with this
-                // insulin and the resulting profile switch syncs back to us. We do not switch locally.
-                //
-                // The send result only reports that the command was uploaded, not that the master applied
-                // it (the channel is one-way). Surface that explicitly: a confirmation snackbar on a
-                // successful upload so the closing dialog isn't misread as "done", and the error dialog
-                // for NotPaired/PublishFailed. The active-insulin chip updates once the master's resulting
-                // profile switch syncs back.
-                val result = clientControlInsulinSender.sendInsulinActivate(iCfg.toJsonObject().toString())
-                if (result == ClientControlSendResult.Success)
-                    showSnackbar(rh.gs(R.string.insulin_activation_requested), EventShowSnackbar.Type.Info)
-                else
-                    result.surfaceErrorDialog(rxBus, rh)
-            } else {
+        val state = uiState.value
+        val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return
+        if (config.AAPSCLIENT) {
+            // Follower: the master runs the loop and owns the active profile. Send only the iCfg as a
+            // signed Client-Control command; the master re-applies its OWN current profile with this
+            // insulin and the resulting profile switch syncs back to us. We do not switch locally.
+            //
+            // The round-trip dispatcher waits for the master's two-step ACK and surfaces it as
+            // ActionProgress, so the pending dialog can close like a local execution on confirmation
+            // (Applied), show the master's reason on Rejected, or warn on Unconfirmed (no ack in time —
+            // the active-insulin chip then updates whenever the master's profile switch syncs back).
+            clientControlJob?.cancel()
+            clientControlJob = viewModelScope.launch {
+                clientControlDispatcher.dispatch(ClientControlActionDispatcher.Command.InsulinActivate(iCfg.toJsonObject().toString()))
+                    .collect { progress ->
+                        if (progress is ActionProgress.Applied) {
+                            // Mirror local execution: dismiss the dialog and confirm. Chip follows on sync-back.
+                            _uiState.update { it.copy(clientControlProgress = null) }
+                            showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
+                            refreshData()
+                        } else {
+                            _uiState.update { it.copy(clientControlProgress = progress) }
+                        }
+                    }
+            }
+        } else {
+            viewModelScope.launch {
                 profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)
                 refreshData()
             }
         }
+    }
+
+    /**
+     * Dismiss the round-trip pending dialog. While still waiting (Sending/MasterExecuting) this is
+     * "stop waiting", NOT "cancel" — the command may already have been uploaded and could still apply;
+     * the active-insulin chip will reflect the real state when the master's profile switch syncs back.
+     */
+    fun dismissClientControlProgress() {
+        clientControlJob?.cancel()
+        clientControlJob = null
+        _uiState.update { it.copy(clientControlProgress = null) }
     }
 
     // Helpers
