@@ -4,18 +4,26 @@ import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
+import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.PROPAGATION_MARGIN_MS
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.ROUND_TRIP_TTL_MS
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -45,6 +53,7 @@ class ClientControlRoundTrip @Inject constructor(
     private val publisher: ClientControlPublisher,
     private val pairingRepository: ClientPairingRepository,
     private val nsClientV3Plugin: Provider<NSClientV3Plugin>,
+    private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
 ) : ClientControlActionDispatcher {
@@ -58,6 +67,9 @@ class ClientControlRoundTrip @Inject constructor(
         const val ROUND_TRIP_TTL_MS = 8_000L
         const val PROPAGATION_MARGIN_MS = 2_000L
         const val PING_TTL_MS = 10_000L
+
+        // Minimum time the preference-edit modal stays up, so a sub-second round trip doesn't just flash.
+        const val MIN_MODAL_VISIBLE_MS = 1_500L
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -91,6 +103,7 @@ class ClientControlRoundTrip @Inject constructor(
         // now — feed the liveness clock so masterReachable clears the offline banner without waiting
         // for the next devicestatus heartbeat.
         nsClientV3Plugin.get().bumpMasterSignal(dateUtil.now())
+        nsClientRepository.addLog("◄ CLIENTCTL", "ack ${ack.phase}/${ack.status} counter=${ack.commandCounter}" + (ack.reason?.let { " ($it)" } ?: ""))
         ackEvents.tryEmit(ack)
     }
 
@@ -102,6 +115,45 @@ class ClientControlRoundTrip @Inject constructor(
         publisher.publishTracked(ClientControlMessage.Ping, dateUtil.now() + PING_TTL_MS, wantsAck = true)
     }
 
+    // Ambient preference-edit round-trip progress (Phase 3.3). Drives an app-level modal hosted in
+    // ComposeMainActivity, since a synced-pref edit isn't tied to one screen's collect.
+    private val _preferenceEditProgress = MutableStateFlow<ActionProgress?>(null)
+    override val preferenceEditProgress: StateFlow<ActionProgress?> = _preferenceEditProgress.asStateFlow()
+
+    override fun dismissPreferenceEditProgress() {
+        _preferenceEditProgress.value = null
+    }
+
+    /**
+     * Run a synced-preference edit through the round-trip and surface progress on
+     * [preferenceEditProgress]. Optimistic: the value was already stored by `put`; the modal covers the
+     * control while we confirm, and the master's republish corrects it if LWW superseded the edit.
+     * On [ActionProgress.Applied] the modal is dismissed silently; terminal Rejected/Unconfirmed stay
+     * up until the user dismisses.
+     */
+    suspend fun runPreferenceEdit(prefs: Map<String, Pair<String, Long>>) {
+        val shownAt = dateUtil.now()
+        try {
+            dispatch(ClientControlActionDispatcher.Command.PreferenceEdit(prefs)).collect { p ->
+                if (p is ActionProgress.Applied) {
+                    // The round trip over a live WS can resolve in well under a second — hold the modal a
+                    // beat so it doesn't just flash, then dismiss.
+                    val visibleMs = dateUtil.now() - shownAt
+                    if (visibleMs < MIN_MODAL_VISIBLE_MS) delay(MIN_MODAL_VISIBLE_MS - visibleMs)
+                    _preferenceEditProgress.value = null
+                } else {
+                    _preferenceEditProgress.value = p
+                }
+            }
+        } finally {
+            // Cancelled mid-flight (e.g. plugin scope torn down) — don't leave a stuck spinner. Terminal
+            // states (Rejected/Unconfirmed) are kept for the user to dismiss; only clear a waiting state.
+            val current = _preferenceEditProgress.value
+            if (current is ActionProgress.Sending || current is ActionProgress.MasterExecuting)
+                _preferenceEditProgress.value = null
+        }
+    }
+
     override fun dispatch(command: ClientControlActionDispatcher.Command): Flow<ActionProgress> = channelFlow {
         if (!inFlight.compareAndSet(false, true)) {
             send(ActionProgress.Rejected("another request is already in progress"))
@@ -111,15 +163,25 @@ class ClientControlRoundTrip @Inject constructor(
             send(ActionProgress.Sending)
             val message = when (command) {
                 is ClientControlActionDispatcher.Command.InsulinActivate -> ClientControlMessage.InsulinActivate(command.iCfgJson)
+                is ClientControlActionDispatcher.Command.PreferenceEdit  ->
+                    ClientControlMessage.PreferencesUpdate(command.prefs.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) })
             }
             val validUntil = dateUtil.now() + ROUND_TRIP_TTL_MS
             val tracked = publisher.publishTracked(message, validUntil)
             val counter = when (val r = tracked.result) {
-                is ClientControlSendResult.NotPaired     -> { send(ActionProgress.Rejected("not paired with a master")); return@channelFlow }
-                is ClientControlSendResult.PublishFailed -> { send(ActionProgress.Rejected(r.reason ?: "upload failed")); return@channelFlow }
+                is ClientControlSendResult.NotPaired     -> {
+                    send(ActionProgress.Rejected("not paired with a master")); return@channelFlow
+                }
+
+                is ClientControlSendResult.PublishFailed -> {
+                    send(ActionProgress.Rejected(r.reason ?: "upload failed")); return@channelFlow
+                }
+
                 is ClientControlSendResult.Success       -> tracked.counter
             }
-            if (counter == null) { send(ActionProgress.Rejected("internal error: missing correlation id")); return@channelFlow }
+            if (counter == null) {
+                send(ActionProgress.Rejected("internal error: missing correlation id")); return@channelFlow
+            }
 
             val plugin = nsClientV3Plugin.get()
             val terminal = CompletableDeferred<ActionProgress>()

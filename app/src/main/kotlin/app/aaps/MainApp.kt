@@ -469,19 +469,22 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
         // 3.3
         if (preferences.get(UnitDoubleKey.OverviewLowMark) == 0.0) preferences.remove(UnitDoubleKey.OverviewLowMark)
         if (preferences.get(UnitDoubleKey.OverviewHighMark) == 0.0) preferences.remove(UnitDoubleKey.OverviewHighMark)
-        if (preferences.getIfExists(BooleanKey.GeneralSimpleMode) == null)
+        // These three migrate bidirectionally-synced keys. Skip on a client: it adopts the value from
+        // the master via sync, and a local put here would now trigger a client→master round-trip (modal)
+        // at startup. The master migrates and publishes; the client follows.
+        if (!config.AAPSCLIENT && preferences.getIfExists(BooleanKey.GeneralSimpleMode) == null)
             preferences.put(BooleanKey.GeneralSimpleMode, !preferences.get(BooleanNonKey.GeneralSetupWizardProcessed))
         // Migrate from OpenAPSSMBDynamicISFPlugin
         if (sp.getBoolean("ConfigBuilder_APS_OpenAPSSMBDynamicISFPlugin_Enabled", false)) {
             sp.remove("ConfigBuilder_APS_OpenAPSSMBDynamicISFPlugin_Enabled")
             sp.remove("ConfigBuilder_APS_OpenAPSSMBDynamicISFPlugin_Visible")
             sp.putBoolean("ConfigBuilder_APS_OpenAPSSMB_Enabled", true)
-            preferences.put(BooleanKey.ApsUseDynamicSensitivity, true)
+            if (!config.AAPSCLIENT) preferences.put(BooleanKey.ApsUseDynamicSensitivity, true)
         }
         // convert Double to Int
         try {
             val dynIsf = sp.getDouble("DynISFAdjust", 0.0)
-            if (dynIsf != 0.0 && dynIsf.toInt() != preferences.get(IntKey.ApsDynIsfAdjustmentFactor))
+            if (!config.AAPSCLIENT && dynIsf != 0.0 && dynIsf.toInt() != preferences.get(IntKey.ApsDynIsfAdjustmentFactor))
                 preferences.put(IntKey.ApsDynIsfAdjustmentFactor, dynIsf.toInt())
         } catch (_: Exception) { /* ignore */
         }
@@ -700,6 +703,11 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
         if (sp.getDouble("activity_target", 140.0) == 0.0) sp.remove("activity_target")
         if (sp.getInt("hypo_duration", 60) == 0) sp.remove("hypo_duration")
         if (sp.getDouble("hypo_target", 160.0) == 0.0) sp.remove("hypo_target")
+
+        // Seeds the bidirectionally-synced TempTargetPresets. Skip on a client: it adopts the presets
+        // from the master via sync, and a local put here would trigger a client→master round-trip
+        // (modal) at startup. The master seeds and publishes; the client follows.
+        if (config.AAPSCLIENT) return
 
         // Check if migration already completed
         val existing = preferences.get(StringNonKey.TempTargetPresets)

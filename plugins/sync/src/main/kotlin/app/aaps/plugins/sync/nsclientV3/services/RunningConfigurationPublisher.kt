@@ -8,6 +8,7 @@ import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventConfigBuilderChange
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.RunningConfiguration
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
@@ -20,7 +21,9 @@ import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher.C
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -64,13 +67,30 @@ class RunningConfigurationPublisher @Inject constructor(
 
     private var job: Job? = null
 
+    // Force a cold republish on demand. Used after the master applies an inbound client pref command so
+    // the client always gets the authoritative value back — even when LWW dropped the pushed value as a
+    // no-op (which wouldn't change a key and so wouldn't trigger the observeChange republish). Lets the
+    // client converge a superseded edit instead of being stuck on its optimistic value.
+    private val forceColdRepublish = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Master-side: republish the cold doc now (debounced with the other cold triggers). */
+    fun requestColdRepublish() {
+        forceColdRepublish.tryEmit(Unit)
+    }
+
     fun start(scope: CoroutineScope) {
         if (!config.APS) return
         if (job != null) return
         job = scope.launch {
-            // initial publish on plugin start so both docs are fresh
-            publishCold()
-            publishHot()
+            // Publish on connect, not blindly at plugin start (the NS connection may not be ready yet,
+            // so a start-time publish would just fail silently). When WS is used, the WS-connect collector
+            // below owns the initial publish (it fires on first connect, or immediately if already
+            // connected). In poll mode there is no WS connect event to hook, so fall back to a start-time
+            // publish there.
+            if (!preferences.get(BooleanKey.NsClient3UseWs)) {
+                publishCold()
+                publishHot()
+            }
 
             val switchTrigger: Flow<Unit> = rxBus.toFlow(EventConfigBuilderChange::class.java).map { }
             // Authorized-clients changes (pair / unpair / revoke / markActive) republish so paired
@@ -83,7 +103,7 @@ class RunningConfigurationPublisher @Inject constructor(
 
             // Cold doc: rarely-changing config. Longer debounce collapses bulk edits.
             launch {
-                (coldKeyTriggers + switchTrigger + authorizedClientsTrigger).merge()
+                (coldKeyTriggers + switchTrigger + authorizedClientsTrigger + forceColdRepublish).merge()
                     .debounce(COLD_DEBOUNCE_MS)
                     .collect { publishCold() }
             }
@@ -93,11 +113,11 @@ class RunningConfigurationPublisher @Inject constructor(
                     .debounce(HOT_DEBOUNCE_MS)
                     .collect { publishHot() }
             }
-            // Master WS (re)connect → re-publish both docs. Recovers a config edit made while NS was
-            // down (putSettings has no retry), recreates an auto-pruned doc, and covers an initial
-            // publish that failed before NS was ready. Debounced to swallow reconnect flapping.
-            // Republishing unchanged config is harmless: clients re-apply idempotently and per-key LWW
-            // no-ops (same SyncedPrefModified).
+            // Master WS connect → publish both docs. This is the INITIAL publish (fires on first
+            // connect, or immediately if already connected when started) AND the reconnect republish:
+            // recovers a config edit made while NS was down (putSettings has no retry) and recreates an
+            // auto-pruned doc. Debounced to swallow reconnect flapping. Republishing unchanged config is
+            // harmless: clients re-apply idempotently and per-key LWW no-ops (same SyncedPrefModified).
             launch {
                 nsClientV3Plugin.get().wsConnectedFlow
                     .filter { it }

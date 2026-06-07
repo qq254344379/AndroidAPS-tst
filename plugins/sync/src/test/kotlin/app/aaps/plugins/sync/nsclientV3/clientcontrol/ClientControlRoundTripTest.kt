@@ -3,6 +3,7 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argThat
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -43,6 +45,7 @@ internal class ClientControlRoundTripTest {
     @Mock private lateinit var pairingRepository: ClientPairingRepository
     @Mock private lateinit var nsClientV3Plugin: NSClientV3Plugin
     @Mock private lateinit var nsAndroidClient: NSAndroidClient
+    @Mock private lateinit var nsClientRepository: NSClientRepository
     @Mock private lateinit var dateUtil: DateUtil
     @Mock private lateinit var aapsLogger: AAPSLogger
 
@@ -66,7 +69,7 @@ internal class ClientControlRoundTripTest {
         whenever(pairingRepository.secretBytesOrNull()).thenReturn(secret)
         whenever(nsClientV3Plugin.masterReachable).thenReturn(reachable)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
-        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, dateUtil, aapsLogger)
+        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
     }
 
     private suspend fun stubPublish(result: ClientControlSendResult, ctr: Long? = counter) {
@@ -196,6 +199,33 @@ internal class ClientControlRoundTripTest {
     fun forgedAckDoesNotBumpMasterSignal() = runTest {
         sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok, signSecret = ByteArray(32) { 0x42 }))
         verify(nsClientV3Plugin, never()).bumpMasterSignal(any())
+    }
+
+    // ---- preference round-trip (3.3) ----
+
+    @Test
+    fun runPreferenceEditSendsPreferencesUpdateAndClearsProgressOnApplied() = runTest {
+        stubPublish(ClientControlSendResult.Success)
+        val job = launch { sut.runPreferenceEdit(mapOf("boluswizard_percentage" to ("80" to 100L))) }
+        runCurrent()
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok))
+        advanceUntilIdle() // lets the MIN_MODAL_VISIBLE_MS hold elapse before the auto-dismiss
+        job.join()
+        verify(publisher).publishTracked(argThat { this is ClientControlMessage.PreferencesUpdate }, any(), any())
+        assertThat(sut.preferenceEditProgress.value).isNull() // Applied → silent dismiss
+    }
+
+    @Test
+    fun runPreferenceEditRejectedKeepsProgressUntilDismiss() = runTest {
+        stubPublish(ClientControlSendResult.Success)
+        val job = launch { sut.runPreferenceEdit(mapOf("boluswizard_percentage" to ("80" to 100L))) }
+        runCurrent()
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Failed, reason = "nope"))
+        runCurrent()
+        job.join()
+        assertThat(sut.preferenceEditProgress.value).isInstanceOf(ActionProgress.Rejected::class.java)
+        sut.dismissPreferenceEditProgress()
+        assertThat(sut.preferenceEditProgress.value).isNull()
     }
 
     @Test

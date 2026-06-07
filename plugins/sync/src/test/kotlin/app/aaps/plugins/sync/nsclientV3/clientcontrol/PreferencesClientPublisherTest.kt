@@ -1,14 +1,16 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
-import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
-import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.LongComposedKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
+import app.aaps.core.keys.interfaces.IntNonPreferenceKey
 import app.aaps.core.keys.interfaces.NonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.StringNonPreferenceKey
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.advanceTimeBy
@@ -28,7 +30,7 @@ import org.mockito.kotlin.whenever
 class PreferencesClientPublisherTest {
 
     @Mock lateinit var preferences: Preferences
-    @Mock lateinit var sender: ClientControlPreferencesSender
+    @Mock lateinit var clientControlRoundTrip: ClientControlRoundTrip
     @Mock lateinit var config: Config
     @Mock lateinit var aapsLogger: AAPSLogger
 
@@ -42,32 +44,63 @@ class PreferencesClientPublisherTest {
         MockitoAnnotations.openMocks(this)
         whenever(config.AAPSCLIENT).thenReturn(true)
         whenever(preferences.syncedLocalChanges).thenReturn(changes)
-        // The publisher reads the value via the BooleanNonPreferenceKey overload (smart-cast), so stub that one.
         whenever(preferences.get(key as BooleanNonPreferenceKey)).thenReturn(true)
         whenever(preferences.get(LongComposedKey.SyncedPrefModified, key.key)).thenReturn(100L)
-        sut = PreferencesClientPublisher(preferences, sender, config, aapsLogger)
+        sut = PreferencesClientPublisher(preferences, clientControlRoundTrip, config, aapsLogger)
     }
 
     @Test
-    fun publishesLocalSyncedChangeAsValuePlusStamp() = runTest {
-        whenever(sender.sendPreferencesUpdate(any())).thenReturn(ClientControlSendResult.Success)
+    fun editRoutesToConfirmedRoundTrip() = runTest {
         sut.start(backgroundScope)
         runCurrent()
 
         changes.emit(key)
-        advanceTimeBy(2_100); runCurrent()
+        advanceTimeBy(600); runCurrent() // settle window
 
-        verify(sender).sendPreferencesUpdate(eq(mapOf(key.key to ("true" to 100L))))
+        verify(clientControlRoundTrip).runPreferenceEdit(eq(mapOf(key.key to ("true" to 100L))))
     }
 
     @Test
-    fun doesNotPublishOnMaster() = runTest {
+    fun batchesKeysChangedWithinSettleWindowIntoOneRoundTrip() = runTest {
+        val pct = IntKey.OverviewBolusPercentage
+        whenever(preferences.get(pct as IntNonPreferenceKey)).thenReturn(80)
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, pct.key)).thenReturn(200L)
+        sut.start(backgroundScope)
+        runCurrent()
+
+        changes.emit(key)
+        changes.emit(pct)
+        runCurrent()                     // both accumulate in pending
+        advanceTimeBy(600); runCurrent() // single settle → single round-trip
+
+        verify(clientControlRoundTrip).runPreferenceEdit(
+            eq(mapOf(key.key to ("true" to 100L), pct.key to ("80" to 200L)))
+        )
+    }
+
+    @Test
+    fun definitionBlobRoundTrips() = runTest {
+        val qw = StringNonKey.QuickWizard
+        val blob = """[{"buttonText":"Meal"}]"""
+        whenever(preferences.get(qw as StringNonPreferenceKey)).thenReturn(blob)
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, qw.key)).thenReturn(300L)
+        sut.start(backgroundScope)
+        runCurrent()
+
+        changes.emit(qw)
+        advanceTimeBy(600); runCurrent()
+
+        verify(clientControlRoundTrip).runPreferenceEdit(eq(mapOf(qw.key to (blob to 300L))))
+    }
+
+    @Test
+    fun doesNotRunOnMaster() = runTest {
         whenever(config.AAPSCLIENT).thenReturn(false)
         sut.start(backgroundScope)
 
         changes.emit(key)
-        advanceTimeBy(2_100); runCurrent()
+        advanceTimeBy(600); runCurrent()
 
-        verify(sender, never()).sendPreferencesUpdate(any())
+        verify(clientControlRoundTrip, never()).runPreferenceEdit(any())
     }
 }

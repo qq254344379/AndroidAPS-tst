@@ -70,6 +70,8 @@ import app.aaps.compose.navigation.AppRoute
 import app.aaps.compose.navigation.appNavGraph
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.configuration.InitProgress
@@ -135,6 +137,7 @@ import app.aaps.plugins.configuration.setupwizard.SWDefinition
 import app.aaps.plugins.source.DexcomPlugin
 import app.aaps.plugins.source.activities.RequestDexcomPermissionActivity
 import app.aaps.ui.compose.careDialog.CareportalEventType
+import app.aaps.ui.compose.clientcontrol.ClientControlPendingDialog
 import app.aaps.ui.compose.configuration.ConfigurationViewModel
 import app.aaps.ui.compose.fillDialog.FillPreselect
 import app.aaps.ui.compose.insulinManagement.InsulinManagementViewModel
@@ -187,6 +190,7 @@ class ComposeMainActivity : AppCompatActivity() {
     @Inject lateinit var cryptoUtil: CryptoUtil
     @Inject lateinit var activePlugin: ActivePlugin
     @Inject lateinit var nsClient: NsClient
+    @Inject lateinit var clientControlActionDispatcher: ClientControlActionDispatcher
     @Inject lateinit var automationRuntime: AutomationRuntime
     @Inject lateinit var configBuilder: ConfigBuilder
     @Inject lateinit var swDefinition: SWDefinition
@@ -350,6 +354,19 @@ class ComposeMainActivity : AppCompatActivity() {
                         // Root-level dialog host — subscribes to EventShowDialog and
                         // renders one modal dialog at a time.
                         GlobalDialogHost(rxBus = rxBus)
+
+                        // App-level pending modal for a confirmed synced-preference round-trip
+                        // (Phase 3.3). A pref edit can originate from any settings screen, so the
+                        // modal is hosted here rather than per-screen. Applied is cleared in the
+                        // coordinator (silent dismiss); Rejected/Unconfirmed stay until dismissed.
+                        val prefEditProgress by clientControlActionDispatcher.preferenceEditProgress.collectAsStateWithLifecycle()
+                        prefEditProgress?.let { progress ->
+                            if (progress !is ActionProgress.Applied)
+                                ClientControlPendingDialog(
+                                    progress = progress,
+                                    onDismiss = { clientControlActionDispatcher.dismissPreferenceEditProgress() }
+                                )
+                        }
                     }
                 }
             }

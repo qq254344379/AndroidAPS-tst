@@ -19,12 +19,14 @@ import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -94,6 +96,7 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
     @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
+    @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
     private var masterAuthorizedClients = "[]"
     private var masterModified = 0L
     private var masterAppliedValue: String? = null
@@ -134,6 +137,10 @@ class ClientControlUplinkIntegrationTest {
 
         // ---------- NS bridge: capture what the client publishes ----------
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
+        // Pref edits now ride the confirmed round-trip; dispatch reads masterReachable. No ack is
+        // bridged back here, so the round-trip just times out to Unconfirmed — the command doc is still
+        // captured + delivered to the master, which is what this uplink test asserts.
+        whenever(nsClientV3Plugin.masterReachable).thenReturn(MutableStateFlow(true))
         whenever(nsAndroidClient.updateSettings(any<String>(), any<JSONObject>())).thenAnswer {
             val id = it.getArgument<String>(0)
             // The master now writes two-step ACK docs through this same NS bridge; ignore them here so
@@ -148,12 +155,13 @@ class ClientControlUplinkIntegrationTest {
         // ---------- real components ----------
         clientPairingRepository = ClientPairingRepository(clientPrefs, secureEncrypt, aapsLogger)
         clientControlPublisher = ClientControlPublisher(clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
-        preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlPublisher, clientConfig, aapsLogger)
+        val clientControlRoundTrip = ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
+        preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, aapsLogger)
 
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            activeSceneSync, profileFunction, offerPublisher, masterPrefs, dateUtil, uel, aapsLogger
+            activeSceneSync, profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, aapsLogger
         )
 
         // ---------- pairing: same secret on both sides ----------

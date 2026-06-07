@@ -1,10 +1,8 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
-import app.aaps.core.interfaces.configuration.ClientControlPreferencesSender
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
-import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.DoubleNonPreferenceKey
@@ -23,33 +21,38 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Generic client-side publisher for bidirectionally-synced **plain preference** edits — the
- * registry-driven analogue of the per-domain `*DefinitionsClientPublisher`s. On an AAPSCLIENT device
- * it collects [Preferences.syncedLocalChanges] (emitted only on LOCAL writes to `Bidirectional`
- * keys), debounces, batches the changed keys with their current value + modified stamp, and pushes
- * them to the master via [ClientControlPreferencesSender]. The master applies per-key
- * last-writer-wins and republishes via the running-config doc.
+ * Generic client-side publisher for bidirectionally-synced preference edits (plain values AND the
+ * definition blobs — QuickWizard/Scenes/Insulin/etc. — which persist as synced string prefs). On an
+ * AAPSCLIENT device it collects [Preferences.syncedLocalChanges] (emitted only on LOCAL `put`s to
+ * `Bidirectional` keys), batches the changed keys over a short settle window, and pushes them to the
+ * master through the **confirmed round-trip** ([ClientControlRoundTrip.runPreferenceEdit]) — which
+ * shows a pending modal and resolves on the master's ACK. The master applies per-key last-writer-wins
+ * and republishes via the running-config doc.
  *
- * No version-gate is needed here: applied-from-sync writes go through `Preferences.putRemote` and
- * are never emitted on [Preferences.syncedLocalChanges], so the apply→observe→publish echo can't
- * form — origin is known at the write, not inferred.
+ * Why batched + sequential: one round-trip at a time (the collector suspends inside `runPreferenceEdit`
+ * until the modal resolves), so edits made meanwhile accumulate in [pending] and ship in the next
+ * round-trip. That sidesteps the single-in-flight contention and the shared `preferences_update`
+ * identifier — there is never more than one pref round-trip outstanding. The settle window also lets a
+ * slider drag finish before the modal appears.
  *
- * Adding a new bidirectional setting requires no change here — it just shows up as another key on
- * the flow. (Value (de)serialization is currently Boolean-only; extend [serialize] per type as the
- * first non-Boolean bidirectional key lands.)
+ * No echo: applied-from-sync writes go through `Preferences.putRemote`, never emitted on
+ * [Preferences.syncedLocalChanges]. Only genuine user edits reach here (programmatic synced-key writes
+ * on a client were eliminated — see MainApp migrations — so the modal only ever shows for real edits).
+ *
+ * Adding a new bidirectional setting requires no change here — it just shows up as another key.
  */
 @OptIn(FlowPreview::class)
 @Singleton
 class PreferencesClientPublisher @Inject constructor(
     private val preferences: Preferences,
-    private val clientControlPreferencesSender: ClientControlPreferencesSender,
+    private val clientControlRoundTrip: ClientControlRoundTrip,
     private val config: Config,
     private val aapsLogger: AAPSLogger
 ) {
 
     private var job: Job? = null
 
-    // Keys changed since the last successful send, drained on each debounced trigger.
+    // Keys changed since the last round-trip, drained on each debounced trigger.
     private val pending = mutableSetOf<NonPreferenceKey>()
 
     fun start(scope: CoroutineScope) {
@@ -58,16 +61,15 @@ class PreferencesClientPublisher @Inject constructor(
         job = scope.launch {
             preferences.syncedLocalChanges
                 .onEach { key -> synchronized(pending) { pending.add(key) } }
-                .debounce(DEBOUNCE_MS)
+                .debounce(SETTLE_MS)
                 .collect {
                     val batch = synchronized(pending) { pending.toList().also { pending.clear() } }
                     val changes = batch.mapNotNull { key -> serialize(key)?.let { key.key to it } }.toMap()
                     if (changes.isEmpty()) return@collect
-                    val result = clientControlPreferencesSender.sendPreferencesUpdate(changes)
-                    if (result != ClientControlSendResult.Success)
-                    // Re-queue on failure so the next local edit (or retry) picks them up again.
-                        synchronized(pending) { pending.addAll(batch) }
-                    aapsLogger.debug(LTag.NSCLIENT, "ClientControl: preferences.update keys=${changes.keys} result=$result")
+                    aapsLogger.debug(LTag.NSCLIENT, "ClientControl: preferences.update round-trip keys=${changes.keys}")
+                    // Suspends until the round-trip resolves (modal dismissed); further edits queue in
+                    // `pending` and ship in the next iteration — never two concurrent pref round-trips.
+                    clientControlRoundTrip.runPreferenceEdit(changes)
                 }
         }
     }
@@ -96,6 +98,8 @@ class PreferencesClientPublisher @Inject constructor(
 
     private companion object {
 
-        private const val DEBOUNCE_MS = 2_000L
+        // Settle window before a round-trip fires: collapses a slider drag / a burst of edits into one
+        // batched, confirmed round-trip (one modal), short enough to still feel responsive.
+        private const val SETTLE_MS = 500L
     }
 }

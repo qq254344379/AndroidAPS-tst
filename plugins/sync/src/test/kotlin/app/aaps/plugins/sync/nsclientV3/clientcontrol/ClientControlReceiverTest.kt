@@ -31,6 +31,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -62,6 +63,7 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
     @Mock private lateinit var uel: UserEntryLogger
+    @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
 
     // Same deterministic fake as the repository tests — encrypt/decrypt round-trip via reverse,
     // so the persisted form does not contain the original plaintext.
@@ -117,6 +119,7 @@ internal class ClientControlReceiverTest {
             preferences,
             dateUtil,
             uel,
+            runningConfigurationPublisher,
             aapsLogger
         )
     }
@@ -704,6 +707,20 @@ internal class ClientControlReceiverTest {
         sendPreferencesUpdate(clientId, secret, mapOf(concentrationKey to PrefEntry("true", 2_000L)))
 
         verify(preferences).putRemote(BooleanKey.GeneralInsulinConcentration, true, 2_000L)
+    }
+
+    @Test
+    fun preferencesUpdateAlwaysForcesColdRepublishEvenWhenLwwDrops() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(preferences.get(concentrationKey)).thenReturn(BooleanKey.GeneralInsulinConcentration)
+        // Stored stamp newer than the push → LWW drops it (a no-op apply).
+        whenever(preferences.get(LongComposedKey.SyncedPrefModified, concentrationKey)).thenReturn(5_000L)
+
+        sendPreferencesUpdate(clientId, secret, mapOf(concentrationKey to PrefEntry("true", 1_000L)))
+
+        // The client must still get the authoritative value back so it can converge off its optimistic edit.
+        verify(runningConfigurationPublisher).requestColdRepublish()
     }
 
     @Test

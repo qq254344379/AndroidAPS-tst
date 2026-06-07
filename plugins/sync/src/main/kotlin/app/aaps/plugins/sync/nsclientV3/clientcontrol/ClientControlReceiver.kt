@@ -32,6 +32,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.json.JSONObject
@@ -82,6 +83,7 @@ class ClientControlReceiver @Inject constructor(
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
     private val uel: UserEntryLogger,
+    private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val aapsLogger: AAPSLogger
 ) {
 
@@ -374,8 +376,13 @@ class ClientControlReceiver @Inject constructor(
         }
         nsClientRepository.addLog("◄ CLIENTCTL", "preferences.update from ${entry.name}: " + if (applied.isEmpty()) "nothing applied" else "applied ${applied.joinToString()}")
         if (applied.isNotEmpty()) uel.log(Action.REMOTE_CONFIG_CHANGED, Sources.NSClient, note = "${entry.name}: ${applied.joinToString()}")
+        // Always republish the cold doc so the client converges to the master's authoritative values —
+        // including keys LWW-dropped here as a no-op (those don't change a value, so they wouldn't
+        // trigger the observeChange-driven republish on their own). Without this a client that loses LWW
+        // on a concurrent edit would stay stuck on its optimistic value.
+        runningConfigurationPublisher.requestColdRepublish()
         // Best-effort merge: per-key rejects (unknown/stale/bad-type) are logged but the batch as a
-        // whole is acknowledged Ok — the client's pref sync is fire-and-forget, not a single action.
+        // whole is acknowledged Ok.
         return AckOutcome(AckStatus.Ok, null)
     }
 
@@ -427,6 +434,7 @@ class ClientControlReceiver @Inject constructor(
             put("ack", JSONObject(json.encodeToString(AckEnvelope.serializer(), ack)))
         }
         runCatching { client.updateSettings(identifier, doc) }
+            .onSuccess { nsClientRepository.addLog("► CLIENTCTL", "ack $phase/$status counter=$commandCounter" + (reason?.let { " ($it)" } ?: "")) }
             .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl: ack write failed for $identifier: ${it.message}") }
     }
 
