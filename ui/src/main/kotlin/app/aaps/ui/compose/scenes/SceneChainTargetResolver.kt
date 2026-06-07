@@ -5,6 +5,7 @@ import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.scenes.SceneChainResolver
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,7 +35,7 @@ class SceneChainTargetResolver @Inject constructor(
     private val activePlugin: ActivePlugin,
     private val profileFunction: ProfileFunction,
     private val sceneRepository: SceneRepository
-) {
+) : SceneChainResolver {
 
     /** True iff the master's runtime state currently allows activating any scene. Suspend
      *  because the underlying loop / profile lookups suspend. */
@@ -48,7 +49,7 @@ class SceneChainTargetResolver @Inject constructor(
      * the master to decide whether to offer "Skip to X" in its own End Scene dialog and as
      * the TOCTOU re-check at command receipt time.
      */
-    suspend fun resolveRunnableChainTarget(activeScene: Scene): Scene? {
+    override suspend fun resolveRunnableChainTarget(activeScene: Scene): Scene? {
         val chain = activeScene.endAction as? SceneEndAction.ChainScene ?: return null
         val target = sceneRepository.getScene(chain.sceneId) ?: return null
         if (!target.isEnabled) return null
@@ -71,7 +72,7 @@ class SceneChainTargetResolver @Inject constructor(
      * outcome in the NS log and a plain stop, identical to what they'd see if they triggered it
      * locally on master while the loop was suspended.
      */
-    fun resolveCatalogChainTarget(activeScene: Scene): Scene? {
+    override fun resolveCatalogChainTarget(activeScene: Scene): Scene? {
         val chain = activeScene.endAction as? SceneEndAction.ChainScene ?: return null
         val target = sceneRepository.getScene(chain.sceneId) ?: return null
         if (!target.isEnabled) return null

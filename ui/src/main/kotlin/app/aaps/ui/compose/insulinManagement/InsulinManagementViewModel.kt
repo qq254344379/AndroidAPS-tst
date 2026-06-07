@@ -496,19 +496,16 @@ class InsulinManagementViewModel @Inject constructor(
             // ActionProgress, so the pending dialog can close like a local execution on confirmation
             // (Applied), show the master's reason on Rejected, or warn on Unconfirmed (no ack in time —
             // the active-insulin chip then updates whenever the master's profile switch syncs back).
+            // The single app-level modal is driven by the dispatcher's run(); we only handle the
+            // feature-specific follow-up here. Applied → confirm + refresh (chip follows on sync-back);
+            // Rejected/Unconfirmed are surfaced by the central modal.
             clientControlJob?.cancel()
             clientControlJob = viewModelScope.launch {
-                clientControlDispatcher.dispatch(ClientControlActionDispatcher.Command.InsulinActivate(iCfg.toJsonObject().toString()))
-                    .collect { progress ->
-                        if (progress is ActionProgress.Applied) {
-                            // Mirror local execution: dismiss the dialog and confirm. Chip follows on sync-back.
-                            _uiState.update { it.copy(clientControlProgress = null) }
-                            showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
-                            refreshData()
-                        } else {
-                            _uiState.update { it.copy(clientControlProgress = progress) }
-                        }
-                    }
+                val result = clientControlDispatcher.run(ClientControlActionDispatcher.Command.InsulinActivate(iCfg.toJsonObject().toString()))
+                if (result is ActionProgress.Applied) {
+                    showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
+                    refreshData()
+                }
             }
         } else {
             viewModelScope.launch {
@@ -516,17 +513,6 @@ class InsulinManagementViewModel @Inject constructor(
                 refreshData()
             }
         }
-    }
-
-    /**
-     * Dismiss the round-trip pending dialog. While still waiting (Sending/MasterExecuting) this is
-     * "stop waiting", NOT "cancel" — the command may already have been uploaded and could still apply;
-     * the active-insulin chip will reflect the real state when the master's profile switch syncs back.
-     */
-    fun dismissClientControlProgress() {
-        clientControlJob?.cancel()
-        clientControlJob = null
-        _uiState.update { it.copy(clientControlProgress = null) }
     }
 
     // Helpers

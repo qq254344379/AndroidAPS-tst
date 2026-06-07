@@ -4,7 +4,10 @@ import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.overview.graph.GraphConfigRepository
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
+import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
+import app.aaps.core.interfaces.scenes.SceneChainResolver
+import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.interfaces.widget.WidgetUpdater
 import app.aaps.core.interfaces.workflow.CalculationSignals
@@ -13,7 +16,9 @@ import app.aaps.ui.activities.ErrorActivity
 import app.aaps.ui.compose.overview.OverviewDataCacheFactory
 import app.aaps.ui.compose.overview.graphs.GraphConfigRepositoryImpl
 import app.aaps.ui.compose.scenes.ActiveSceneManager
+import app.aaps.ui.compose.scenes.SceneActionsImpl
 import app.aaps.ui.compose.scenes.SceneAutomationApiImpl
+import app.aaps.ui.compose.scenes.SceneChainTargetResolver
 import app.aaps.ui.compose.scenes.SceneRepository
 
 import app.aaps.ui.search.BuiltInSearchables
@@ -49,7 +54,13 @@ abstract class UiModule {
 
         @Binds fun bindSceneAutomationApi(impl: SceneAutomationApiImpl): SceneAutomationApi
 
+        @Binds fun bindSceneActions(impl: SceneActionsImpl): SceneActions
+
         @Binds fun bindScenes(impl: SceneRepository): Scenes
+
+        @Binds fun bindSceneStore(impl: SceneRepository): SceneStore
+
+        @Binds fun bindSceneChainResolver(impl: SceneChainTargetResolver): SceneChainResolver
 
         @Binds fun bindActiveSceneSync(impl: ActiveSceneManager): ActiveSceneSync
 

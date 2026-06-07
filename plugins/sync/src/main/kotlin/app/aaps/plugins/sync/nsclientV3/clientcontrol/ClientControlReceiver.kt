@@ -1,7 +1,6 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.ICfg
-import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -9,7 +8,6 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
-import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
@@ -77,7 +75,6 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientV3Plugin: Provider<NSClientV3Plugin>,
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
-    private val activeSceneSync: ActiveSceneSync,
     private val profileFunction: ProfileFunction,
     private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
@@ -251,23 +248,13 @@ class ClientControlReceiver @Inject constructor(
 
     private suspend fun onVerifiedSceneStop(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStop, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        // triggerChain=true means "Skip to <ChainTarget>". Read the active scene's currently
-        // configured chain target FRESH at receipt time (not from the wire) so a stale client
-        // view can't trigger an unintended scene.
-        val chainTargetId = if (message.triggerChain) {
-            val activeId = activeSceneSync.activeSceneSnapshot()?.sceneId
-            val activeScene = activeId?.let { sceneAutomationApi.getScene(it) }
-            (activeScene?.endAction as? SceneEndAction.ChainScene)?.sceneId
-        } else null
-        val result = if (chainTargetId != null) sceneAutomationApi.stopActiveSceneAndStartScene(chainTargetId)
+        // triggerChain=true means "Skip to <ChainTarget>": stopActiveSceneAndChain resolves the active
+        // scene's currently-configured chain target FRESH at receipt time (not from the wire) so a stale
+        // client view can't trigger an unintended scene, and posts the chain notification — identical to
+        // a master-local "Skip to" from the End-Scene dialog.
+        val result = if (message.triggerChain) sceneAutomationApi.stopActiveSceneAndChain()
         else sceneAutomationApi.stopActiveScene()
-        // Outcome distinguishes the three branches so an operator reading the NS log can tell
-        // chain-fired apart from chain-requested-but-no-target apart from plain-stop.
-        val outcome = when {
-            chainTargetId != null -> "chain→$chainTargetId"
-            message.triggerChain  -> "no-chain-target"
-            else                  -> "plain-stop"
-        }
+        val outcome = if (message.triggerChain) "chain" else "plain-stop"
         nsClientRepository.addLog("◄ CLIENTCTL", "scene.stop $outcome from ${entry.name}: ${result.tag()}")
         // ChainCompleted with failedCount==0 is a fully successful chain — not a failure to warn about.
         val isFailure = when (result) {

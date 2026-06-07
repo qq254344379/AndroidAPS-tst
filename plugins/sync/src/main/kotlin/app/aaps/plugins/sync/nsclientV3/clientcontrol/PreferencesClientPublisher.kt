@@ -1,5 +1,6 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -25,11 +26,11 @@ import javax.inject.Singleton
  * definition blobs — QuickWizard/Scenes/Insulin/etc. — which persist as synced string prefs). On an
  * AAPSCLIENT device it collects [Preferences.syncedLocalChanges] (emitted only on LOCAL `put`s to
  * `Bidirectional` keys), batches the changed keys over a short settle window, and pushes them to the
- * master through the **confirmed round-trip** ([ClientControlRoundTrip.runPreferenceEdit]) — which
+ * master through the **confirmed round-trip** ([ClientControlRoundTrip.run]) — which
  * shows a pending modal and resolves on the master's ACK. The master applies per-key last-writer-wins
  * and republishes via the running-config doc.
  *
- * Why batched + sequential: one round-trip at a time (the collector suspends inside `runPreferenceEdit`
+ * Why batched + sequential: one round-trip at a time (the collector suspends inside `ClientControlRoundTrip.run`
  * until the modal resolves), so edits made meanwhile accumulate in [pending] and ship in the next
  * round-trip. That sidesteps the single-in-flight contention and the shared `preferences_update`
  * identifier — there is never more than one pref round-trip outstanding. The settle window also lets a
@@ -67,9 +68,9 @@ class PreferencesClientPublisher @Inject constructor(
                     val changes = batch.mapNotNull { key -> serialize(key)?.let { key.key to it } }.toMap()
                     if (changes.isEmpty()) return@collect
                     aapsLogger.debug(LTag.NSCLIENT, "ClientControl: preferences.update round-trip keys=${changes.keys}")
-                    // Suspends until the round-trip resolves (modal dismissed); further edits queue in
-                    // `pending` and ship in the next iteration — never two concurrent pref round-trips.
-                    clientControlRoundTrip.runPreferenceEdit(changes)
+                    // Suspends until the round-trip resolves (drives the single app-level modal); further
+                    // edits queue in `pending` and ship next — never two concurrent pref round-trips.
+                    clientControlRoundTrip.run(ClientControlActionDispatcher.Command.PreferenceEdit(changes))
                 }
         }
     }

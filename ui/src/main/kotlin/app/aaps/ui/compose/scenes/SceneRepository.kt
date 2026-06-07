@@ -1,6 +1,7 @@
 package app.aaps.ui.compose.scenes
 
 import app.aaps.core.data.model.Scene
+import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -17,24 +18,24 @@ import javax.inject.Singleton
 @Singleton
 class SceneRepository @Inject constructor(
     private val preferences: Preferences
-) : Scenes {
+) : Scenes, SceneStore {
 
     /** Observable raw flow of the scene-definitions pref. */
-    val scenesFlow: StateFlow<String> = preferences.observe(StringNonKey.SceneDefinitions)
+    override val scenesFlow: StateFlow<String> = preferences.observe(StringNonKey.SceneDefinitions)
 
     /** All scenes. */
-    fun getScenes(): List<Scene> = preferences.get(StringNonKey.SceneDefinitions).toScenes()
+    override fun getScenes(): List<Scene> = preferences.get(StringNonKey.SceneDefinitions).toScenes()
 
     /** Get a scene by ID. */
-    fun getScene(id: String): Scene? = getScenes().find { it.id == id }
+    override fun getScene(id: String): Scene? = getScenes().find { it.id == id }
 
     /** Save the full list of scenes. */
-    fun saveScenes(scenes: List<Scene>) {
+    override fun saveScenes(scenes: List<Scene>) {
         preferences.put(StringNonKey.SceneDefinitions, scenes.toJson())
     }
 
     /** Add or update a scene (upsert by id). */
-    fun saveScene(scene: Scene) {
+    override fun saveScene(scene: Scene) {
         val scenes = getScenes().toMutableList()
         val index = scenes.indexOfFirst { it.id == scene.id }
         if (index >= 0) scenes[index] = scene else scenes.add(scene)
@@ -42,7 +43,7 @@ class SceneRepository @Inject constructor(
     }
 
     /** Remove a scene by id. */
-    fun deleteScene(id: String) {
+    override fun deleteScene(id: String) {
         val scenes = getScenes().toMutableList()
         if (scenes.removeAll { it.id == id }) saveScenes(scenes)
     }

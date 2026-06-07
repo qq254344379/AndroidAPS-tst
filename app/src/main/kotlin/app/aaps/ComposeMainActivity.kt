@@ -355,16 +355,16 @@ class ComposeMainActivity : AppCompatActivity() {
                         // renders one modal dialog at a time.
                         GlobalDialogHost(rxBus = rxBus)
 
-                        // App-level pending modal for a confirmed synced-preference round-trip
-                        // (Phase 3.3). A pref edit can originate from any settings screen, so the
-                        // modal is hosted here rather than per-screen. Applied is cleared in the
-                        // coordinator (silent dismiss); Rejected/Unconfirmed stay until dismissed.
-                        val prefEditProgress by clientControlActionDispatcher.preferenceEditProgress.collectAsStateWithLifecycle()
-                        prefEditProgress?.let { progress ->
+                        // The single app-level pending modal for ANY client-control round-trip
+                        // (insulin / scenes / synced-preference edits). Hosted once here, feature-
+                        // independent; round-trips are single-in-flight so at most one shows. Applied is
+                        // cleared by the dispatcher (silent); Rejected/Unconfirmed stay until dismissed.
+                        val actionProgress by clientControlActionDispatcher.actionProgress.collectAsStateWithLifecycle()
+                        actionProgress?.let { progress ->
                             if (progress !is ActionProgress.Applied)
                                 ClientControlPendingDialog(
                                     progress = progress,
-                                    onDismiss = { clientControlActionDispatcher.dismissPreferenceEditProgress() }
+                                    onDismiss = { clientControlActionDispatcher.dismissActionProgress() }
                                 )
                         }
                     }

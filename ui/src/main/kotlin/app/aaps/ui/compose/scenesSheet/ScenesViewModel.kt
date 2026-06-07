@@ -19,7 +19,7 @@ import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.ui.compose.scenes.SceneExecutor
-import app.aaps.ui.compose.scenes.SceneRepository
+import app.aaps.core.interfaces.scenes.SceneStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -69,7 +69,7 @@ class ScenesViewModel @Inject constructor(
     private val profileFunction: ProfileFunction,
     private val config: Config,
     private val rxBus: RxBus,
-    private val sceneRepository: SceneRepository,
+    private val sceneRepository: SceneStore,
     private val sceneExecutor: SceneExecutor,
     private val rh: ResourceHelper,
     private val nsClient: NsClient

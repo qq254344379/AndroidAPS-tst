@@ -161,7 +161,7 @@ class ClientControlUplinkIntegrationTest {
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            activeSceneSync, profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, aapsLogger
+            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, aapsLogger
         )
 
         // ---------- pairing: same secret on both sides ----------

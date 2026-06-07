@@ -22,8 +22,6 @@ import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
-import app.aaps.core.interfaces.notifications.NotificationId
-import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.overview.graph.ProfileDisplayData
 import app.aaps.core.interfaces.overview.graph.RunningModeDisplayData
@@ -45,9 +43,9 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
-import app.aaps.core.interfaces.scenes.ClientControlSceneSender
-import app.aaps.core.interfaces.scenes.SceneAutomationApi
-import app.aaps.core.interfaces.scenes.SceneAutomationResult
+import app.aaps.core.interfaces.scenes.SceneActions
+import app.aaps.core.interfaces.scenes.SceneChainResolver
+import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.ui.IconsProvider
 import app.aaps.core.interfaces.ui.UiInteraction
@@ -69,10 +67,6 @@ import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
 import app.aaps.ui.compose.scenes.ActiveSceneManager
-import app.aaps.ui.compose.scenes.SceneChainTargetResolver
-import app.aaps.ui.compose.scenes.SceneExecutor
-import app.aaps.ui.compose.scenes.SceneRepository
-import app.aaps.ui.compose.scenes.surfaceErrorDialog
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -119,16 +113,13 @@ class MainViewModel @Inject constructor(
     private val uel: UserEntryLogger,
     private val loop: Loop,
     private val protectionCheck: ProtectionCheck,
-    private val sceneRepository: SceneRepository,
-    private val sceneExecutor: SceneExecutor,
-    private val sceneChainTargetResolver: SceneChainTargetResolver,
+    private val sceneRepository: SceneStore,
+    private val sceneActions: SceneActions,
+    private val sceneChainTargetResolver: SceneChainResolver,
     private val activeSceneManager: ActiveSceneManager,
-    private val sceneAutomationApi: SceneAutomationApi,
     private val rxBus: RxBus,
     private val runningModeGuard: RunningModeGuard,
-    private val notificationManager: NotificationManager,
-    private val nsClient: NsClient,
-    private val clientControlSceneSender: ClientControlSceneSender
+    private val nsClient: NsClient
 ) : ViewModel() {
 
     // Event-driven state (drawer, dialogs, simple-mode preference). Imperative .update{} calls
@@ -717,14 +708,9 @@ class MainViewModel @Inject constructor(
      *
      *  On master: dismiss locally as before. */
     fun dismissExpiredScene() {
-        if (config.AAPSCLIENT) {
-            viewModelScope.launch {
-                clientControlSceneSender.sendSceneStop(triggerChain = false)
-                    .surfaceErrorDialog(rxBus, rh)
-            }
-        } else {
-            sceneExecutor.dismiss()
-        }
+        // stop(false) maps to "dismiss expired banner" on the master (stopActiveScene dismisses when
+        // the scene is expired) and to scene.stop on a client — one path for both.
+        viewModelScope.launch { sceneActions.stop(triggerChain = false) }
     }
 
     /** Format milliseconds to a localized "time remaining" string (e.g., "1h 30m remaining"). */
@@ -846,67 +832,18 @@ class MainViewModel @Inject constructor(
                 )
             }
 
-            is ConfirmableAction.ActivateScene            -> {
-                if (config.AAPSCLIENT) {
-                    // AAPSClient: publish scene.start to the paired master. The catalogue is in
-                    // sceneRepository (synced via Phase 2a) so the id is meaningful on master.
-                    clientControlSceneSender.sendSceneStart(action.sceneId, action.durationMinutes)
-                        .surfaceErrorDialog(rxBus, rh)
-                } else {
-                    val scene = sceneRepository.getScene(action.sceneId) ?: return@launch
-                    sceneExecutor.activate(scene, action.durationMinutes)
-                }
-            }
+            is ConfirmableAction.ActivateScene            ->
+                // One path for both roles. Master honours the passed duration; client round-trips.
+                sceneActions.start(action.sceneId, action.durationMinutes)
 
-            is ConfirmableAction.DeactivateScene          -> {
-                if (config.AAPSCLIENT) clientControlSceneSender.sendSceneStop(triggerChain = false)
-                    .surfaceErrorDialog(rxBus, rh)
-                else sceneExecutor.deactivate()
-            }
+            is ConfirmableAction.DeactivateScene          ->
+                sceneActions.stop(triggerChain = false)
 
-            is ConfirmableAction.DeactivateAndChainScene  -> {
-                if (config.AAPSCLIENT) {
-                    // AAPSClient: master will derive the chain target from its current active
-                    // scene state at receipt time, so we don't pass action.targetSceneId over
-                    // the wire — see ClientControlMessage.SceneStop KDoc.
-                    clientControlSceneSender.sendSceneStop(triggerChain = true)
-                        .surfaceErrorDialog(rxBus, rh)
-                    return@launch
-                }
-                // Delegate the canChain + execute sequence to SceneAutomationApiImpl — single
-                // canonical implementation shared with the client-control scene.stop(triggerChain)
-                // path. The ChainCompleted variant carries enough detail (ended/target names + per-
-                // action counts) to post the SCENE_CHAINED success or SCENE_CHAIN_ERROR partial-fail
-                // notification without re-implementing the activation logic here.
-                when (val result = sceneAutomationApi.stopActiveSceneAndStartScene(action.targetSceneId)) {
-                    is SceneAutomationResult.ChainCompleted -> {
-                        if (result.failedCount == 0 && result.endedSceneName != null) {
-                            notificationManager.post(
-                                id = NotificationId.SCENE_CHAINED,
-                                text = rh.gs(app.aaps.core.ui.R.string.scene_chained_format, result.endedSceneName, result.targetSceneName)
-                            )
-                        } else if (result.failedCount > 0) {
-                            notificationManager.post(
-                                id = NotificationId.SCENE_CHAIN_ERROR,
-                                text = rh.gs(
-                                    app.aaps.core.ui.R.string.scene_chain_error_summary,
-                                    result.endedSceneName ?: "",
-                                    result.targetSceneName,
-                                    result.failedCount,
-                                    result.totalCount
-                                )
-                            )
-                        }
-                    }
-                    // Target gone / disabled / preconditions failed: chain silently dropped, matching
-                    // the prior inline behavior (the user committed to ending the scene; the chain
-                    // was best-effort). Failed(deactivate-error) also stays silent here for parity.
-                    SceneAutomationResult.SceneNotFound,
-                    SceneAutomationResult.SceneDisabled,
-                    is SceneAutomationResult.Failed,
-                    SceneAutomationResult.Success           -> Unit
-                }
-            }
+            is ConfirmableAction.DeactivateAndChainScene  ->
+                // The master derives the chain target from its active scene's endAction and posts the
+                // SCENE_CHAINED / SCENE_CHAIN_ERROR notification itself (in SceneAutomationApiImpl.
+                // stopActiveSceneAndChain), so this is identical for UI- and client-triggered chains.
+                sceneActions.stop(triggerChain = true)
         }
     }
 

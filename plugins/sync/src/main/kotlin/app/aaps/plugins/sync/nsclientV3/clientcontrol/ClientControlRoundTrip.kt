@@ -17,7 +17,9 @@ import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.PROPAGATION_MARGIN_MS
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.ROUND_TRIP_TTL_MS
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -67,9 +69,6 @@ class ClientControlRoundTrip @Inject constructor(
         const val ROUND_TRIP_TTL_MS = 8_000L
         const val PROPAGATION_MARGIN_MS = 2_000L
         const val PING_TTL_MS = 10_000L
-
-        // Minimum time the preference-edit modal stays up, so a sub-second round trip doesn't just flash.
-        const val MIN_MODAL_VISIBLE_MS = 1_500L
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -115,43 +114,52 @@ class ClientControlRoundTrip @Inject constructor(
         publisher.publishTracked(ClientControlMessage.Ping, dateUtil.now() + PING_TTL_MS, wantsAck = true)
     }
 
-    // Ambient preference-edit round-trip progress (Phase 3.3). Drives an app-level modal hosted in
-    // ComposeMainActivity, since a synced-pref edit isn't tied to one screen's collect.
-    private val _preferenceEditProgress = MutableStateFlow<ActionProgress?>(null)
-    override val preferenceEditProgress: StateFlow<ActionProgress?> = _preferenceEditProgress.asStateFlow()
+    // The single app-level pending-modal signal, fed by every run() regardless of feature. Hosted once
+    // in ComposeMainActivity; round-trips are single-in-flight so there's at most one modal at a time.
+    private val _actionProgress = MutableStateFlow<ActionProgress?>(null)
+    override val actionProgress: StateFlow<ActionProgress?> = _actionProgress.asStateFlow()
 
-    override fun dismissPreferenceEditProgress() {
-        _preferenceEditProgress.value = null
+    // The currently running run()'s job, so dismissActionProgress() can "stop waiting" on it.
+    @Volatile private var currentRun: Job? = null
+
+    override fun dismissActionProgress() {
+        _actionProgress.value = null
+        currentRun?.cancel()
     }
 
     /**
-     * Run a synced-preference edit through the round-trip and surface progress on
-     * [preferenceEditProgress]. Optimistic: the value was already stored by `put`; the modal covers the
-     * control while we confirm, and the master's republish corrects it if LWW superseded the edit.
-     * On [ActionProgress.Applied] the modal is dismissed silently; terminal Rejected/Unconfirmed stay
-     * up until the user dismisses.
+     * Run [command], driving the single app-level modal ([actionProgress]) for the whole round-trip and
+     * returning the terminal [ActionProgress] for the caller's feature-specific follow-up. Optimistic
+     * for prefs/insulin: the value/effect is already applied locally; the modal just confirms. On
+     * [ActionProgress.Applied] the modal is held a beat (so it doesn't flash) then cleared; terminal
+     * Rejected/Unconfirmed stay up until dismissed. A dismiss ("stop waiting") cancels this run.
      */
-    suspend fun runPreferenceEdit(prefs: Map<String, Pair<String, Long>>) {
+    override suspend fun run(command: ClientControlActionDispatcher.Command): ActionProgress {
         val shownAt = dateUtil.now()
+        var terminal: ActionProgress = ActionProgress.Unconfirmed("no confirmation from master")
         try {
-            dispatch(ClientControlActionDispatcher.Command.PreferenceEdit(prefs)).collect { p ->
-                if (p is ActionProgress.Applied) {
-                    // The round trip over a live WS can resolve in well under a second — hold the modal a
-                    // beat so it doesn't just flash, then dismiss.
-                    val visibleMs = dateUtil.now() - shownAt
-                    if (visibleMs < MIN_MODAL_VISIBLE_MS) delay(MIN_MODAL_VISIBLE_MS - visibleMs)
-                    _preferenceEditProgress.value = null
-                } else {
-                    _preferenceEditProgress.value = p
+            coroutineScope {
+                currentRun = coroutineContext[Job]
+                dispatch(command).collect { p ->
+                    terminal = p
+                    // Applied is cleared after the loop (with the min-visible hold); show the rest live.
+                    if (p !is ActionProgress.Applied) _actionProgress.value = p
                 }
             }
+            if (terminal is ActionProgress.Applied) {
+                val visibleMs = dateUtil.now() - shownAt
+                if (visibleMs < ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS)
+                    delay(ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS - visibleMs)
+                _actionProgress.value = null
+            }
         } finally {
-            // Cancelled mid-flight (e.g. plugin scope torn down) — don't leave a stuck spinner. Terminal
-            // states (Rejected/Unconfirmed) are kept for the user to dismiss; only clear a waiting state.
-            val current = _preferenceEditProgress.value
+            currentRun = null
+            // Cancelled mid-wait (dismiss / scope teardown) — don't leave a stuck spinner.
+            val current = _actionProgress.value
             if (current is ActionProgress.Sending || current is ActionProgress.MasterExecuting)
-                _preferenceEditProgress.value = null
+                _actionProgress.value = null
         }
+        return terminal
     }
 
     override fun dispatch(command: ClientControlActionDispatcher.Command): Flow<ActionProgress> = channelFlow {
@@ -165,6 +173,8 @@ class ClientControlRoundTrip @Inject constructor(
                 is ClientControlActionDispatcher.Command.InsulinActivate -> ClientControlMessage.InsulinActivate(command.iCfgJson)
                 is ClientControlActionDispatcher.Command.PreferenceEdit  ->
                     ClientControlMessage.PreferencesUpdate(command.prefs.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) })
+                is ClientControlActionDispatcher.Command.SceneStart      -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
+                is ClientControlActionDispatcher.Command.SceneStop       -> ClientControlMessage.SceneStop(command.triggerChain)
             }
             val validUntil = dateUtil.now() + ROUND_TRIP_TTL_MS
             val tracked = publisher.publishTracked(message, validUntil)

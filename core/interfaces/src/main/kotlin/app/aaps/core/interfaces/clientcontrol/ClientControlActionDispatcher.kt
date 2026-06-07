@@ -16,24 +16,30 @@ import kotlinx.coroutines.flow.StateFlow
 interface ClientControlActionDispatcher {
 
     /**
-     * Send [command] to the master and emit progress until a terminal [ActionProgress]
-     * ([ActionProgress.Applied] / [ActionProgress.Rejected] / [ActionProgress.Unconfirmed]).
-     *
-     * [command] is the same JSON shape carried by the corresponding `ClientControlMessage` variant.
-     * Phase 1 supports only [Command.InsulinActivate].
+     * Low-level: send [command] and emit progress until a terminal [ActionProgress]
+     * ([ActionProgress.Applied] / [ActionProgress.Rejected] / [ActionProgress.Unconfirmed]). Most
+     * callers should use [run] instead — it also drives the single app-level modal ([actionProgress]).
      */
     fun dispatch(command: Command): Flow<ActionProgress>
 
     /**
-     * Ambient progress for a "settings edit" round-trip that isn't tied to a single screen's collect
-     * (a synced-preference edit can originate from any settings screen). Non-null while an app-level
-     * pending modal should show; cleared on success or via [dismissPreferenceEditProgress]. Phase-3.3
-     * spike. Default empty for impls without the channel.
+     * Run [command] and drive the **single, app-level** pending modal ([actionProgress]) for its whole
+     * lifecycle, returning the terminal [ActionProgress] for the caller's feature-specific follow-up
+     * (e.g. a snackbar / data refresh on [ActionProgress.Applied]). The modal is hosted once (in the
+     * activity) and is feature-independent — callers don't render it themselves. Round-trips are
+     * single-in-flight, so there's at most one modal at a time.
      */
-    val preferenceEditProgress: StateFlow<ActionProgress?> get() = NO_PREFERENCE_EDIT
+    suspend fun run(command: Command): ActionProgress
 
-    /** Dismiss the ambient preference-edit modal (terminal Rejected/Unconfirmed states). */
-    fun dismissPreferenceEditProgress() {}
+    /**
+     * The single client-control pending-modal signal, fed by every [run] regardless of which feature
+     * triggered it. Non-null while the modal should show; cleared on success / dismiss. Hosted once at
+     * the app root. Default empty for impls without the channel.
+     */
+    val actionProgress: StateFlow<ActionProgress?> get() = NO_ACTION_PROGRESS
+
+    /** Dismiss the modal (terminal Rejected/Unconfirmed) or stop waiting on an in-flight [run]. */
+    fun dismissActionProgress() {}
 
     /** The closed set of actions dispatchable through the round-trip channel. */
     sealed interface Command {
@@ -46,12 +52,22 @@ interface ClientControlActionDispatcher {
          * The master applies LWW and republishes; the ACK resolves the round-trip.
          */
         data class PreferenceEdit(val prefs: Map<String, Pair<String, Long>>) : Command
+
+        /** Activate the scene [sceneId] on the master (null duration → the scene's stored default). */
+        data class SceneStart(val sceneId: String, val durationMinutes: Int?) : Command
+
+        /** Deactivate the master's active scene; [triggerChain] = also fire its configured chain target. */
+        data class SceneStop(val triggerChain: Boolean) : Command
     }
 
-    private companion object {
+    companion object {
 
-        // Shared empty flow for the default [preferenceEditProgress] (impls without the channel) —
+        /** Minimum time a round-trip pending modal stays up, so a sub-second round trip doesn't flash.
+         *  Shared by every modal driven off this dispatcher (pref edits and the insulin activation). */
+        const val MIN_MODAL_VISIBLE_MS = 1_500L
+
+        // Shared empty flow for the default [actionProgress] (impls without the channel) —
         // a single instance, so the default getter doesn't allocate per call.
-        private val NO_PREFERENCE_EDIT: StateFlow<ActionProgress?> = MutableStateFlow(null)
+        private val NO_ACTION_PROGRESS: StateFlow<ActionProgress?> = MutableStateFlow(null)
     }
 }

@@ -13,7 +13,7 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.ui.compose.pluginCategoryTitleRes
-import app.aaps.ui.compose.scenes.SceneRepository
+import app.aaps.core.interfaces.scenes.SceneStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,7 +48,7 @@ class QuickLaunchConfigViewModel @Inject constructor(
     private val automation: Automation,
     private val activePlugin: ActivePlugin,
     private val profileRepository: ProfileRepository,
-    private val sceneRepository: SceneRepository,
+    private val sceneRepository: SceneStore,
     private val resolver: QuickLaunchResolver
 ) : ViewModel() {
 

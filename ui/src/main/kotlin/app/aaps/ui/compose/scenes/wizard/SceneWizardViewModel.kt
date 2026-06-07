@@ -19,7 +19,7 @@ import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.profileNames
-import app.aaps.ui.compose.scenes.SceneRepository
+import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.ui.compose.scenes.SceneTemplate
 import app.aaps.ui.compose.scenes.toScenes
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,7 +37,7 @@ import javax.inject.Inject
 @Stable
 class SceneWizardViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val sceneRepository: SceneRepository,
+    private val sceneRepository: SceneStore,
     private val profileRepository: ProfileRepository,
     private val profileUtil: ProfileUtil,
     private val preferences: Preferences,

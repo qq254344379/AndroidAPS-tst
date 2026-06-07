@@ -18,8 +18,9 @@ import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
-import app.aaps.core.interfaces.scenes.ClientControlSceneSender
-import app.aaps.core.interfaces.scenes.SceneAutomationApi
+import app.aaps.core.interfaces.scenes.SceneActions
+import app.aaps.core.interfaces.scenes.SceneChainResolver
+import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Translator
@@ -42,7 +43,7 @@ import javax.inject.Inject
 @HiltViewModel
 @Stable
 class SceneListViewModel @Inject constructor(
-    private val sceneRepository: SceneRepository,
+    private val sceneRepository: SceneStore,
     private val activeSceneManager: ActiveSceneManager,
     private val sceneExecutor: SceneExecutor,
     private val persistenceLayer: PersistenceLayer,
@@ -53,9 +54,8 @@ class SceneListViewModel @Inject constructor(
     private val dateUtil: DateUtil,
     private val translator: Translator,
     private val config: Config,
-    private val clientControlSceneSender: ClientControlSceneSender,
-    private val sceneChainTargetResolver: SceneChainTargetResolver,
-    private val sceneAutomationApi: SceneAutomationApi,
+    private val sceneActions: SceneActions,
+    private val sceneChainTargetResolver: SceneChainResolver,
     private val nsClient: NsClient
 ) : ViewModel() {
 
@@ -213,17 +213,9 @@ class SceneListViewModel @Inject constructor(
     fun confirmActivation() {
         val state = _dialogState.value as? DialogState.ConfirmActivation ?: return
         _dialogState.value = null
-        viewModelScope.launch {
-            if (config.AAPSCLIENT) {
-                // AAPSClient: publish scene.start to the paired master. Pass null durationMinutes
-                // so the master honours the scene's stored default — keeps wire format minimal
-                // and prevents drift between client and master scene definitions.
-                clientControlSceneSender.sendSceneStart(state.scene.id, durationMinutes = null)
-                    .surfaceErrorDialog(rxBus, rh)
-            } else {
-                sceneExecutor.activate(state.scene)
-            }
-        }
+        // One call for both roles: master executes locally, client round-trips (driving the app-level
+        // modal). Null duration → the master honours the scene's stored default.
+        viewModelScope.launch { sceneActions.start(state.scene.id) }
     }
 
     fun requestDeactivation() {
@@ -247,23 +239,16 @@ class SceneListViewModel @Inject constructor(
 
     fun confirmDeactivation() {
         _dialogState.value = null
-        viewModelScope.launch {
-            if (config.AAPSCLIENT) clientControlSceneSender.sendSceneStop(triggerChain = false)
-                .surfaceErrorDialog(rxBus, rh)
-            else sceneExecutor.deactivate()
-        }
+        viewModelScope.launch { sceneActions.stop(triggerChain = false) }
     }
 
-    /** Secondary action on the 3-button dialog: end current scene and immediately fire the chain target. */
+    /** Secondary action on the 3-button dialog: end current scene and immediately fire the chain target.
+     *  The master derives the chain target from the active scene's endAction, so no id crosses the wire. */
     fun confirmDeactivationAndChain() {
         val state = _dialogState.value as? DialogState.ConfirmDeactivation ?: return
-        val targetId = state.chainTargetId ?: return
+        state.chainTargetId ?: return // only offered when a chain target exists
         _dialogState.value = null
-        viewModelScope.launch {
-            if (config.AAPSCLIENT) clientControlSceneSender.sendSceneStop(triggerChain = true)
-                .surfaceErrorDialog(rxBus, rh)
-            else sceneAutomationApi.stopActiveSceneAndStartScene(targetId)
-        }
+        viewModelScope.launch { sceneActions.stop(triggerChain = true) }
     }
 
     fun dismissDialog() {

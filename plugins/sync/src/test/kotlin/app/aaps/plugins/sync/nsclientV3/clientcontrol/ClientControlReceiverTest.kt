@@ -58,7 +58,6 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var nsClientV3Plugin: NSClientV3Plugin
     @Mock private lateinit var nsAndroidClient: NSAndroidClient
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
-    @Mock private lateinit var activeSceneSync: ActiveSceneSync
     @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var dateUtil: DateUtil
@@ -113,7 +112,6 @@ internal class ClientControlReceiverTest {
             Provider { nsClientV3Plugin },
             nsClientRepository,
             sceneAutomationApi,
-            activeSceneSync,
             profileFunction,
             offerPublisher,
             preferences,
@@ -398,49 +396,36 @@ internal class ClientControlReceiverTest {
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(false), counter = 5L)))
 
         verify(sceneAutomationApi).stopActiveScene()
-        verify(sceneAutomationApi, never()).stopActiveSceneAndStartScene(any())
+        verify(sceneAutomationApi, never()).stopActiveSceneAndChain()
         verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test
-    fun sceneStopWithChainResolvesActiveSceneAndDispatchesAndChain() = runTest {
+    fun sceneStopWithChainDispatchesToStopActiveSceneAndChain() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
-        // Simulate master state: active scene "sleep", chained to "wakeup"
-        whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
-            ActiveSceneSnapshot(sceneId = "sleep", activatedAt = now - 60_000L, durationMs = 3_600_000L)
-        )
-        whenever(sceneAutomationApi.getScene("sleep")).thenReturn(
-            Scene(id = "sleep", name = "Sleep", endAction = SceneEndAction.ChainScene("wakeup"))
-        )
-        whenever(sceneAutomationApi.stopActiveSceneAndStartScene("wakeup")).thenReturn(SceneAutomationResult.Success)
+        // The receiver delegates chain-target resolution + notification to the API; it just requests
+        // stop+chain. (The resolution/fallback detail is covered by the SceneAutomationApiImpl tests.)
+        whenever(sceneAutomationApi.stopActiveSceneAndChain()).thenReturn(SceneAutomationResult.Success)
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
 
-        verify(sceneAutomationApi).stopActiveSceneAndStartScene("wakeup")
+        verify(sceneAutomationApi).stopActiveSceneAndChain()
         verify(sceneAutomationApi, never()).stopActiveScene()
         verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     /**
      * ChainCompleted with failedCount==0 is a fully successful chain — receiver must NOT log a warn,
-     * even though the result type isn't [SceneAutomationResult.Success]. Locks in the isFailure
-     * classification added when ChainCompleted was introduced.
+     * even though the result type isn't [SceneAutomationResult.Success].
      */
     @Test
-    fun sceneStopWithChainCompletedSuccessfullyDoesNotWarn() = runTest {
+    fun sceneStopChainCompletedSuccessfullyDoesNotWarn() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
-        whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
-            ActiveSceneSnapshot(sceneId = "sleep", activatedAt = now - 60_000L, durationMs = 3_600_000L)
-        )
-        whenever(sceneAutomationApi.getScene("sleep")).thenReturn(
-            Scene(id = "sleep", name = "Sleep", endAction = SceneEndAction.ChainScene("wakeup"))
-        )
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
-        whenever(sceneAutomationApi.stopActiveSceneAndStartScene("wakeup")).thenReturn(
+        whenever(sceneAutomationApi.stopActiveSceneAndChain()).thenReturn(
             SceneAutomationResult.ChainCompleted(endedSceneName = "Sleep", targetSceneName = "Wakeup", failedCount = 0, totalCount = 3)
         )
 
@@ -454,61 +439,17 @@ internal class ClientControlReceiverTest {
      * Receiver must log a warn so operators reading the NS log see partial failures.
      */
     @Test
-    fun sceneStopWithChainPartialFailureWarns() = runTest {
+    fun sceneStopChainPartialFailureWarns() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
-        whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
-            ActiveSceneSnapshot(sceneId = "sleep", activatedAt = now - 60_000L, durationMs = 3_600_000L)
-        )
-        whenever(sceneAutomationApi.getScene("sleep")).thenReturn(
-            Scene(id = "sleep", name = "Sleep", endAction = SceneEndAction.ChainScene("wakeup"))
-        )
-        whenever(nsAndroidClient.deleteSettings(identifier)).thenReturn(deleteOk)
-        whenever(sceneAutomationApi.stopActiveSceneAndStartScene("wakeup")).thenReturn(
+        whenever(sceneAutomationApi.stopActiveSceneAndChain()).thenReturn(
             SceneAutomationResult.ChainCompleted(endedSceneName = "Sleep", targetSceneName = "Wakeup", failedCount = 2, totalCount = 3)
         )
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
 
         verify(aapsLogger).warn(eq(LTag.NSCLIENT), argThat<String> { contains("scene.stop failed") && contains("chain-partial") })
-    }
-
-    @Test
-    fun sceneStopWithChainFallsBackToPlainStopWhenActiveSceneHasNoChainTarget() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
-        whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(
-            ActiveSceneSnapshot(sceneId = "exercise", activatedAt = now - 60_000L, durationMs = 3_600_000L)
-        )
-        whenever(sceneAutomationApi.getScene("exercise")).thenReturn(
-            Scene(id = "exercise", name = "Exercise", endAction = SceneEndAction.Notification)
-        )
-        whenever(sceneAutomationApi.stopActiveScene()).thenReturn(SceneAutomationResult.Success)
-
-        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
-
-        verify(sceneAutomationApi).stopActiveScene()
-        verify(sceneAutomationApi, never()).stopActiveSceneAndStartScene(any())
-        verify(nsAndroidClient, never()).deleteSettings(identifier)
-    }
-
-    @Test
-    fun sceneStopWithChainFallsBackToPlainStopWhenNoActiveSceneAtAll() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_stop_$clientId"
-        // No active scene on master at receipt time — short-circuits before getScene lookup.
-        whenever(activeSceneSync.activeSceneSnapshot()).thenReturn(null)
-        whenever(sceneAutomationApi.stopActiveScene()).thenReturn(SceneAutomationResult.Success)
-
-        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
-
-        verify(sceneAutomationApi).stopActiveScene()
-        verify(sceneAutomationApi, never()).stopActiveSceneAndStartScene(any())
-        verify(sceneAutomationApi, never()).getScene(any())
-        verify(nsAndroidClient, never()).deleteSettings(identifier)
     }
 
     @Test

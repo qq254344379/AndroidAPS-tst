@@ -143,10 +143,11 @@ use
 show
 `MasterOfflineBanner` when the master is unreachable, so nothing reachable saves while offline.
 
-**Still deferred:** per-key applied/superseded ACK (so the modal can say "overridden" vs "applied"
-on
-LWW loss — only meaningful now that always-republish landed); insulin (Phase-1) modal min-visible
-parity.
+**Done since:** insulin (Phase-1) modal min-visible parity — both modals now share
+`ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS` (1.5 s).
+
+**Still deferred:** per-key applied/superseded ACK (so the modal can say "overridden" vs "applied" on
+LWW loss — only meaningful now that always-republish landed).
 
 History — the incremental spike was: ONE key (`OverviewBolusPercentage`) → chosen over pessimistic
 for the

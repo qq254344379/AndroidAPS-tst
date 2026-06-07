@@ -1,5 +1,6 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.keys.BooleanKey
@@ -57,7 +58,7 @@ class PreferencesClientPublisherTest {
         changes.emit(key)
         advanceTimeBy(600); runCurrent() // settle window
 
-        verify(clientControlRoundTrip).runPreferenceEdit(eq(mapOf(key.key to ("true" to 100L))))
+        verify(clientControlRoundTrip).run(eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(key.key to ("true" to 100L)))))
     }
 
     @Test
@@ -73,8 +74,8 @@ class PreferencesClientPublisherTest {
         runCurrent()                     // both accumulate in pending
         advanceTimeBy(600); runCurrent() // single settle → single round-trip
 
-        verify(clientControlRoundTrip).runPreferenceEdit(
-            eq(mapOf(key.key to ("true" to 100L), pct.key to ("80" to 200L)))
+        verify(clientControlRoundTrip).run(
+            eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(key.key to ("true" to 100L), pct.key to ("80" to 200L))))
         )
     }
 
@@ -90,7 +91,7 @@ class PreferencesClientPublisherTest {
         changes.emit(qw)
         advanceTimeBy(600); runCurrent()
 
-        verify(clientControlRoundTrip).runPreferenceEdit(eq(mapOf(qw.key to (blob to 300L))))
+        verify(clientControlRoundTrip).run(eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(qw.key to (blob to 300L)))))
     }
 
     @Test
@@ -101,6 +102,6 @@ class PreferencesClientPublisherTest {
         changes.emit(key)
         advanceTimeBy(600); runCurrent()
 
-        verify(clientControlRoundTrip, never()).runPreferenceEdit(any())
+        verify(clientControlRoundTrip, never()).run(any())
     }
 }

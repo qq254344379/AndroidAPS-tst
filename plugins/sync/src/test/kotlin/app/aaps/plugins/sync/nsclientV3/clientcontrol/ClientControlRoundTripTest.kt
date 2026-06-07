@@ -201,31 +201,56 @@ internal class ClientControlRoundTripTest {
         verify(nsClientV3Plugin, never()).bumpMasterSignal(any())
     }
 
-    // ---- preference round-trip (3.3) ----
+    // ---- run() drives the single app-level modal (actionProgress) ----
 
     @Test
-    fun runPreferenceEditSendsPreferencesUpdateAndClearsProgressOnApplied() = runTest {
+    fun runSendsCommandAndClearsModalOnApplied() = runTest {
         stubPublish(ClientControlSendResult.Success)
-        val job = launch { sut.runPreferenceEdit(mapOf("boluswizard_percentage" to ("80" to 100L))) }
+        val cmdPref = ClientControlActionDispatcher.Command.PreferenceEdit(mapOf("boluswizard_percentage" to ("80" to 100L)))
+        val job = launch { sut.run(cmdPref) }
         runCurrent()
         sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok))
         advanceUntilIdle() // lets the MIN_MODAL_VISIBLE_MS hold elapse before the auto-dismiss
         job.join()
         verify(publisher).publishTracked(argThat { this is ClientControlMessage.PreferencesUpdate }, any(), any())
-        assertThat(sut.preferenceEditProgress.value).isNull() // Applied → silent dismiss
+        assertThat(sut.actionProgress.value).isNull() // Applied → silent dismiss
     }
 
     @Test
-    fun runPreferenceEditRejectedKeepsProgressUntilDismiss() = runTest {
+    fun runReturnsAppliedTerminal() = runTest {
         stubPublish(ClientControlSendResult.Success)
-        val job = launch { sut.runPreferenceEdit(mapOf("boluswizard_percentage" to ("80" to 100L))) }
+        var terminal: ActionProgress? = null
+        val job = launch { terminal = sut.run(cmd) }
+        runCurrent()
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok))
+        advanceUntilIdle()
+        job.join()
+        assertThat(terminal).isEqualTo(ActionProgress.Applied)
+    }
+
+    @Test
+    fun runRejectedKeepsModalUntilDismiss() = runTest {
+        stubPublish(ClientControlSendResult.Success)
+        val job = launch { sut.run(cmd) }
         runCurrent()
         sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Failed, reason = "nope"))
-        runCurrent()
+        advanceUntilIdle()
         job.join()
-        assertThat(sut.preferenceEditProgress.value).isInstanceOf(ActionProgress.Rejected::class.java)
-        sut.dismissPreferenceEditProgress()
-        assertThat(sut.preferenceEditProgress.value).isNull()
+        assertThat(sut.actionProgress.value).isInstanceOf(ActionProgress.Rejected::class.java)
+        sut.dismissActionProgress()
+        assertThat(sut.actionProgress.value).isNull()
+    }
+
+    @Test
+    fun dismissWhileWaitingClearsModalAndStopsRun() = runTest {
+        stubPublish(ClientControlSendResult.Success)
+        val job = launch { sut.run(cmd) }
+        runCurrent() // waiting (Sending/MasterExecuting), modal up
+        assertThat(sut.actionProgress.value).isInstanceOf(ActionProgress.Sending::class.java)
+        sut.dismissActionProgress() // "stop waiting"
+        advanceUntilIdle()
+        job.join()
+        assertThat(sut.actionProgress.value).isNull()
     }
 
     @Test

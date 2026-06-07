@@ -2,8 +2,13 @@ package app.aaps.ui.compose.scenes
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import app.aaps.core.data.model.Scene
+import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationManager
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
+import app.aaps.core.ui.R
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -16,7 +21,9 @@ class SceneAutomationApiImpl @Inject constructor(
     private val sceneRepository: SceneRepository,
     private val sceneExecutor: SceneExecutor,
     private val activeSceneManager: ActiveSceneManager,
-    private val sceneChainTargetResolver: SceneChainTargetResolver
+    private val sceneChainTargetResolver: SceneChainTargetResolver,
+    private val notificationManager: NotificationManager,
+    private val rh: ResourceHelper
 ) : SceneAutomationApi {
 
     override val scenesFlow: StateFlow<String> get() = sceneRepository.scenesFlow
@@ -82,6 +89,28 @@ class SceneAutomationApiImpl @Inject constructor(
             failedCount = activateResult.actionResults.count { !it.success },
             totalCount = activateResult.actionResults.size
         )
+    }
+
+    override suspend fun stopActiveSceneAndChain(): SceneAutomationResult {
+        // Resolve the chain target from the active scene's own endAction (no caller-supplied id), then
+        // delegate to the single canonical stop+start path (which TOCTOU-re-checks preconditions).
+        val targetId = (activeSceneManager.getActiveState()?.scene?.endAction as? SceneEndAction.ChainScene)?.sceneId
+        val result = if (targetId != null) stopActiveSceneAndStartScene(targetId) else stopActiveScene()
+        // Chain-completion notification — posted here so it fires identically whether the chain was
+        // triggered from the End-Scene dialog or a client's scene.stop(triggerChain) command.
+        if (result is SceneAutomationResult.ChainCompleted) {
+            if (result.failedCount == 0 && result.endedSceneName != null)
+                notificationManager.post(
+                    id = NotificationId.SCENE_CHAINED,
+                    text = rh.gs(R.string.scene_chained_format, result.endedSceneName, result.targetSceneName)
+                )
+            else if (result.failedCount > 0)
+                notificationManager.post(
+                    id = NotificationId.SCENE_CHAIN_ERROR,
+                    text = rh.gs(R.string.scene_chain_error_summary, result.endedSceneName ?: "", result.targetSceneName, result.failedCount, result.totalCount)
+                )
+        }
+        return result
     }
 
     override fun setEnabled(id: String, enabled: Boolean): SceneAutomationResult {
