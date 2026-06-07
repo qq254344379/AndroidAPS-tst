@@ -9,6 +9,7 @@ import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
+import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.MasterPairing
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
@@ -25,6 +26,9 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.never
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import javax.inject.Provider
 
@@ -170,6 +174,28 @@ internal class ClientControlRoundTripTest {
         job.join()
         assertThat(out).doesNotContain(ActionProgress.Applied)
         assertThat(out.last()).isInstanceOf(ActionProgress.Unconfirmed::class.java)
+    }
+
+    // ---- liveness (PING-PONG) ----
+
+    @Test
+    fun sendPingPublishesPingWithWantsAck() = runTest {
+        whenever(publisher.publishTracked(any(), any(), any())).thenReturn(ClientControlPublisher.TrackedPublish(ClientControlSendResult.Success, counter))
+        sut.sendPing()
+        verify(publisher).publishTracked(eq(ClientControlMessage.Ping), any(), eq(true))
+    }
+
+    @Test
+    fun validAckBumpsMasterSignal() = runTest {
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok))
+        verify(nsClientV3Plugin).bumpMasterSignal(now) // dateUtil.now() == now
+    }
+
+    /** Safety: a forged ack must not be treated as a liveness signal either. */
+    @Test
+    fun forgedAckDoesNotBumpMasterSignal() = runTest {
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok, signSecret = ByteArray(32) { 0x42 }))
+        verify(nsClientV3Plugin, never()).bumpMasterSignal(any())
     }
 
     @Test

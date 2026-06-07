@@ -35,6 +35,16 @@ sealed class ClientControlMessage {
     ) : ClientControlMessage()
 
     /**
+     * Liveness probe. The master does nothing but acknowledge it — the signed ACK ("pong") is an
+     * authenticated, real-time "master alive now" signal the client folds into `masterReachable`,
+     * clearing the offline banner without waiting for the next devicestatus heartbeat. Sent with
+     * `wantsAck = true`.
+     */
+    @Serializable
+    @SerialName("ping")
+    data object Ping : ClientControlMessage()
+
+    /**
      * Tells the master to activate the named scene. `durationMinutes = null` means use
      * the scene's stored default; an explicit value (including 0 for indefinite) overrides.
      */

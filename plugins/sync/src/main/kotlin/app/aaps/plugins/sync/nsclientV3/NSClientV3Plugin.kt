@@ -174,6 +174,10 @@ class NSClientV3Plugin @Inject constructor(
 
         const val RECORDS_TO_LOAD = 500
         private val CLIENT_CONTROL_POLL_MS = T.mins(5).msecs()
+
+        // Rate-limit for requestMasterProbe so screen recompositions / banner flaps / reconnect bursts
+        // don't spam pings + settings re-fetches at the master.
+        private val PROBE_MIN_INTERVAL_MS = T.secs(5).msecs()
     }
 
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -282,6 +286,13 @@ class NSClientV3Plugin @Inject constructor(
                         delay(CLIENT_CONTROL_POLL_MS)
                     }
                 }
+        }
+        // Client: probe the master the moment the WS (re)connects — the pong clears the offline banner
+        // fast, and the bundled config re-fetch picks up anything missed while disconnected.
+        if (config.AAPSCLIENT) {
+            scope.launch {
+                wsConnectedFlow.collect { connected -> if (connected) requestMasterProbe() }
+            }
         }
         rxBus.toFlow(EventAppExit::class.java)
             .collectResilient(scope, aapsLogger, LTag.NSCLIENT) {
@@ -396,6 +407,25 @@ class NSClientV3Plugin @Inject constructor(
             .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl ACK dispatch failed: ${it.message}", it) }
     }
 
+    @Volatile private var lastProbeAt = 0L
+
+    // See [NsClient.requestMasterProbe]. Client-only, WS-up-only, rate-limited. Fires a ping (its pong
+    // bumps the liveness clock → banner clears) and re-fetches the running-config docs (in case a live
+    // push was missed while out of contact). Uses [reachableScope] so it's safe to call before/around
+    // service restarts.
+    override fun requestMasterProbe() {
+        if (!config.AAPSCLIENT || !_wsConnected.value) return
+        val now = dateUtil.now()
+        if (now - lastProbeAt < PROBE_MIN_INTERVAL_MS) return
+        lastProbeAt = now
+        reachableScope.launch {
+            runCatching { clientControlRoundTrip.sendPing() }
+                .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl ping failed: ${it.message}") }
+        }
+        // Pull any config we missed while disconnected (the worker no-ops on master / GETs both docs on client).
+        WorkManager.getInstance(context).enqueue(OneTimeWorkRequest.Builder(LoadSettingsWorker::class.java).build())
+    }
+
     fun scheduleIrregularExecution(refreshToken: Boolean = false) {
         if (refreshToken) {
             handler?.post { executeLoop("REFRESH TOKEN") }
@@ -453,6 +483,18 @@ class NSClientV3Plugin @Inject constructor(
     // keep the newest known heartbeat; a batch may deliver an older record after a newer one.
     internal fun bumpDevicestatusHeartbeat(heartbeatAt: Long) {
         if (heartbeatAt > _lastDevicestatusReceivedAt.value) _lastDevicestatusReceivedAt.value = heartbeatAt
+        bumpMasterSignal(heartbeatAt)
+    }
+
+    // Unified liveness clock: the newest of ANY authenticated, real-time master signal — a devicestatus
+    // heartbeat, a verified Client-Control ACK/pong, or a live config republish. [masterReachable]'s
+    // freshness term reads THIS (not devicestatus alone), so an active PING-PONG clears the offline
+    // banner without waiting for the next devicestatus push. Same fail-closed seed (0L) + pristine=false.
+    private val _lastMasterSignalAt = MutableStateFlow(0L)
+
+    /** Bump the liveness clock from a real-time master signal (pong / live republish / heartbeat). Monotonic. */
+    internal fun bumpMasterSignal(at: Long) {
+        if (at > _lastMasterSignalAt.value) _lastMasterSignalAt.value = at
     }
 
     // Grace before flagging offline on a WS drop — swallows brief flaps (reconnect storms during NS
@@ -488,7 +530,7 @@ class NSClientV3Plugin @Inject constructor(
                     delay(wsDisconnectGraceMs); emit(false)
                 }
             },
-            lastDevicestatusReceivedAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = false, now = dateUtil::now),
+            _lastMasterSignalAt.freshness(thresholdMs = heartbeatStaleMs, scope = reachableScope, tickMs = heartbeatTickMs, pristine = false, now = dateUtil::now),
             preferences.observe(StringNonKey.NsClientControlClientId).map { it.isNotEmpty() },
             orphanDetector.authorized
         ) { ws, fresh, paired, authorized ->

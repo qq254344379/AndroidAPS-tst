@@ -654,6 +654,20 @@ internal class ClientControlReceiverTest {
     }
 
     @Test
+    fun pingAcksOkAndAdvancesCounter() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}ping_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.Ping, counter = 5L, wantsAck = true)))
+
+        assertThat(acks.last().phase.name).isEqualTo("Done")
+        assertThat(acks.last().status.name).isEqualTo("Ok")
+        assertThat(authorizedRepository.current(now).single { it.clientId == clientId }.counterReceived).isEqualTo(5L)
+    }
+
+    @Test
     fun expiredCommandIsNotExecutedAndAcksExpired() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)

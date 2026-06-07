@@ -52,6 +52,17 @@ interface NsClient : Sync {
         get() = MutableStateFlow(true).asStateFlow()
 
     /**
+     * Actively probe master liveness (and pull any config missed while out of contact). On a client
+     * this fires a signed Client-Control ping — whose authenticated ACK ("pong") refreshes
+     * [masterReachable] far faster than waiting for the next devicestatus heartbeat — and re-fetches
+     * the running-config docs. Rate-limited and a no-op when WS is down / on a master. Call it when an
+     * offline-gated screen appears so the banner clears promptly if the master is in fact online.
+     *
+     * Default no-op: impls without a Client-Control channel have nothing to probe.
+     */
+    fun requestMasterProbe() {}
+
+    /**
      * NS URL
      */
     val address: String

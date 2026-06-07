@@ -297,11 +297,16 @@ class NSClientV3Service : DaggerService() {
                         docString.toRunningConfiguration()?.let {
                             runningConfiguration.applyCold(it)
                             orphanDetector.onSettingsDoc(it, docJson.optLong("srvModified", 0L))
+                            // A live config push proves the master is alive now → feed the liveness clock.
+                            nsClientV3Plugin.bumpMasterSignal(srvModified)
                         }
                     // Client-side: hot state doc — apply only the active scene + runtime flags.
                     // Kept distinct from the cold branch so this never clears a running scene.
                     config.AAPSCLIENT && identifier == SettingsIdentifiers.STATE    ->
-                        docString.toRunningConfiguration()?.let { runningConfiguration.applyHot(it) }
+                        docString.toRunningConfiguration()?.let {
+                            runningConfiguration.applyHot(it)
+                            nsClientV3Plugin.bumpMasterSignal(srvModified)
+                        }
                     // Client-side: master→client command ACK. Must be checked BEFORE the generic
                     // IDENTIFIER_PREFIX branch (ack identifiers share that prefix) so the master
                     // receiver never tries to verify an ack as an inbound command envelope.

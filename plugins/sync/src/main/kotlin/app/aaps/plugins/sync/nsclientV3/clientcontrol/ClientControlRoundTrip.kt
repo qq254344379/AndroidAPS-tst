@@ -57,6 +57,7 @@ class ClientControlRoundTrip @Inject constructor(
         // AFTER the client has stopped waiting; the 2 s margin (and pollAck) catch a last-moment ack.
         const val ROUND_TRIP_TTL_MS = 8_000L
         const val PROPAGATION_MARGIN_MS = 2_000L
+        const val PING_TTL_MS = 10_000L
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -86,7 +87,19 @@ class ClientControlRoundTrip @Inject constructor(
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: ACK signature invalid (counter=${ack.commandCounter})")
             return
         }
+        // Any authenticated ACK (a ping pong, or any command result) proves the master is alive right
+        // now — feed the liveness clock so masterReachable clears the offline banner without waiting
+        // for the next devicestatus heartbeat.
+        nsClientV3Plugin.get().bumpMasterSignal(dateUtil.now())
         ackEvents.tryEmit(ack)
+    }
+
+    /**
+     * Fire a liveness probe. Fire-and-forget: the pong arrives via [onAckDoc], which bumps the
+     * liveness clock. No-op if unpaired (publishTracked returns NotPaired).
+     */
+    suspend fun sendPing() {
+        publisher.publishTracked(ClientControlMessage.Ping, dateUtil.now() + PING_TTL_MS, wantsAck = true)
     }
 
     override fun dispatch(command: ClientControlActionDispatcher.Command): Flow<ActionProgress> = channelFlow {

@@ -201,6 +201,7 @@ class ClientControlReceiver @Inject constructor(
             }
 
             is ClientControlMessage.Hello             -> AckOutcome(AckStatus.Ok, null) // unreachable (handled above)
+            ClientControlMessage.Ping                 -> onVerifiedPing(entry, envelope, now)
             is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
             is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
             is ClientControlMessage.InsulinActivate   -> onVerifiedInsulinActivate(entry, envelope, message, now)
@@ -228,6 +229,13 @@ class ClientControlReceiver @Inject constructor(
             ClientState.Active  -> authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         }
         nsClientRepository.addLog("◄ CLIENTCTL", "hello accepted for ${entry.name} (${entry.clientId})")
+    }
+
+    /** Liveness probe: nothing to do but advance the counter and ack Ok — the ack is the pong. */
+    private fun onVerifiedPing(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        nsClientRepository.addLog("◄ CLIENTCTL", "ping from ${entry.name}")
+        return AckOutcome(AckStatus.Ok, null)
     }
 
     private suspend fun onVerifiedSceneStart(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStart, now: Long): AckOutcome {

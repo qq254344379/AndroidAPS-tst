@@ -22,6 +22,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -92,6 +93,20 @@ class RunningConfigurationPublisher @Inject constructor(
                     .debounce(HOT_DEBOUNCE_MS)
                     .collect { publishHot() }
             }
+            // Master WS (re)connect → re-publish both docs. Recovers a config edit made while NS was
+            // down (putSettings has no retry), recreates an auto-pruned doc, and covers an initial
+            // publish that failed before NS was ready. Debounced to swallow reconnect flapping.
+            // Republishing unchanged config is harmless: clients re-apply idempotently and per-key LWW
+            // no-ops (same SyncedPrefModified).
+            launch {
+                nsClientV3Plugin.get().wsConnectedFlow
+                    .filter { it }
+                    .debounce(WS_RECONNECT_DEBOUNCE_MS)
+                    .collect {
+                        publishCold()
+                        publishHot()
+                    }
+            }
         }
     }
 
@@ -153,6 +168,7 @@ class RunningConfigurationPublisher @Inject constructor(
         private const val SCHEMA_VERSION = 1
         private const val COLD_DEBOUNCE_MS = 5_000L
         private const val HOT_DEBOUNCE_MS = 1_000L
+        private const val WS_RECONNECT_DEBOUNCE_MS = 3_000L
 
         // 1 ms past NS APIv3 MIN_TIMESTAMP (946684800000 = 2000-01-01 UTC). Required by
         // validateCommon and immutable after create — kept constant so every update matches.

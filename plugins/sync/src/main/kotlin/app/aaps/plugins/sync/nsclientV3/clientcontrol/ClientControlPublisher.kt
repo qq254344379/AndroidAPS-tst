@@ -129,6 +129,7 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
             is ClientControlMessage.InsulinActivate,
+            ClientControlMessage.Ping,
             is ClientControlMessage.PreferencesUpdate -> "$IDENTIFIER_CMD_PREFIX${type}_${pairing.clientId}"
         }
         val result = uploadEnvelope(identifier, envelope)

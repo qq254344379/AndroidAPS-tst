@@ -143,6 +143,10 @@ class MainViewModel @Inject constructor(
      */
     val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
 
+    /** Actively probe the master (ping + config re-fetch) — call when the offline banner is showing so
+     *  it clears promptly if the master is in fact online. Rate-limited / no-op'd inside the plugin. */
+    fun requestMasterProbe() = nsClient.requestMasterProbe()
+
     /** Toolbar items as a separate StateFlow to avoid unnecessary recompositions of the main UI */
     private val _quickLaunchItems = MutableStateFlow<List<ResolvedQuickLaunchItem>>(emptyList())
 
