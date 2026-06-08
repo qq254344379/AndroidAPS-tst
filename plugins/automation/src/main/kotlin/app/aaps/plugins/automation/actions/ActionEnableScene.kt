@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Visibility
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
+import app.aaps.core.interfaces.scenes.SceneIconResolver
 import app.aaps.core.utils.JsonHelper
 import app.aaps.plugins.automation.R
 import app.aaps.plugins.automation.compose.IconTint
@@ -16,6 +17,7 @@ import javax.inject.Inject
 class ActionEnableScene(injector: HasAndroidInjector) : Action(injector) {
 
     @Inject lateinit var sceneApi: SceneAutomationApi
+    @Inject lateinit var sceneIconResolver: SceneIconResolver
 
     var scene: InputSceneName = InputSceneName()
 
@@ -23,7 +25,7 @@ class ActionEnableScene(injector: HasAndroidInjector) : Action(injector) {
     override fun shortDescription(): String =
         rh.gs(R.string.action_enable_scene_short, sceneApi.getScene(scene.value)?.name ?: "")
 
-    override fun composeIcon() = sceneApi.iconForScene(scene.value) ?: Icons.Filled.Visibility
+    override fun composeIcon() = sceneIconResolver.iconForScene(scene.value) ?: Icons.Filled.Visibility
     override fun composeIconTint() = IconTint.Scene
 
     override suspend fun doAction(): PumpEnactResult =

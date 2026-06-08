@@ -1,4 +1,4 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.implementation.scenes
 
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction

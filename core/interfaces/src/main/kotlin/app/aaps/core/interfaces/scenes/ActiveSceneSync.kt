@@ -1,6 +1,8 @@
 package app.aaps.core.interfaces.scenes
 
+import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.SceneLifecycle
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Bridge between the active-scene runtime state and the NS settings sync layer.
@@ -15,6 +17,13 @@ import app.aaps.core.data.model.SceneLifecycle
  * is still uploading.
  */
 interface ActiveSceneSync {
+
+    /** Observable active-scene runtime state (full domain model), or null when nothing is active.
+     *  VM-facing read access so screens don't depend on the concrete `:implementation` manager. */
+    val activeSceneState: StateFlow<ActiveSceneState?>
+
+    /** Current active-scene runtime state snapshot (full domain model), or null. */
+    fun getActiveState(): ActiveSceneState?
 
     /** Current active scene as a wire-shaped snapshot, or null when no scene is active. */
     fun activeSceneSnapshot(): ActiveSceneSnapshot?

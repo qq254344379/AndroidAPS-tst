@@ -18,6 +18,7 @@ import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
+import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
@@ -25,6 +26,7 @@ import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.objects.extensions.profileNames
+import app.aaps.core.objects.extensions.toScenes
 import app.aaps.core.ui.R
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,8 +46,7 @@ import javax.inject.Inject
 @Stable
 class SceneListViewModel @Inject constructor(
     private val sceneRepository: SceneStore,
-    private val activeSceneManager: ActiveSceneManager,
-    private val sceneExecutor: SceneExecutor,
+    private val activeSceneManager: ActiveSceneSync,
     private val persistenceLayer: PersistenceLayer,
     private val profileUtil: ProfileUtil,
     private val profileRepository: ProfileRepository,
@@ -110,7 +111,7 @@ class SceneListViewModel @Inject constructor(
             sceneList.associate { scene ->
                 scene.id to when {
                     !reachable -> rh.gs(R.string.scene_lock_reason_master_offline)
-                    else       -> sceneExecutor.validateActivation(scene)
+                    else       -> sceneActions.validateActivation(scene)
                 }
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -197,7 +198,7 @@ class SceneListViewModel @Inject constructor(
             if (!scene.isEnabled) return@launch
 
             // Shared validator — single source of truth for pump/loop/profile/actions.
-            sceneExecutor.validateActivation(scene)?.let { reason ->
+            sceneActions.validateActivation(scene)?.let { reason ->
                 _dialogState.value = DialogState.ValidationError(reason)
                 return@launch
             }

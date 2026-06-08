@@ -7,7 +7,7 @@ import app.aaps.core.interfaces.scenes.ClientControlSendResult
  * *config* now syncs via the generic `SyncSpec(Bidirectional)` channel — this remains only for the
  * activate *action*, which can't be a key sync.) Implemented in `:plugins:sync` (where the wire format
  * + signing live), so neither the implementation nor the sync module needs a project dependency on the
- * other. Mirrors [app.aaps.core.interfaces.scenes.ClientControlSceneSender].
+ * other.
  */
 interface ClientControlInsulinSender {
 

@@ -1,6 +1,5 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.implementation.scenes
 
-import androidx.compose.ui.graphics.vector.ImageVector
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.interfaces.notifications.NotificationId
@@ -48,9 +47,6 @@ class SceneAutomationApiImpl @Inject constructor(
 
             else                           -> SceneAutomationResult.Success
         }
-
-    override fun iconForScene(sceneId: String): ImageVector? =
-        sceneRepository.getScene(sceneId)?.let { SceneIcons.fromKey(it.icon).icon }
 
     override fun getScenes(): List<Scene> = sceneRepository.getScenes()
 

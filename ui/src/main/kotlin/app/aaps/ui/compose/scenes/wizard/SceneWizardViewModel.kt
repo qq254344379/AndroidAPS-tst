@@ -19,9 +19,9 @@ import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.profileNames
+import app.aaps.core.objects.extensions.toScenes
 import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.ui.compose.scenes.SceneTemplate
-import app.aaps.ui.compose.scenes.toScenes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted

@@ -1,4 +1,4 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.implementation.scenes
 
 import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.ActiveSceneState.ScopedRecords
@@ -53,7 +53,7 @@ class ActiveSceneManager @Inject constructor(
     private val _activeSceneState = MutableStateFlow<ActiveSceneState?>(null)
 
     /** Observable active scene state. Lifecycle (ACTIVE / EXPIRED) lives inside the state. */
-    val activeSceneState: StateFlow<ActiveSceneState?> = _activeSceneState.asStateFlow()
+    override val activeSceneState: StateFlow<ActiveSceneState?> = _activeSceneState.asStateFlow()
 
     init {
         _activeSceneState.value = loadActiveState()
@@ -102,7 +102,7 @@ class ActiveSceneManager @Inject constructor(
     fun isExpired(): Boolean = _activeSceneState.value?.lifecycle == SceneLifecycle.EXPIRED
 
     /** Get the current active state */
-    fun getActiveState(): ActiveSceneState? = _activeSceneState.value
+    override fun getActiveState(): ActiveSceneState? = _activeSceneState.value
 
     /** Update the scoped record set (called after scene activation to store record IDs) */
     fun updateScopedRecords(scopedRecords: ScopedRecords) {

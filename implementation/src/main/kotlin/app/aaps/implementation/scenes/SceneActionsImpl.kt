@@ -1,5 +1,6 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.implementation.scenes
 
+import app.aaps.core.data.model.Scene
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
@@ -20,8 +21,11 @@ import javax.inject.Singleton
 class SceneActionsImpl @Inject constructor(
     private val config: Config,
     private val dispatcher: ClientControlActionDispatcher,
-    private val sceneApi: SceneAutomationApi
+    private val sceneApi: SceneAutomationApi,
+    private val sceneExecutor: SceneExecutor
 ) : SceneActions {
+
+    override suspend fun validateActivation(scene: Scene): String? = sceneExecutor.validateActivation(scene)
 
     override suspend fun start(sceneId: String, durationMinutes: Int?): ActionProgress =
         if (config.AAPSCLIENT) dispatcher.run(ClientControlActionDispatcher.Command.SceneStart(sceneId, durationMinutes))

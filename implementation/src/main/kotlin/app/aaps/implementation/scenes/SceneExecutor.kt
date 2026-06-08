@@ -1,4 +1,4 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.implementation.scenes
 
 import android.content.Context
 import androidx.work.Data
@@ -505,14 +505,13 @@ class SceneExecutor @Inject constructor(
 
     private fun scheduleExpiryWorker(sceneName: String, delayMs: Long) {
         try {
-            val workerClass = Class.forName("app.aaps.receivers.SceneExpiryWorker")
-
-            @Suppress("UNCHECKED_CAST")
-            val request = OneTimeWorkRequest.Builder(workerClass as Class<androidx.work.ListenableWorker>)
+            // Direct reference now that the worker lives in this module (was Class.forName when this
+            // engine was in :ui and couldn't see the :app worker).
+            val request = OneTimeWorkRequest.Builder(SceneExpiryWorker::class.java)
                 .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
                 .setInputData(
                     Data.Builder()
-                        .putString("scene_name", sceneName)
+                        .putString(SceneExpiryWorker.KEY_SCENE_NAME, sceneName)
                         .build()
                 )
                 .build()

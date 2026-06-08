@@ -1,9 +1,11 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.implementation.scenes
 
 import app.aaps.core.data.model.Scene
 import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.scenes.Scenes
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.objects.extensions.toJson
+import app.aaps.core.objects.extensions.toScenes
 import app.aaps.core.keys.interfaces.Preferences
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject

@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
+import app.aaps.core.interfaces.scenes.SceneIconResolver
 import app.aaps.core.utils.JsonHelper
 import app.aaps.plugins.automation.R
 import app.aaps.plugins.automation.compose.IconTint
@@ -19,6 +20,7 @@ import javax.inject.Inject
 class ActionRunScene(injector: HasAndroidInjector) : Action(injector) {
 
     @Inject lateinit var sceneApi: SceneAutomationApi
+    @Inject lateinit var sceneIconResolver: SceneIconResolver
 
     var scene: InputSceneName = InputSceneName()
 
@@ -32,7 +34,7 @@ class ActionRunScene(injector: HasAndroidInjector) : Action(injector) {
 
     // Show the assigned scene's icon when one is selected; fall back to PlayArrow in the
     // chooser sheet (no scene yet) or if the scene was deleted.
-    override fun composeIcon() = sceneApi.iconForScene(scene.value) ?: Icons.Filled.PlayArrow
+    override fun composeIcon() = sceneIconResolver.iconForScene(scene.value) ?: Icons.Filled.PlayArrow
     override fun composeIconTint() = IconTint.Scene
 
     override suspend fun doAction(): PumpEnactResult =

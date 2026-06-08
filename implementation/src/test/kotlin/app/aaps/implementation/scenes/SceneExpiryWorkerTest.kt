@@ -1,4 +1,4 @@
-package app.aaps.receivers
+package app.aaps.implementation.scenes
 
 import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
@@ -8,9 +8,6 @@ import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.shared.tests.TestBaseWithProfile
-import app.aaps.ui.compose.scenes.ActiveSceneManager
-import app.aaps.ui.compose.scenes.SceneExecutor
-import app.aaps.ui.compose.scenes.SceneRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.BeforeEach

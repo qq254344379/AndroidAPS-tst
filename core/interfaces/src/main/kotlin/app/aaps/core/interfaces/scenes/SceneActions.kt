@@ -1,5 +1,6 @@
 package app.aaps.core.interfaces.scenes
 
+import app.aaps.core.data.model.Scene
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 
 /**
@@ -20,4 +21,7 @@ interface SceneActions {
 
     /** End the active scene; [triggerChain] = also fire its configured chain target (master derives it). */
     suspend fun stop(triggerChain: Boolean = false): ActionProgress
+
+    /** Validation gate for activating [scene] (pump/loop/profile/actions); null = OK, else a reason. */
+    suspend fun validateActivation(scene: Scene): String?
 }

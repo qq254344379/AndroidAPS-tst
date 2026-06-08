@@ -1,4 +1,4 @@
-package app.aaps.receivers
+package app.aaps.implementation.scenes
 
 import android.content.Context
 import androidx.hilt.work.HiltWorker
@@ -17,9 +17,6 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.objects.workflow.LoggingWorker
 import app.aaps.core.ui.R
-import app.aaps.ui.compose.scenes.ActiveSceneManager
-import app.aaps.ui.compose.scenes.SceneExecutor
-import app.aaps.ui.compose.scenes.SceneRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers

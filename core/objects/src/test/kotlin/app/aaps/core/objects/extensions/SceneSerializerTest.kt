@@ -1,4 +1,4 @@
-package app.aaps.ui.compose.scenes
+package app.aaps.core.objects.extensions
 
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.Scene

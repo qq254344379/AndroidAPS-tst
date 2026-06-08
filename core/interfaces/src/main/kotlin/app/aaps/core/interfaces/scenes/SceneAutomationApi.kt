@@ -1,6 +1,5 @@
 package app.aaps.core.interfaces.scenes
 
-import androidx.compose.ui.graphics.vector.ImageVector
 import app.aaps.core.data.model.Scene
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,9 +57,6 @@ interface SceneAutomationApi {
      * plain [stopActiveScene] when there's no chain target.
      */
     suspend fun stopActiveSceneAndChain(): SceneAutomationResult
-
-    /** Resolved icon for the scene's stored icon key, or null if the scene is missing. */
-    fun iconForScene(sceneId: String): ImageVector?
 }
 
 sealed interface SceneAutomationResult {

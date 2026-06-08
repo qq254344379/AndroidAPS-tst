@@ -4,7 +4,6 @@ import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
-import app.aaps.core.interfaces.scenes.ClientControlSceneSender
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
@@ -42,7 +41,7 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) : ClientControlSceneSender, ClientControlInsulinSender {
+) : ClientControlInsulinSender {
 
     companion object {
 
@@ -136,12 +135,6 @@ class ClientControlPublisher @Inject constructor(
 
     /** Result of [publishTracked]: the send outcome plus the correlation counter (non-null only on Success). */
     data class TrackedPublish(val result: ClientControlSendResult, val counter: Long?)
-
-    override suspend fun sendSceneStart(sceneId: String, durationMinutes: Int?): ClientControlSendResult =
-        publish(ClientControlMessage.SceneStart(sceneId, durationMinutes))
-
-    override suspend fun sendSceneStop(triggerChain: Boolean): ClientControlSendResult =
-        publish(ClientControlMessage.SceneStop(triggerChain))
 
     override suspend fun sendInsulinActivate(iCfgJson: String): ClientControlSendResult =
         publish(ClientControlMessage.InsulinActivate(iCfgJson))

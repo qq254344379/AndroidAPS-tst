@@ -43,6 +43,7 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
+import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
@@ -66,7 +67,6 @@ import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
-import app.aaps.ui.compose.scenes.ActiveSceneManager
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -116,7 +116,7 @@ class MainViewModel @Inject constructor(
     private val sceneRepository: SceneStore,
     private val sceneActions: SceneActions,
     private val sceneChainTargetResolver: SceneChainResolver,
-    private val activeSceneManager: ActiveSceneManager,
+    private val activeSceneManager: ActiveSceneSync,
     private val rxBus: RxBus,
     private val runningModeGuard: RunningModeGuard,
     private val nsClient: NsClient
@@ -129,8 +129,8 @@ class MainViewModel @Inject constructor(
     /**
      * AAPSCLIENT-only WS-reachability signal. Constantly true on master. Exposed so the screen
      * can mirror the gating used in [app.aaps.ui.compose.scenes.SceneListViewModel] for any
-     * affordance (e.g. the active-scene chip's End button) that would hit
-     * [ClientControlSceneSender] under the hood.
+     * affordance (e.g. the active-scene chip's End button) that would hit the master via the
+     * client-control round-trip under the hood.
      */
     val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
 
