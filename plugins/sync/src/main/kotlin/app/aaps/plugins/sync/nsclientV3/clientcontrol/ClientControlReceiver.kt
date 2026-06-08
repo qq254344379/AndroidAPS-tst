@@ -1,11 +1,15 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.ICfg
+import app.aaps.core.data.model.TT
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
+import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
@@ -81,6 +85,7 @@ class ClientControlReceiver @Inject constructor(
     private val dateUtil: DateUtil,
     private val uel: UserEntryLogger,
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
+    private val persistenceLayer: PersistenceLayer,
     private val aapsLogger: AAPSLogger
 ) {
 
@@ -196,7 +201,7 @@ class ClientControlReceiver @Inject constructor(
         val outcome = when (message) {
             null                                      -> {
                 onVerifiedUndecodablePayload(entry, envelope, now)
-                AckOutcome(AckStatus.Failed, "unsupported command type ${envelope.type}")
+                AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
             }
 
             is ClientControlMessage.Hello             -> AckOutcome(AckStatus.Ok, null) // unreachable (handled above)
@@ -204,6 +209,8 @@ class ClientControlReceiver @Inject constructor(
             is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
             is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
             is ClientControlMessage.InsulinActivate   -> onVerifiedInsulinActivate(entry, envelope, message, now)
+            is ClientControlMessage.TempTargetSet     -> onVerifiedTempTargetSet(entry, envelope, message, now)
+            ClientControlMessage.TempTargetCancel     -> onVerifiedTempTargetCancel(entry, envelope, now)
             is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
         }
         if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, now)
@@ -243,7 +250,7 @@ class ClientControlReceiver @Inject constructor(
         nsClientRepository.addLog("◄ CLIENTCTL", "scene.start sceneId=${message.sceneId} from ${entry.name}: ${result.tag()}")
         if (result !is SceneAutomationResult.Success)
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.start failed for ${entry.name} sceneId=${message.sceneId}: ${result.tag()}")
-        return if (result is SceneAutomationResult.Success) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, result.tag())
+        return if (result is SceneAutomationResult.Success) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, result.failureReason().name)
     }
 
     private suspend fun onVerifiedSceneStop(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStop, now: Long): AckOutcome {
@@ -264,7 +271,16 @@ class ClientControlReceiver @Inject constructor(
         }
         if (isFailure)
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.stop failed for ${entry.name}: ${result.tag()}")
-        return if (isFailure) AckOutcome(AckStatus.Failed, result.tag()) else AckOutcome(AckStatus.Ok, null)
+        return if (isFailure) AckOutcome(AckStatus.Failed, result.failureReason().name) else AckOutcome(AckStatus.Ok, null)
+    }
+
+    /** Map a failed [SceneAutomationResult] to a localizable [FailureReason] code for the client's ack. */
+    private fun SceneAutomationResult.failureReason(): FailureReason = when (this) {
+        SceneAutomationResult.SceneNotFound     -> FailureReason.SceneNotFound
+        SceneAutomationResult.SceneDisabled     -> FailureReason.SceneDisabled
+        is SceneAutomationResult.ChainCompleted -> FailureReason.PartialFailure
+        is SceneAutomationResult.Failed,
+        SceneAutomationResult.Success           -> FailureReason.ExecutionFailed
     }
 
     /**
@@ -281,14 +297,43 @@ class ClientControlReceiver @Inject constructor(
         if (iCfg == null) {
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: insulin.activate from ${entry.name} has invalid iCfg JSON, ignoring")
             nsClientRepository.addLog("◄ CLIENTCTL", "insulin.activate from ${entry.name}: invalid JSON")
-            return AckOutcome(AckStatus.Failed, "invalid insulin config")
+            return AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
         }
         val applied = profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)
         nsClientRepository.addLog(
             "◄ CLIENTCTL",
             "insulin.activate from ${entry.name}: " + if (applied) "applied ${iCfg.insulinLabel}" else "no active profile"
         )
-        return if (applied) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, "no active profile to re-apply")
+        // ack.reason carries the FailureReason code NAME so the client can localize it.
+        return if (applied) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, FailureReason.NoActiveProfile.name)
+    }
+
+    // Inbound remote command → apply via the domain layer directly (NOT TempTargetActions, which is the
+    // user-facing facade that would pop a dialog on this master). Failures go back to the client's ack.
+    private suspend fun onVerifiedTempTargetSet(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.TempTargetSet, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val outcome = runCatching {
+            persistenceLayer.insertAndCancelCurrentTemporaryTarget(
+                temporaryTarget = TT(
+                    timestamp = message.timestamp, reason = TT.Reason.fromString(message.reason),
+                    lowTarget = message.lowTargetMgdl, highTarget = message.highTargetMgdl,
+                    duration = message.durationMinutes * 60_000L
+                ),
+                action = Action.TT, source = Sources.NSClient, note = null,
+                listValues = listOf(ValueWithUnit.Mgdl(message.lowTargetMgdl), ValueWithUnit.Minute(message.durationMinutes))
+            )
+        }
+        nsClientRepository.addLog("◄ CLIENTCTL", "temp_target.set ${message.lowTargetMgdl}-${message.highTargetMgdl}mg/dl ${message.durationMinutes}min from ${entry.name}: ${if (outcome.isSuccess) "ok" else "failed"}")
+        return outcome.fold({ AckOutcome(AckStatus.Ok, null) }, { AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name) })
+    }
+
+    private suspend fun onVerifiedTempTargetCancel(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val outcome = runCatching {
+            persistenceLayer.cancelCurrentTemporaryTargetIfAny(dateUtil.now(), Action.CANCEL_TT, Sources.NSClient, null, emptyList())
+        }
+        nsClientRepository.addLog("◄ CLIENTCTL", "temp_target.cancel from ${entry.name}: ${if (outcome.isSuccess) "ok" else "failed"}")
+        return outcome.fold({ AckOutcome(AckStatus.Ok, null) }, { AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name) })
     }
 
     /**

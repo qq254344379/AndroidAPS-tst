@@ -2,6 +2,9 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
+import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.clientcontrol.PendingAction
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -56,6 +59,7 @@ class ClientControlRoundTrip @Inject constructor(
     private val pairingRepository: ClientPairingRepository,
     private val nsClientV3Plugin: Provider<NSClientV3Plugin>,
     private val nsClientRepository: NSClientRepository,
+    private val config: Config,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
 ) : ClientControlActionDispatcher {
@@ -114,57 +118,65 @@ class ClientControlRoundTrip @Inject constructor(
         publisher.publishTracked(ClientControlMessage.Ping, dateUtil.now() + PING_TTL_MS, wantsAck = true)
     }
 
-    // The single app-level pending-modal signal, fed by every run() regardless of feature. Hosted once
-    // in ComposeMainActivity; round-trips are single-in-flight so there's at most one modal at a time.
-    private val _actionProgress = MutableStateFlow<ActionProgress?>(null)
-    override val actionProgress: StateFlow<ActionProgress?> = _actionProgress.asStateFlow()
+    // The single app-level modal signal (progress + label), fed by every run()/execute() regardless of
+    // feature. Hosted once in ComposeMainActivity; round-trips are single-in-flight so at most one shows.
+    private val _pending = MutableStateFlow<PendingAction?>(null)
+    override val pendingAction: StateFlow<PendingAction?> = _pending.asStateFlow()
 
     // The currently running run()'s job, so dismissActionProgress() can "stop waiting" on it.
     @Volatile private var currentRun: Job? = null
 
     override fun dismissActionProgress() {
-        _actionProgress.value = null
+        _pending.value = null
         currentRun?.cancel()
     }
 
+    override suspend fun execute(command: ClientControlActionDispatcher.Command, label: String, localExecute: suspend () -> ActionProgress): ActionProgress =
+        if (config.AAPSCLIENT) run(command, label)
+        else {
+            // Master: execute locally (instant). Success is silent; a failure surfaces on the SAME modal.
+            val result = localExecute()
+            if (result !is ActionProgress.Applied) _pending.value = PendingAction(result, label)
+            result
+        }
+
     /**
-     * Run [command], driving the single app-level modal ([actionProgress]) for the whole round-trip and
-     * returning the terminal [ActionProgress] for the caller's feature-specific follow-up. Optimistic
-     * for prefs/insulin: the value/effect is already applied locally; the modal just confirms. On
-     * [ActionProgress.Applied] the modal is held a beat (so it doesn't flash) then cleared; terminal
-     * Rejected/Unconfirmed stay up until dismissed. A dismiss ("stop waiting") cancels this run.
+     * Client-side: run [command] over the round-trip, driving the single app-level modal ([pendingAction])
+     * with [label] for the whole lifecycle and returning the terminal for the caller's follow-up. On
+     * [ActionProgress.Applied] the modal is held a beat then cleared; Rejected/Unconfirmed stay until
+     * dismissed. A dismiss ("stop waiting") cancels this run.
      */
-    override suspend fun run(command: ClientControlActionDispatcher.Command): ActionProgress {
+    override suspend fun run(command: ClientControlActionDispatcher.Command, label: String): ActionProgress {
         val shownAt = dateUtil.now()
-        var terminal: ActionProgress = ActionProgress.Unconfirmed("no confirmation from master")
+        var terminal: ActionProgress = ActionProgress.Unconfirmed(FailureReason.NoReply)
         try {
             coroutineScope {
                 currentRun = coroutineContext[Job]
                 dispatch(command).collect { p ->
                     terminal = p
                     // Applied is cleared after the loop (with the min-visible hold); show the rest live.
-                    if (p !is ActionProgress.Applied) _actionProgress.value = p
+                    if (p !is ActionProgress.Applied) _pending.value = PendingAction(p, label)
                 }
             }
             if (terminal is ActionProgress.Applied) {
                 val visibleMs = dateUtil.now() - shownAt
                 if (visibleMs < ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS)
                     delay(ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS - visibleMs)
-                _actionProgress.value = null
+                _pending.value = null
             }
         } finally {
             currentRun = null
             // Cancelled mid-wait (dismiss / scope teardown) — don't leave a stuck spinner.
-            val current = _actionProgress.value
+            val current = _pending.value?.progress
             if (current is ActionProgress.Sending || current is ActionProgress.MasterExecuting)
-                _actionProgress.value = null
+                _pending.value = null
         }
         return terminal
     }
 
     override fun dispatch(command: ClientControlActionDispatcher.Command): Flow<ActionProgress> = channelFlow {
         if (!inFlight.compareAndSet(false, true)) {
-            send(ActionProgress.Rejected("another request is already in progress"))
+            send(ActionProgress.Rejected(FailureReason.Busy))
             return@channelFlow
         }
         try {
@@ -175,22 +187,25 @@ class ClientControlRoundTrip @Inject constructor(
                     ClientControlMessage.PreferencesUpdate(command.prefs.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) })
                 is ClientControlActionDispatcher.Command.SceneStart      -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
                 is ClientControlActionDispatcher.Command.SceneStop       -> ClientControlMessage.SceneStop(command.triggerChain)
+                is ClientControlActionDispatcher.Command.TempTargetSet   ->
+                    ClientControlMessage.TempTargetSet(command.timestamp, command.lowTargetMgdl, command.highTargetMgdl, command.durationMinutes, command.reason)
+                is ClientControlActionDispatcher.Command.TempTargetCancel -> ClientControlMessage.TempTargetCancel
             }
             val validUntil = dateUtil.now() + ROUND_TRIP_TTL_MS
             val tracked = publisher.publishTracked(message, validUntil)
             val counter = when (val r = tracked.result) {
                 is ClientControlSendResult.NotPaired     -> {
-                    send(ActionProgress.Rejected("not paired with a master")); return@channelFlow
+                    send(ActionProgress.Rejected(FailureReason.NotPaired)); return@channelFlow
                 }
 
                 is ClientControlSendResult.PublishFailed -> {
-                    send(ActionProgress.Rejected(r.reason ?: "upload failed")); return@channelFlow
+                    send(ActionProgress.Rejected(FailureReason.SendFailed, r.reason)); return@channelFlow
                 }
 
                 is ClientControlSendResult.Success       -> tracked.counter
             }
             if (counter == null) {
-                send(ActionProgress.Rejected("internal error: missing correlation id")); return@channelFlow
+                send(ActionProgress.Rejected(FailureReason.Internal)); return@channelFlow
             }
 
             val plugin = nsClientV3Plugin.get()
@@ -208,14 +223,14 @@ class ClientControlRoundTrip @Inject constructor(
             // unreachable the timeout/poll path covers it.
             val reachJob = launch {
                 plugin.masterReachable.drop(1).filter { !it }.collect {
-                    terminal.complete(ActionProgress.Unconfirmed("connection to master lost while waiting"))
+                    terminal.complete(ActionProgress.Unconfirmed(FailureReason.NotReachable))
                 }
             }
 
             val waitMs = (validUntil + PROPAGATION_MARGIN_MS - dateUtil.now()).coerceAtLeast(0L)
             val result = withTimeoutOrNull(waitMs) { terminal.await() }
                 ?: pollAck(counter)
-                ?: ActionProgress.Unconfirmed("no confirmation from master in time")
+                ?: ActionProgress.Unconfirmed(FailureReason.NoReply)
             ackJob.cancel()
             reachJob.cancel()
             send(result)
@@ -226,10 +241,14 @@ class ClientControlRoundTrip @Inject constructor(
 
     private fun doneOutcome(ack: AckEnvelope): ActionProgress? = when (ack.status) {
         AckStatus.Ok      -> ActionProgress.Applied
-        AckStatus.Failed  -> ActionProgress.Rejected(ack.reason ?: "master rejected the command")
-        AckStatus.Expired -> ActionProgress.Rejected("expired before the master applied it")
+        // ack.reason carries the FailureReason code NAME (set master-side); map it back, Unknown if newer.
+        AckStatus.Failed  -> ActionProgress.Rejected(ack.reason.toFailureReason())
+        AckStatus.Expired -> ActionProgress.Rejected(FailureReason.Expired)
         AckStatus.Pending -> null // not terminal
     }
+
+    private fun String?.toFailureReason(): FailureReason =
+        FailureReason.entries.firstOrNull { it.name == this } ?: FailureReason.Unknown
 
     /** Last-chance single read of the ACK doc before declaring Unconfirmed (covers a WS-missed ack). */
     private suspend fun pollAck(counter: Long): ActionProgress? {

@@ -359,11 +359,11 @@ class ComposeMainActivity : AppCompatActivity() {
                         // (insulin / scenes / synced-preference edits). Hosted once here, feature-
                         // independent; round-trips are single-in-flight so at most one shows. Applied is
                         // cleared by the dispatcher (silent); Rejected/Unconfirmed stay until dismissed.
-                        val actionProgress by clientControlActionDispatcher.actionProgress.collectAsStateWithLifecycle()
-                        actionProgress?.let { progress ->
-                            if (progress !is ActionProgress.Applied)
+                        val pendingAction by clientControlActionDispatcher.pendingAction.collectAsStateWithLifecycle()
+                        pendingAction?.let { pending ->
+                            if (pending.progress !is ActionProgress.Applied)
                                 ClientControlPendingDialog(
-                                    progress = progress,
+                                    pending = pending,
                                     onDismiss = { clientControlActionDispatcher.dismissActionProgress() }
                                 )
                         }

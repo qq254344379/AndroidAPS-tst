@@ -4,30 +4,33 @@ import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
-import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.insulin.InsulinActions
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.objects.extensions.toJsonObject
+import app.aaps.core.ui.R
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * [InsulinActions] implementation. Client → confirmed round-trip ([ClientControlActionDispatcher.run],
- * which drives the single app-level modal); master → local profile switch over the active profile.
+ * [InsulinActions] implementation. Goes through [ClientControlActionDispatcher.execute], which owns the
+ * role-branch and the failure dialog; this just maps domain → command + the master-local block.
  */
 @Singleton
 class InsulinActionsImpl @Inject constructor(
-    private val config: Config,
     private val dispatcher: ClientControlActionDispatcher,
-    private val profileFunction: ProfileFunction
+    private val profileFunction: ProfileFunction,
+    private val rh: ResourceHelper
 ) : InsulinActions {
 
     override suspend fun activate(iCfg: ICfg): ActionProgress =
-        if (config.AAPSCLIENT)
-            // Follower: send only the iCfg; the master re-applies its OWN current profile with it and the
-            // resulting profile switch syncs back. The round-trip drives the modal + returns the ACK.
-            dispatcher.run(ClientControlActionDispatcher.Command.InsulinActivate(iCfg.toJsonObject().toString()))
-        else
+        dispatcher.execute(
+            ClientControlActionDispatcher.Command.InsulinActivate(iCfg.toJsonObject().toString()),
+            rh.gs(R.string.clientcontrol_action_activate_insulin, iCfg.insulinLabel)
+        ) {
+            // Master: re-apply the active profile with this insulin. No active profile → can't apply.
             if (profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)) ActionProgress.Applied
-            else ActionProgress.Rejected(null)
+            else ActionProgress.Rejected(FailureReason.NoActiveProfile)
+        }
 }

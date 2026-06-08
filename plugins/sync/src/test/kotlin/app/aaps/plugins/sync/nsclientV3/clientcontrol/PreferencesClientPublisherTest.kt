@@ -3,6 +3,7 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.LongComposedKey
@@ -33,6 +34,7 @@ class PreferencesClientPublisherTest {
     @Mock lateinit var preferences: Preferences
     @Mock lateinit var clientControlRoundTrip: ClientControlRoundTrip
     @Mock lateinit var config: Config
+    @Mock lateinit var rh: ResourceHelper
     @Mock lateinit var aapsLogger: AAPSLogger
 
     private val changes = MutableSharedFlow<NonPreferenceKey>(extraBufferCapacity = 10)
@@ -44,10 +46,11 @@ class PreferencesClientPublisherTest {
     fun setup() {
         MockitoAnnotations.openMocks(this)
         whenever(config.AAPSCLIENT).thenReturn(true)
+        whenever(rh.gs(any<Int>())).thenReturn("update settings")
         whenever(preferences.syncedLocalChanges).thenReturn(changes)
         whenever(preferences.get(key as BooleanNonPreferenceKey)).thenReturn(true)
         whenever(preferences.get(LongComposedKey.SyncedPrefModified, key.key)).thenReturn(100L)
-        sut = PreferencesClientPublisher(preferences, clientControlRoundTrip, config, aapsLogger)
+        sut = PreferencesClientPublisher(preferences, clientControlRoundTrip, config, rh, aapsLogger)
     }
 
     @Test
@@ -58,7 +61,7 @@ class PreferencesClientPublisherTest {
         changes.emit(key)
         advanceTimeBy(600); runCurrent() // settle window
 
-        verify(clientControlRoundTrip).run(eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(key.key to ("true" to 100L)))))
+        verify(clientControlRoundTrip).run(eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(key.key to ("true" to 100L)))), any())
     }
 
     @Test
@@ -75,7 +78,7 @@ class PreferencesClientPublisherTest {
         advanceTimeBy(600); runCurrent() // single settle → single round-trip
 
         verify(clientControlRoundTrip).run(
-            eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(key.key to ("true" to 100L), pct.key to ("80" to 200L))))
+            eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(key.key to ("true" to 100L), pct.key to ("80" to 200L)))), any()
         )
     }
 
@@ -91,7 +94,7 @@ class PreferencesClientPublisherTest {
         changes.emit(qw)
         advanceTimeBy(600); runCurrent()
 
-        verify(clientControlRoundTrip).run(eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(qw.key to (blob to 300L)))))
+        verify(clientControlRoundTrip).run(eq(ClientControlActionDispatcher.Command.PreferenceEdit(mapOf(qw.key to (blob to 300L)))), any())
     }
 
     @Test
@@ -102,6 +105,6 @@ class PreferencesClientPublisherTest {
         changes.emit(key)
         advanceTimeBy(600); runCurrent()
 
-        verify(clientControlRoundTrip, never()).run(any())
+        verify(clientControlRoundTrip, never()).run(any(), any())
     }
 }

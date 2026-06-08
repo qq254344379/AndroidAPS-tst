@@ -2,6 +2,8 @@ package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
+import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
@@ -46,6 +48,7 @@ internal class ClientControlRoundTripTest {
     @Mock private lateinit var nsClientV3Plugin: NSClientV3Plugin
     @Mock private lateinit var nsAndroidClient: NSAndroidClient
     @Mock private lateinit var nsClientRepository: NSClientRepository
+    @Mock private lateinit var config: Config
     @Mock private lateinit var dateUtil: DateUtil
     @Mock private lateinit var aapsLogger: AAPSLogger
 
@@ -69,7 +72,8 @@ internal class ClientControlRoundTripTest {
         whenever(pairingRepository.secretBytesOrNull()).thenReturn(secret)
         whenever(nsClientV3Plugin.masterReachable).thenReturn(reachable)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
-        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, aapsLogger)
     }
 
     private suspend fun stubPublish(result: ClientControlSendResult, ctr: Long? = counter) {
@@ -101,10 +105,10 @@ internal class ClientControlRoundTripTest {
         val out = mutableListOf<ActionProgress>()
         val job = launch { sut.dispatch(cmd).collect { out += it } }
         runCurrent()
-        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Failed, reason = "no active profile to re-apply"))
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Failed, reason = FailureReason.NoActiveProfile.name))
         runCurrent()
         job.join()
-        assertThat(out.last()).isEqualTo(ActionProgress.Rejected("no active profile to re-apply"))
+        assertThat(out.last()).isEqualTo(ActionProgress.Rejected(FailureReason.NoActiveProfile))
     }
 
     @Test
@@ -123,7 +127,7 @@ internal class ClientControlRoundTripTest {
     fun notPairedEmitsRejectedWithoutWaiting() = runTest {
         stubPublish(ClientControlSendResult.NotPaired, ctr = null)
         val out = sut.dispatch(cmd).let { flow -> mutableListOf<ActionProgress>().also { l -> launch { flow.collect { l += it } }.join() } }
-        assertThat(out).containsExactly(ActionProgress.Sending, ActionProgress.Rejected("not paired with a master")).inOrder()
+        assertThat(out).containsExactly(ActionProgress.Sending, ActionProgress.Rejected(FailureReason.NotPaired)).inOrder()
     }
 
     @Test
@@ -146,7 +150,7 @@ internal class ClientControlRoundTripTest {
         reachable.value = false
         runCurrent()
         job.join()
-        assertThat(out.last()).isEqualTo(ActionProgress.Unconfirmed("connection to master lost while waiting"))
+        assertThat(out.last()).isEqualTo(ActionProgress.Unconfirmed(FailureReason.NotReachable))
     }
 
     /** Safety: a validly-shaped but WRONG-secret ACK must NOT resolve to Applied. */
@@ -201,26 +205,26 @@ internal class ClientControlRoundTripTest {
         verify(nsClientV3Plugin, never()).bumpMasterSignal(any())
     }
 
-    // ---- run() drives the single app-level modal (actionProgress) ----
+    // ---- run() drives the single app-level modal (pendingAction) ----
 
     @Test
     fun runSendsCommandAndClearsModalOnApplied() = runTest {
         stubPublish(ClientControlSendResult.Success)
         val cmdPref = ClientControlActionDispatcher.Command.PreferenceEdit(mapOf("boluswizard_percentage" to ("80" to 100L)))
-        val job = launch { sut.run(cmdPref) }
+        val job = launch { sut.run(cmdPref, "update settings") }
         runCurrent()
         sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok))
         advanceUntilIdle() // lets the MIN_MODAL_VISIBLE_MS hold elapse before the auto-dismiss
         job.join()
         verify(publisher).publishTracked(argThat { this is ClientControlMessage.PreferencesUpdate }, any(), any())
-        assertThat(sut.actionProgress.value).isNull() // Applied → silent dismiss
+        assertThat(sut.pendingAction.value).isNull() // Applied → silent dismiss
     }
 
     @Test
     fun runReturnsAppliedTerminal() = runTest {
         stubPublish(ClientControlSendResult.Success)
         var terminal: ActionProgress? = null
-        val job = launch { terminal = sut.run(cmd) }
+        val job = launch { terminal = sut.run(cmd, "do thing") }
         runCurrent()
         sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Ok))
         advanceUntilIdle()
@@ -231,26 +235,26 @@ internal class ClientControlRoundTripTest {
     @Test
     fun runRejectedKeepsModalUntilDismiss() = runTest {
         stubPublish(ClientControlSendResult.Success)
-        val job = launch { sut.run(cmd) }
+        val job = launch { sut.run(cmd, "do thing") }
         runCurrent()
-        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Failed, reason = "nope"))
+        sut.onAckDoc(ackDoc(AckPhase.Done, AckStatus.Failed, reason = FailureReason.ExecutionFailed.name))
         advanceUntilIdle()
         job.join()
-        assertThat(sut.actionProgress.value).isInstanceOf(ActionProgress.Rejected::class.java)
+        assertThat(sut.pendingAction.value?.progress).isInstanceOf(ActionProgress.Rejected::class.java)
         sut.dismissActionProgress()
-        assertThat(sut.actionProgress.value).isNull()
+        assertThat(sut.pendingAction.value).isNull()
     }
 
     @Test
     fun dismissWhileWaitingClearsModalAndStopsRun() = runTest {
         stubPublish(ClientControlSendResult.Success)
-        val job = launch { sut.run(cmd) }
+        val job = launch { sut.run(cmd, "do thing") }
         runCurrent() // waiting (Sending/MasterExecuting), modal up
-        assertThat(sut.actionProgress.value).isInstanceOf(ActionProgress.Sending::class.java)
+        assertThat(sut.pendingAction.value?.progress).isInstanceOf(ActionProgress.Sending::class.java)
         sut.dismissActionProgress() // "stop waiting"
         advanceUntilIdle()
         job.join()
-        assertThat(sut.actionProgress.value).isNull()
+        assertThat(sut.pendingAction.value).isNull()
     }
 
     @Test
@@ -262,7 +266,7 @@ internal class ClientControlRoundTripTest {
 
         val out2 = mutableListOf<ActionProgress>()
         launch { sut.dispatch(cmd).collect { out2 += it } }.join()
-        assertThat(out2).containsExactly(ActionProgress.Rejected("another request is already in progress"))
+        assertThat(out2).containsExactly(ActionProgress.Rejected(FailureReason.Busy))
 
         job1.cancel() // releases inFlight via finally
     }

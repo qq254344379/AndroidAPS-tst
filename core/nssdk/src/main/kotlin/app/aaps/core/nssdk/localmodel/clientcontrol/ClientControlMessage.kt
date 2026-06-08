@@ -97,6 +97,26 @@ sealed class ClientControlMessage {
     data class PreferencesUpdate(
         val prefs: Map<String, PrefEntry>
     ) : ClientControlMessage()
+
+    /**
+     * Client asks the master to set a temp target. The master re-creates the TT (with its own source)
+     * and applies it locally; the resulting record syncs back. [timestamp] carries the client's intended
+     * start time (supports a back-dated event time); targets are mg/dL; [reason] is `TT.Reason.text`.
+     */
+    @Serializable
+    @SerialName("temp_target_set")
+    data class TempTargetSet(
+        val timestamp: Long,
+        val lowTargetMgdl: Double,
+        val highTargetMgdl: Double,
+        val durationMinutes: Int,
+        val reason: String
+    ) : ClientControlMessage()
+
+    /** Client asks the master to cancel the currently active temp target. */
+    @Serializable
+    @SerialName("temp_target_cancel")
+    data object TempTargetCancel : ClientControlMessage()
 }
 
 /** One synced preference on the wire: its value (serialized as a string) and edit timestamp. */

@@ -16,29 +16,40 @@ import kotlinx.coroutines.flow.StateFlow
 interface ClientControlActionDispatcher {
 
     /**
-     * Low-level: send [command] and emit progress until a terminal [ActionProgress]
-     * ([ActionProgress.Applied] / [ActionProgress.Rejected] / [ActionProgress.Unconfirmed]). Most
-     * callers should use [run] instead — it also drives the single app-level modal ([actionProgress]).
+     * Low-level: send [command] and emit progress until a terminal [ActionProgress]. Most callers
+     * should use [execute] (or [run]) instead — those also drive the single app-level modal.
      */
     fun dispatch(command: Command): Flow<ActionProgress>
 
     /**
-     * Run [command] and drive the **single, app-level** pending modal ([actionProgress]) for its whole
-     * lifecycle, returning the terminal [ActionProgress] for the caller's feature-specific follow-up
-     * (e.g. a snackbar / data refresh on [ActionProgress.Applied]). The modal is hosted once (in the
-     * activity) and is feature-independent — callers don't render it themselves. Round-trips are
+     * Run [command] over the round-trip (client side) and drive the **single, app-level** pending modal
+     * ([pendingAction]) for its whole lifecycle, returning the terminal [ActionProgress]. [label] is a
+     * short, already-localized description of the action shown in the modal. Round-trips are
      * single-in-flight, so there's at most one modal at a time.
      */
-    suspend fun run(command: Command): ActionProgress
+    suspend fun run(command: Command, label: String): ActionProgress
 
     /**
-     * The single client-control pending-modal signal, fed by every [run] regardless of which feature
-     * triggered it. Non-null while the modal should show; cleared on success / dismiss. Hosted once at
-     * the app root. Default empty for impls without the channel.
+     * **The generalization point for user-initiated actions.** Resolves [command] for the right role
+     * and surfaces the result through the one app-level modal for BOTH roles:
+     *  - **client** → the round-trip ([run]);
+     *  - **master** → runs [localExecute] and, if it fails (non-[ActionProgress.Applied]), shows the
+     *    same modal (success is silent — instant).
+     *
+     * [label] is a short, already-localized action description ("set temp target", "activate scene
+     * Sleep"). Returns the terminal for the caller's success follow-up. **Do not** use this for inbound
+     * remote commands applied on the master — those must not pop a master dialog (use the domain API).
      */
-    val actionProgress: StateFlow<ActionProgress?> get() = NO_ACTION_PROGRESS
+    suspend fun execute(command: Command, label: String, localExecute: suspend () -> ActionProgress): ActionProgress
 
-    /** Dismiss the modal (terminal Rejected/Unconfirmed) or stop waiting on an in-flight [run]. */
+    /**
+     * The single client-control modal signal (progress + label), fed by every [run]/[execute]
+     * regardless of feature. Non-null while the modal should show; cleared on success / dismiss. Hosted
+     * once at the app root. Default empty for impls without the channel.
+     */
+    val pendingAction: StateFlow<PendingAction?> get() = NO_PENDING_ACTION
+
+    /** Dismiss the modal (terminal Rejected/Unconfirmed) or stop waiting on an in-flight action. */
     fun dismissActionProgress() {}
 
     /** The closed set of actions dispatchable through the round-trip channel. */
@@ -58,6 +69,18 @@ interface ClientControlActionDispatcher {
 
         /** Deactivate the master's active scene; [triggerChain] = also fire its configured chain target. */
         data class SceneStop(val triggerChain: Boolean) : Command
+
+        /** Set a temp target on the master ([timestamp] = intended start time; targets mg/dL; reason text). */
+        data class TempTargetSet(
+            val timestamp: Long,
+            val lowTargetMgdl: Double,
+            val highTargetMgdl: Double,
+            val durationMinutes: Int,
+            val reason: String
+        ) : Command
+
+        /** Cancel the master's currently active temp target. */
+        data object TempTargetCancel : Command
     }
 
     companion object {
@@ -66,8 +89,8 @@ interface ClientControlActionDispatcher {
          *  Shared by every modal driven off this dispatcher (pref edits and the insulin activation). */
         const val MIN_MODAL_VISIBLE_MS = 1_500L
 
-        // Shared empty flow for the default [actionProgress] (impls without the channel) —
+        // Shared empty flow for the default [pendingAction] (impls without the channel) —
         // a single instance, so the default getter doesn't allocate per call.
-        private val NO_ACTION_PROGRESS: StateFlow<ActionProgress?> = MutableStateFlow(null)
+        private val NO_PENDING_ACTION: StateFlow<PendingAction?> = MutableStateFlow(null)
     }
 }

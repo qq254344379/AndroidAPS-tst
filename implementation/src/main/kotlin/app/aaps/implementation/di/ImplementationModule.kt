@@ -41,6 +41,7 @@ import app.aaps.core.interfaces.stats.DexcomTirCalculator
 import app.aaps.core.interfaces.stats.TddCalculator
 import app.aaps.core.interfaces.stats.TirCalculator
 import app.aaps.core.interfaces.storage.Storage
+import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.ui.IconsProvider
 import app.aaps.core.interfaces.userEntry.UserEntryPresentationHelper
 import app.aaps.core.interfaces.utils.DecimalFormatter
@@ -93,6 +94,7 @@ import app.aaps.implementation.stats.DexcomTirCalculatorImpl
 import app.aaps.implementation.stats.TddCalculatorImpl
 import app.aaps.implementation.stats.TirCalculatorImpl
 import app.aaps.implementation.storage.FileStorage
+import app.aaps.implementation.tempTargets.TempTargetActionsImpl
 import app.aaps.implementation.userEntry.UserEntryPresentationHelperImpl
 import app.aaps.implementation.utils.DecimalFormatterImpl
 import app.aaps.implementation.utils.HardLimitsImpl
@@ -139,6 +141,7 @@ class ImplementationModule {
         @Binds fun bindInsulin(insulinImpl: InsulinImpl): Insulin
         @Binds fun bindInsulinManager(insulinImpl: InsulinImpl): InsulinManager
         @Binds fun bindInsulinActions(impl: InsulinActionsImpl): InsulinActions
+        @Binds fun bindTempTargetActions(impl: TempTargetActionsImpl): TempTargetActions
         @Binds fun bindConcentrationHelper(concentrationHelperImpl: ConcentrationHelperImpl): ConcentrationHelper
         @Binds fun bindDetailedBolusInfoStorage(detailedBolusInfoStorageImpl: DetailedBolusInfoStorageImpl): DetailedBolusInfoStorage
         @Binds fun bindTemporaryBasalStorage(temporaryBasalStorageImpl: TemporaryBasalStorageImpl): TemporaryBasalStorage

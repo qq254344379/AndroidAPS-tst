@@ -8,6 +8,10 @@ package app.aaps.core.interfaces.clientcontrol
  * means "definitely not applied" (safe to tell the user nothing happened), while [Unconfirmed] means
  * "unknown" — the command was sent but no result came back in time, so the real state must be read
  * from normal sync-back, not assumed. A therapy action must never be reported as done on uncertainty.
+ *
+ * Failures carry a [FailureReason] **code** (not free text) so the message can be localized on the
+ * showing device — crucial for a master→client ack, where free text would arrive in the master's
+ * locale. [detail] is optional extra context (counts, an exception message) for display/logs.
  */
 sealed interface ActionProgress {
 
@@ -21,8 +25,35 @@ sealed interface ActionProgress {
     data object Applied : ActionProgress
 
     /** Terminal: definitely not applied — master refused / failed, or it never reached NS. */
-    data class Rejected(val reason: String?) : ActionProgress
+    data class Rejected(val reason: FailureReason, val detail: String? = null) : ActionProgress
 
-    /** Terminal (remote only): sent, but no confirmation before the deadline / connection lost. State unknown. */
-    data class Unconfirmed(val reason: String?) : ActionProgress
+    /** Terminal (remote only): sent, but no confirmation before the deadline / connection lost. Unknown. */
+    data class Unconfirmed(val reason: FailureReason, val detail: String? = null) : ActionProgress
+}
+
+/**
+ * Localizable failure code for [ActionProgress.Rejected] / [ActionProgress.Unconfirmed]. The wire/ack
+ * carries the enum **name**; the showing device maps it to a localized string (unknown names → [Unknown]
+ * for forward compatibility).
+ */
+enum class FailureReason {
+
+    // --- transport / round-trip (client side) ---
+    NotPaired,       // this device isn't paired with a master
+    NotReachable,    // master offline — couldn't send, or connection lost mid-wait (Unconfirmed)
+    NoReply,         // sent, but no confirmation before the deadline (Unconfirmed)
+    Expired,         // master dropped it as too old to apply safely
+    Busy,            // another client-control action is already in progress
+    SendFailed,      // upload to Nightscout failed (detail = transport error)
+
+    // --- master-side execution ---
+    NoActiveProfile, // insulin: master has no active profile to re-apply onto
+    SceneNotFound,   // scene no longer exists
+    SceneDisabled,   // scene is disabled
+    PartialFailure,  // scene chained but some actions failed (detail = "x/y")
+    ExecutionFailed, // master-side execution failed (detail = message)
+
+    // --- catch-alls ---
+    Internal,        // a bug / unexpected state (shouldn't normally surface)
+    Unknown          // unrecognised code (e.g. newer master) or unmapped failure
 }

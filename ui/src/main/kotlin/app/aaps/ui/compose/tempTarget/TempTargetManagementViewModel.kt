@@ -7,9 +7,7 @@ import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.model.TTPreset
-import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.observeChanges
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -17,8 +15,10 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowSnackbar
+import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.tempTargets.toJson
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.BooleanKey
@@ -57,7 +57,8 @@ class TempTargetManagementViewModel @Inject constructor(
     val rh: ResourceHelper,
     val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger,
-    private val rxBus: RxBus
+    private val rxBus: RxBus,
+    private val tempTargetActions: TempTargetActions
 ) : ViewModel() {
 
     val units: GlucoseUnit
@@ -552,45 +553,26 @@ class TempTargetManagementViewModel @Inject constructor(
      */
     fun activateWithEditorValues(onSuccess: () -> Unit) {
         viewModelScope.launch {
-            try {
-                val currentState = uiState.value
-                val timestamp = if (currentState.eventTimeChanged) {
-                    currentState.eventTime
-                } else {
-                    dateUtil.now()
-                }
+            val currentState = uiState.value
+            val timestamp = if (currentState.eventTimeChanged) currentState.eventTime else dateUtil.now()
+            // Convert target from user units (display) to mg/dL (database storage)
+            val targetMgdl = profileUtil.convertToMgdl(currentState.editorTarget, units)
+            val durationMinutes = (currentState.editorDuration / 60000L).toInt()
+            val reason = currentState.selectedPreset?.reason ?: TT.Reason.CUSTOM
+            val notes = currentState.notes.takeIf { it.isNotBlank() }
 
-                // Convert target from user units (display) to mg/dL (database storage)
-                val targetMgdl = profileUtil.convertToMgdl(currentState.editorTarget, units)
-                val durationMs = currentState.editorDuration
-                val reason = currentState.selectedPreset?.reason ?: TT.Reason.CUSTOM
-                val notes = currentState.notes.takeIf { it.isNotBlank() }
-
-                // Create TT object
-                val tempTarget = TT(
-                    timestamp = timestamp,
-                    duration = durationMs,
-                    reason = reason,
-                    lowTarget = targetMgdl,
-                    highTarget = targetMgdl
-                )
-
-                persistenceLayer.insertAndCancelCurrentTemporaryTarget(
-                    temporaryTarget = tempTarget,
-                    action = Action.TT,
-                    source = Sources.TTDialog,
-                    note = notes,
-                    listValues = listOf(
-                        ValueWithUnit.Mgdl(targetMgdl),
-                        ValueWithUnit.Minute((durationMs / 60000L).toInt())
-                    )
-                )
-                if (durationMs / 60000L == 10L) preferences.put(BooleanNonKey.ObjectivesTempTargetUsed, true)
-
+            // One path for both roles: master writes locally, client round-trips (driving the app-level
+            // modal). Only continue (mark objective / close) once the master has actually applied it.
+            val result = tempTargetActions.set(
+                reason = reason, lowMgdl = targetMgdl, highMgdl = targetMgdl,
+                durationMinutes = durationMinutes, timestamp = timestamp,
+                source = Sources.TTDialog, note = notes
+            )
+            if (result is ActionProgress.Applied) {
+                if (durationMinutes == 10) preferences.put(BooleanNonKey.ObjectivesTempTargetUsed, true)
                 onSuccess()
-            } catch (e: Exception) {
-                aapsLogger.error(LTag.UI, "Failed to activate temp target", e)
             }
+            // Rejected/Unconfirmed are surfaced by the central modal; the screen stays open.
         }
     }
 
@@ -599,19 +581,8 @@ class TempTargetManagementViewModel @Inject constructor(
      */
     fun cancelActive() {
         viewModelScope.launch {
-            try {
-                persistenceLayer.cancelCurrentTemporaryTargetIfAny(
-                    timestamp = dateUtil.now(),
-                    action = Action.CANCEL_TT,
-                    source = Sources.TTDialog,
-                    note = null,
-                    listValues = emptyList()
-                )
-
-                loadData()
-            } catch (e: Exception) {
-                aapsLogger.error(LTag.UI, "Failed to cancel temp target", e)
-            }
+            tempTargetActions.cancel(source = Sources.TTDialog, note = null)
+            loadData()
         }
     }
 }

@@ -45,6 +45,7 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneActions
+import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
@@ -115,6 +116,7 @@ class MainViewModel @Inject constructor(
     private val protectionCheck: ProtectionCheck,
     private val sceneRepository: SceneStore,
     private val sceneActions: SceneActions,
+    private val tempTargetActions: TempTargetActions,
     private val sceneChainTargetResolver: SceneChainResolver,
     private val activeSceneManager: ActiveSceneSync,
     private val rxBus: RxBus,
@@ -790,23 +792,13 @@ class MainViewModel @Inject constructor(
             is ConfirmableAction.ActivateTempTargetPreset -> {
                 val presets = preferences.get(StringNonKey.TempTargetPresets).toTTPresetsWithNameRes()
                 val preset = presets.find { it.id == action.presetId } ?: return@launch
+                // One path for both roles (master writes locally, client round-trips → app-level modal).
+                // The active-TT chip follows from DB observers / sync-back, so we don't need the result.
                 viewModelScope.launch {
-                    val tempTarget = TT(
-                        timestamp = dateUtil.now(),
-                        duration = preset.duration,
-                        reason = preset.reason,
-                        lowTarget = preset.targetValue,
-                        highTarget = preset.targetValue
-                    )
-                    persistenceLayer.insertAndCancelCurrentTemporaryTarget(
-                        temporaryTarget = tempTarget,
-                        action = Action.TT,
-                        source = Sources.TTDialog,
-                        note = null,
-                        listValues = listOf(
-                            ValueWithUnit.Mgdl(preset.targetValue),
-                            ValueWithUnit.Minute((preset.duration / 60000L).toInt())
-                        )
+                    tempTargetActions.set(
+                        reason = preset.reason, lowMgdl = preset.targetValue, highMgdl = preset.targetValue,
+                        durationMinutes = (preset.duration / 60000L).toInt(), timestamp = dateUtil.now(),
+                        source = Sources.TTDialog, note = null
                     )
                 }
             }

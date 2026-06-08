@@ -4,6 +4,7 @@ import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.DoubleNonPreferenceKey
@@ -48,6 +49,7 @@ class PreferencesClientPublisher @Inject constructor(
     private val preferences: Preferences,
     private val clientControlRoundTrip: ClientControlRoundTrip,
     private val config: Config,
+    private val rh: ResourceHelper,
     private val aapsLogger: AAPSLogger
 ) {
 
@@ -70,7 +72,10 @@ class PreferencesClientPublisher @Inject constructor(
                     aapsLogger.debug(LTag.NSCLIENT, "ClientControl: preferences.update round-trip keys=${changes.keys}")
                     // Suspends until the round-trip resolves (drives the single app-level modal); further
                     // edits queue in `pending` and ship next — never two concurrent pref round-trips.
-                    clientControlRoundTrip.run(ClientControlActionDispatcher.Command.PreferenceEdit(changes))
+                    clientControlRoundTrip.run(
+                        ClientControlActionDispatcher.Command.PreferenceEdit(changes),
+                        rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_update_settings)
+                    )
                 }
         }
     }

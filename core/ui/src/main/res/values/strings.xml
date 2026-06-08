@@ -393,6 +393,29 @@
     <string name="master_offline_banner">Master device unreachable. Editing is disabled until the connection is restored.</string>
     <string name="scene_lock_reason_master_offline">Master disconnected</string>
     <string name="scene_lock_reason_scene_active">Stop the running scene first</string>
+
+    <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
+    <string name="clientcontrol_action_set_temp_target">set temp target</string>
+    <string name="clientcontrol_action_cancel_temp_target">cancel temp target</string>
+    <string name="clientcontrol_action_activate_scene">activate scene %1$s</string>
+    <string name="clientcontrol_action_deactivate_scene">end scene</string>
+    <string name="clientcontrol_action_activate_insulin">activate insulin %1$s</string>
+    <string name="clientcontrol_action_update_settings">update settings</string>
+
+    <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
+    <string name="clientcontrol_fail_not_paired">This device isn\'t paired with a master.</string>
+    <string name="clientcontrol_fail_not_reachable">The master is offline.</string>
+    <string name="clientcontrol_fail_no_reply">No reply from the master in time.</string>
+    <string name="clientcontrol_fail_expired">The command expired before the master applied it.</string>
+    <string name="clientcontrol_fail_busy">Another action is already in progress.</string>
+    <string name="clientcontrol_fail_send_failed">Couldn\'t reach Nightscout.</string>
+    <string name="clientcontrol_fail_no_active_profile">The master has no active profile to apply it onto.</string>
+    <string name="clientcontrol_fail_scene_not_found">The scene no longer exists.</string>
+    <string name="clientcontrol_fail_scene_disabled">The scene is disabled.</string>
+    <string name="clientcontrol_fail_partial">Some actions couldn\'t be applied.</string>
+    <string name="clientcontrol_fail_execution">The master couldn\'t apply it.</string>
+    <string name="clientcontrol_fail_internal">Something went wrong.</string>
+    <string name="clientcontrol_fail_unknown">The command failed.</string>
     <string name="scene_revert_tt">Cancel temporary target</string>
     <string name="scene_revert_profile">Revert profile change</string>
     <string name="scene_revert_smb_on">Re-enable SMB</string>

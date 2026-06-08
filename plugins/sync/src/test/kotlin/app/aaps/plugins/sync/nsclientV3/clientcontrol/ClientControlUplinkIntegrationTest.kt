@@ -19,6 +19,8 @@ import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -97,6 +99,8 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
+    @Mock private lateinit var persistenceLayer: PersistenceLayer
+    @Mock private lateinit var rh: ResourceHelper
     private var masterAuthorizedClients = "[]"
     private var masterModified = 0L
     private var masterAppliedValue: String? = null
@@ -115,6 +119,7 @@ class ClientControlUplinkIntegrationTest {
 
         // ---------- client Preferences fake ----------
         whenever(clientConfig.AAPSCLIENT).thenReturn(true)
+        whenever(rh.gs(any<Int>())).thenReturn("update settings")
         whenever(clientPrefs.syncedLocalChanges).thenReturn(syncedLocalChanges)
         clientStrings[StringNonKey.AutomationEvents.key] = automationJson
         whenever(clientPrefs.get(any<StringNonPreferenceKey>())).thenAnswer { clientStrings[it.getArgument<StringNonPreferenceKey>(0).key] ?: "" }
@@ -155,13 +160,13 @@ class ClientControlUplinkIntegrationTest {
         // ---------- real components ----------
         clientPairingRepository = ClientPairingRepository(clientPrefs, secureEncrypt, aapsLogger)
         clientControlPublisher = ClientControlPublisher(clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
-        val clientControlRoundTrip = ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
-        preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, aapsLogger)
+        val clientControlRoundTrip = ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, clientConfig, dateUtil, aapsLogger)
+        preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, rh, aapsLogger)
 
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, aapsLogger
+            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, aapsLogger
         )
 
         // ---------- pairing: same secret on both sides ----------

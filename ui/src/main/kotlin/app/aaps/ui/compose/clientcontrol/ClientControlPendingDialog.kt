@@ -17,44 +17,45 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.clientcontrol.PendingAction
 import app.aaps.ui.R
 import app.aaps.core.ui.R as CoreUiR
 
 /**
- * Modal shown while a client→master round-trip action is in flight, and for its terminal
- * non-success states. [ActionProgress.Applied] is handled by the caller (dismiss + confirm), so it is
- * never passed here.
+ * Modal shown while a client-control action is in flight, and for its terminal failure states. The
+ * [PendingAction] carries the already-localized action [label] (built on the initiating device) and the
+ * [ActionProgress]; failures carry a [FailureReason] code mapped to a localized message **here**, so a
+ * master→client failure reads in the client's locale. [ActionProgress.Applied] is handled by the caller
+ * (dismiss + confirm), so it never reaches this dialog.
  *
- * While waiting ([ActionProgress.Sending] / [ActionProgress.MasterExecuting]) the only action is
- * "Stop waiting" — deliberately not "Cancel": the command may already have been uploaded and could
- * still apply on the master; dismissing only stops watching for the result.
- *
- * Modal: back-press and tap-outside are disabled, so the dialog can only be left via its buttons —
- * a stray tap can't silently drop a therapy action mid-flight.
+ * Modal: back-press and tap-outside are disabled — a stray tap can't silently drop a therapy action.
  */
 @Composable
 fun ClientControlPendingDialog(
-    progress: ActionProgress,
+    pending: PendingAction,
     onDismiss: () -> Unit
 ) {
-    // Sending and MasterExecuting share one visual ("working") so the dialog doesn't resize mid-flight
-    // as the state advances — only the terminal states differ.
+    val progress = pending.progress
+    // Sending and MasterExecuting share one visual ("working") so the dialog doesn't resize mid-flight.
     val waiting = progress is ActionProgress.Sending || progress is ActionProgress.MasterExecuting
 
-    val title = when (progress) {
-        is ActionProgress.Rejected    -> stringResource(R.string.clientcontrol_pending_rejected_title)
-        is ActionProgress.Unconfirmed -> stringResource(R.string.clientcontrol_pending_unconfirmed_title)
-        else                          -> stringResource(R.string.clientcontrol_pending_working_title) // Sending/MasterExecuting/(Applied)
+    // A partial failure (e.g. a chained scene where some target actions failed) mostly succeeded — don't
+    // dress it up as a flat rejection.
+    val partial = progress is ActionProgress.Rejected && progress.reason == FailureReason.PartialFailure
+
+    val title = when {
+        partial                            -> stringResource(R.string.clientcontrol_pending_partial_title)
+        progress is ActionProgress.Rejected    -> stringResource(R.string.clientcontrol_pending_rejected_title)
+        progress is ActionProgress.Unconfirmed -> stringResource(R.string.clientcontrol_pending_unconfirmed_title)
+        else                                   -> stringResource(R.string.clientcontrol_pending_working_title) // Sending/MasterExecuting
     }
 
     AlertDialog(
-        // Modal: only the buttons dismiss it; back-press / tap-outside are disabled so a therapy
-        // action in flight can't be dropped by a stray tap.
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         title = { Text(title) },
         text = {
-            // Fixed width + min height keep the dialog a stable size across state transitions.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -62,8 +63,13 @@ fun ClientControlPendingDialog(
                 verticalArrangement = Arrangement.Center
             ) {
                 when (progress) {
-                    is ActionProgress.Rejected    -> Text(progress.reason ?: stringResource(R.string.clientcontrol_pending_rejected_text))
-                    is ActionProgress.Unconfirmed -> Text(stringResource(R.string.clientcontrol_pending_unconfirmed_text))
+                    is ActionProgress.Rejected    ->
+                        if (partial) Text(stringResource(R.string.clientcontrol_pending_partial_format, pending.label))
+                        else Text(stringResource(R.string.clientcontrol_pending_failed_format, pending.label, reasonText(progress.reason)))
+
+                    is ActionProgress.Unconfirmed ->
+                        Text(stringResource(R.string.clientcontrol_pending_unconfirmed_format, pending.label, reasonText(progress.reason)))
+
                     else                          ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
@@ -80,3 +86,23 @@ fun ClientControlPendingDialog(
         }
     )
 }
+
+/** Localized message for a [FailureReason] code (unknown codes from a newer master → generic). */
+@Composable
+private fun reasonText(reason: FailureReason): String = stringResource(
+    when (reason) {
+        FailureReason.NotPaired       -> CoreUiR.string.clientcontrol_fail_not_paired
+        FailureReason.NotReachable    -> CoreUiR.string.clientcontrol_fail_not_reachable
+        FailureReason.NoReply         -> CoreUiR.string.clientcontrol_fail_no_reply
+        FailureReason.Expired         -> CoreUiR.string.clientcontrol_fail_expired
+        FailureReason.Busy            -> CoreUiR.string.clientcontrol_fail_busy
+        FailureReason.SendFailed      -> CoreUiR.string.clientcontrol_fail_send_failed
+        FailureReason.NoActiveProfile -> CoreUiR.string.clientcontrol_fail_no_active_profile
+        FailureReason.SceneNotFound   -> CoreUiR.string.clientcontrol_fail_scene_not_found
+        FailureReason.SceneDisabled   -> CoreUiR.string.clientcontrol_fail_scene_disabled
+        FailureReason.PartialFailure  -> CoreUiR.string.clientcontrol_fail_partial
+        FailureReason.ExecutionFailed -> CoreUiR.string.clientcontrol_fail_execution
+        FailureReason.Internal        -> CoreUiR.string.clientcontrol_fail_internal
+        FailureReason.Unknown         -> CoreUiR.string.clientcontrol_fail_unknown
+    }
+)
