@@ -11,6 +11,8 @@ import app.aaps.core.interfaces.source.BgSource
 import app.aaps.core.interfaces.source.NSClientSource
 import app.aaps.core.interfaces.sync.DataSyncSelector
 import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.LongNonKey
+import app.aaps.plugins.sync.nsShared.StoreDataForDbImpl
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientLongKey
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -745,6 +747,24 @@ class DataSyncSelectorV3Test : TestBaseWithProfile() {
         sut.processChangedProfileStore()
 
         verify(nsClientV3Plugin, Times(0)).nsAdd(any(), any(), any(), anyOrNull())
+        Unit
+    }
+
+    @Test
+    fun processChangedProfileStoreUploadsPumpIncompatibleStoreTest() = runTest {
+        // A profile that's valid but not deliverable by the current pump (basal 1 U/h, below the
+        // pump's 2.0 minimum) must STILL upload — the sync gate is semantic-only now. Under the old
+        // pump-aware gate this whole store was silently blocked (#4872).
+        testPumpPlugin.pumpDescription.basalMinimumRate = 2.0
+        whenever(preferences.get(NsclientBooleanKey.NsPaused)).thenReturn(false)
+        whenever(preferences.get(NsclientLongKey.ProfileStoreLastSyncedId)).thenReturn(0L)
+        whenever(preferences.get(LongNonKey.LocalProfileLastChange)).thenReturn(1000L)
+        whenever(activePlugin.activeNsClient).thenReturn(nsClient)
+        whenever(nsClient.nsAdd(eq("profile"), any<DataSyncSelector.PairProfileStore>(), any(), anyOrNull())).thenReturn(true)
+
+        sut.processChangedProfileStore()
+
+        verify(nsClient, Times(1)).nsAdd(eq("profile"), any<DataSyncSelector.PairProfileStore>(), any(), anyOrNull())
         Unit
     }
 
