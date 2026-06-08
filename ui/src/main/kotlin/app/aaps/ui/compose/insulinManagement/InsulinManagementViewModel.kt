@@ -9,12 +9,12 @@ import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
-import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.compensateForClockSkew
 import app.aaps.core.interfaces.db.observeChanges
 import app.aaps.core.interfaces.insulin.ConcentrationType
+import app.aaps.core.interfaces.insulin.InsulinActions
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.insulin.InsulinType
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -29,7 +29,6 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.observeChange
-import app.aaps.core.objects.extensions.toJsonObject
 import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.ui.R
@@ -63,7 +62,7 @@ class InsulinManagementViewModel @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val profileRepository: ProfileRepository,
     private val config: Config,
-    private val clientControlDispatcher: ClientControlActionDispatcher
+    private val insulinActions: InsulinActions
 ) : ViewModel() {
 
     // Tracks the in-flight client→master activation round-trip so the "stop waiting" action can cancel it.
@@ -487,29 +486,15 @@ class InsulinManagementViewModel @Inject constructor(
         _uiState.update { it.copy(activationMessage = null) }
         val state = uiState.value
         val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return
-        if (config.AAPSCLIENT) {
-            // Follower: the master runs the loop and owns the active profile. Send only the iCfg as a
-            // signed Client-Control command; the master re-applies its OWN current profile with this
-            // insulin and the resulting profile switch syncs back to us. We do not switch locally.
-            //
-            // The round-trip dispatcher waits for the master's two-step ACK and surfaces it as
-            // ActionProgress, so the pending dialog can close like a local execution on confirmation
-            // (Applied), show the master's reason on Rejected, or warn on Unconfirmed (no ack in time —
-            // the active-insulin chip then updates whenever the master's profile switch syncs back).
-            // The single app-level modal is driven by the dispatcher's run(); we only handle the
-            // feature-specific follow-up here. Applied → confirm + refresh (chip follows on sync-back);
-            // Rejected/Unconfirmed are surfaced by the central modal.
-            clientControlJob?.cancel()
-            clientControlJob = viewModelScope.launch {
-                val result = clientControlDispatcher.run(ClientControlActionDispatcher.Command.InsulinActivate(iCfg.toJsonObject().toString()))
-                if (result is ActionProgress.Applied) {
-                    showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
-                    refreshData()
-                }
-            }
-        } else {
-            viewModelScope.launch {
-                profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)
+        // One call for both roles (master = local profile switch, client = confirmed round-trip driving
+        // the app-level modal). We only handle the feature-specific follow-up: on Applied confirm +
+        // refresh (on a client the chip follows on sync-back); Rejected/Unconfirmed are surfaced by the
+        // central modal.
+        clientControlJob?.cancel()
+        clientControlJob = viewModelScope.launch {
+            val result = insulinActions.activate(iCfg)
+            if (result is ActionProgress.Applied) {
+                showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
                 refreshData()
             }
         }

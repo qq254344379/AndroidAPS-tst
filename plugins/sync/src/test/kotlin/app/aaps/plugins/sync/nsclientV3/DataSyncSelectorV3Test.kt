@@ -12,7 +12,7 @@ import app.aaps.core.interfaces.source.NSClientSource
 import app.aaps.core.interfaces.sync.DataSyncSelector
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.LongNonKey
-import app.aaps.plugins.sync.nsShared.StoreDataForDbImpl
+import app.aaps.plugins.sync.nsclientV3.StoreDataForDbImpl
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientLongKey
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -759,12 +759,11 @@ class DataSyncSelectorV3Test : TestBaseWithProfile() {
         whenever(preferences.get(NsclientBooleanKey.NsPaused)).thenReturn(false)
         whenever(preferences.get(NsclientLongKey.ProfileStoreLastSyncedId)).thenReturn(0L)
         whenever(preferences.get(LongNonKey.LocalProfileLastChange)).thenReturn(1000L)
-        whenever(activePlugin.activeNsClient).thenReturn(nsClient)
-        whenever(nsClient.nsAdd(eq("profile"), any<DataSyncSelector.PairProfileStore>(), any(), anyOrNull())).thenReturn(true)
+        whenever(nsClientV3Plugin.nsAdd(eq("profile"), any<DataSyncSelector.PairProfileStore>(), any(), anyOrNull())).thenReturn(true)
 
         sut.processChangedProfileStore()
 
-        verify(nsClient, Times(1)).nsAdd(eq("profile"), any<DataSyncSelector.PairProfileStore>(), any(), anyOrNull())
+        verify(nsClientV3Plugin, Times(1)).nsAdd(eq("profile"), any<DataSyncSelector.PairProfileStore>(), any(), anyOrNull())
         Unit
     }
 
