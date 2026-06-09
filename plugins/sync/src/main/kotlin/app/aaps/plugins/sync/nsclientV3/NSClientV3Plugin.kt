@@ -497,6 +497,16 @@ class NSClientV3Plugin @Inject constructor(
         if (at > _lastMasterSignalAt.value) _lastMasterSignalAt.value = at
     }
 
+    /**
+     * Force [masterReachable] offline by staling the liveness clock. Called when a client-control action
+     * gets no ack (Unconfirmed): we don't actually know the master is alive, so flip offline — that drives
+     * the app-level probe to ping + re-pull, reconciling the real state instead of leaving a stale guess.
+     * Self-heals: a pong/heartbeat bumps the clock fresh again within seconds if the master is up.
+     */
+    internal fun markMasterUnreachable() {
+        _lastMasterSignalAt.value = 0L
+    }
+
     // Grace before flagging offline on a WS drop — swallows brief flaps (reconnect storms during NS
     // restarts), short enough that a real outage surfaces in seconds.
     private val wsDisconnectGraceMs = 5_000L

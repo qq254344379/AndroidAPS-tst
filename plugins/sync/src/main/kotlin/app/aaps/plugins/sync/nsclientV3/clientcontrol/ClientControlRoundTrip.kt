@@ -158,6 +158,10 @@ class ClientControlRoundTrip @Inject constructor(
                     if (p !is ActionProgress.Applied) _pending.value = PendingAction(p, label)
                 }
             }
+            // No ack came back (timeout / connection lost) → we don't actually know the master's state.
+            // Flip offline so the app-level probe pings + re-pulls and the real result reconciles, rather
+            // than leaving a stale optimistic guess. Self-heals on the next pong/heartbeat.
+            if (terminal is ActionProgress.Unconfirmed) nsClientV3Plugin.get().markMasterUnreachable()
             if (terminal is ActionProgress.Applied) {
                 val visibleMs = dateUtil.now() - shownAt
                 if (visibleMs < ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS)

@@ -308,6 +308,20 @@ class ComposeMainActivity : AppCompatActivity() {
         val navController = rememberNavController().also { this.navController = it }
         val masterReachable by nsClient.masterReachable.collectAsStateWithLifecycle()
 
+        // Global self-heal — event-driven, NOT a poll (a timer would keep the CPU awake). Probe once when
+        // we go offline, and again on each navigation while offline, so any screen/dialog the user opens
+        // re-checks. (The WS reconnect and a failed action also probe; all internally rate-limited.)
+        // `masterReachable` is lifecycle-collected and navigation only happens in the foreground, so this
+        // never runs in the background.
+        LaunchedEffect(masterReachable) {
+            if (!masterReachable) nsClient.requestMasterProbe()
+        }
+        LaunchedEffect(navController) {
+            navController.currentBackStackEntryFlow.collect {
+                if (!nsClient.masterReachable.value) nsClient.requestMasterProbe()
+            }
+        }
+
         CompositionLocalProvider(
             LocalPreferences provides preferences,
             LocalDateUtil provides dateUtil,

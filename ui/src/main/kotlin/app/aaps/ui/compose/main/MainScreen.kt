@@ -227,11 +227,8 @@ fun MainScreen(
                 val activeSceneState by mainViewModel.activeSceneState.collectAsStateWithLifecycle()
                 val sceneExpired by mainViewModel.sceneExpired.collectAsStateWithLifecycle()
                 val masterReachable by mainViewModel.masterReachable.collectAsStateWithLifecycle()
-                // While the master shows offline, actively probe it (ping + config re-fetch) so the
-                // banner clears fast if it's actually online. Rate-limited inside the plugin.
-                LaunchedEffect(masterReachable) {
-                    if (!masterReachable) mainViewModel.requestMasterProbe()
-                }
+                // (Probe-while-offline is now global — see ComposeMainActivity. This screen still reads
+                // masterReachable for its own gating.)
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Main content
                     OverviewScreen(
