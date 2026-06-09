@@ -4,6 +4,7 @@ import app.aaps.core.data.model.RM
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.maintenance.ImportExportPrefs
@@ -63,6 +64,7 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
     @Mock private lateinit var bolusWizardProvider: Provider<BolusWizard>
     @Mock private lateinit var pumpStatusProvider: PumpStatusProvider
     @Mock private lateinit var runningModeGuard: RunningModeGuard
+    @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
     @Mock private lateinit var pump: PumpWithConcentration
     @Mock private lateinit var automation: Automation
     @Mock private lateinit var event: AutomationEvent
@@ -77,7 +79,7 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
             loop, processedDeviceStatusData, receiverStatusStore, quickWizard, trendCalculator, dateUtil,
             constraintsChecker, uel, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
             persistenceLayer, importExportPrefs, decimalFormatter, bolusWizardProvider, pumpStatusProvider,
-            ch, runningModeGuard, CoroutineScope(Dispatchers.Unconfined)
+            ch, runningModeGuard, wizardBolusExecutor, CoroutineScope(Dispatchers.Unconfined)
         )
         // @Inject lateinit field — Dagger is not running, set manually.
         sut.automation = automation

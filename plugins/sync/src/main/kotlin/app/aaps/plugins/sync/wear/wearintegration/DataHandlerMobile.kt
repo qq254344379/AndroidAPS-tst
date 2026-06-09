@@ -27,6 +27,7 @@ import app.aaps.core.interfaces.aps.GlucoseStatus
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -152,15 +153,13 @@ class DataHandlerMobile @Inject constructor(
     private val pumpStatusProvider: PumpStatusProvider,
     private val ch: ConcentrationHelper,
     private val runningModeGuard: RunningModeGuard,
+    private val wizardBolusExecutor: WizardBolusExecutor,
     @ApplicationScope private val appScope: CoroutineScope,
 ) {
 
     @Inject lateinit var automation: Automation
     @Inject lateinit var scenes: SceneAutomationApi
     private val disposable = CompositeDisposable()
-
-    private var lastBolusWizard: BolusWizard? = null
-    private var lastQuickWizardEntry: QuickWizardEntry? = null
 
     init {
         // From Wear
@@ -382,7 +381,7 @@ class DataHandlerMobile @Inject constructor(
             .concatMapCompletable {
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionBolusConfirmed received $it from ${it.sourceNodeId}")
-                    doBolus(it.insulin, it.carbs, null, 0, null)
+                    wizardBolusExecutor.deliver(it.insulin, it.carbs, null, 0, null, null, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -401,7 +400,7 @@ class DataHandlerMobile @Inject constructor(
             .concatMapCompletable {
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionECarbsConfirmed received $it from ${it.sourceNodeId}")
-                    doECarbs(it.carbs, it.carbsTime, it.duration)
+                    wizardBolusExecutor.deliverECarbs(it.carbs, it.carbsTime, it.duration, null, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -442,7 +441,7 @@ class DataHandlerMobile @Inject constructor(
                         rxBus.send(EventShowSnackbar("aborting: previously applied constraint changed", EventShowSnackbar.Type.Warning))
                         sendError("aborting: previously applied constraint changed")
                     } else
-                        doFillBolus(it.insulin)
+                        wizardBolusExecutor.deliverFillBolus(it.insulin, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -478,39 +477,10 @@ class DataHandlerMobile @Inject constructor(
             .concatMapCompletable { event ->
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionWizardConfirmed received $event from ${event.sourceNodeId}")
-                    val wizard = lastBolusWizard.also { lastBolusWizard = null } ?: return@rxCompletable
-                    val quickWizardEntry = lastQuickWizardEntry.also { lastQuickWizardEntry = null }
-                    if (wizard.timeStamp != event.timeStamp) return@rxCompletable
-                    var carbTime: Long? = null
-                    var carbTimeOffset: Long = 0
-                    var useAlarm = false
-                    val currentTime = Calendar.getInstance().timeInMillis
-                    var eventTime = currentTime
-                    var carbs2 = 0
-                    var duration = 0
-                    var notes: String? = null
-
-                    quickWizardEntry?.let { qwe ->
-                        carbTimeOffset = qwe.carbTime().toLong()
-                        carbTime = currentTime + (carbTimeOffset * 60000)
-                        useAlarm = qwe.useAlarm() == QuickWizardEntry.YES
-                        notes = qwe.buttonText()
-
-                        if (qwe.useEcarbs() == QuickWizardEntry.YES) {
-                            val timeOffset = qwe.time()
-                            eventTime += (timeOffset * 60000)
-                            carbs2 = qwe.carbs2()
-                            duration = qwe.duration()
-                        }
-                    }
-                    doBolus(wizard.calculatedTotalInsulin, wizard.carbs, carbTime, 0, wizard.createBolusCalculatorResult(), notes)
-                    doECarbs(carbs2, eventTime, duration, notes)
-
-                    if (useAlarm && wizard.carbs > 0 && carbTimeOffset > 0) {
-                        automation.scheduleTimeToEatReminder(T.mins(carbTimeOffset).secs().toInt())
-                    }
-                    quickWizardEntry?.markAsUsed()
-                    sendQuickWizardToWear()
+                    // Consume-once dedup + delivery live in the shared executor; refresh the watch's
+                    // quick-wizard list (lastUsed) only when something was actually delivered.
+                    val result = wizardBolusExecutor.confirm(event.timeStamp, Sources.Wear, ::sendError)
+                    if (result is WizardBolusExecutor.ConfirmResult.Delivered) sendQuickWizardToWear()
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -943,8 +913,7 @@ class DataHandlerMobile @Inject constructor(
             totalBeforePercentage = if (percentage != 100) bolusWizard.totalBeforePercentageAdjustment else null,
             cob = bolusWizard.cob
         )
-        lastBolusWizard = bolusWizard
-        lastQuickWizardEntry = null
+        wizardBolusExecutor.setPending(bolusWizard.calculatedTotalInsulin, bolusWizard.carbs, bolusWizard.createBolusCalculatorResult(), bolusWizard.timeStamp)
         rxBus.send(EventMobileToWear(wizardResult))
     }
 
@@ -1037,83 +1006,47 @@ class DataHandlerMobile @Inject constructor(
 
     private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
         if (rejectIfAapsClient()) return
-        runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
-            sendError(it)
-            return
-        }
-        val actualBg = iobCobCalculator.ads.actualBg()
-        val profile = profileFunction.getProfile()
-        val profileName = profileFunction.getProfileName()
-        val quickWizardEntry = quickWizard.get(command.guid)
-        if (quickWizardEntry == null) {
-            sendError(rh.gs(R.string.quick_wizard_not_available))
-            return
-        }
-        if (actualBg == null) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_actual_bg))
-            return
-        }
-        if (profile == null) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_active_profile))
-            return
-        }
-        val cobInfo = iobCobCalculator.getCobInfo("QuickWizard wear")
-        if (cobInfo.displayCob == null) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_cob))
-            return
-        }
-        val pump = activePlugin.activePump
-        if (!pump.isInitialized()) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
-            return
-        }
+        // Gate + compute + constraint-cap + park-in-slot live in the shared executor; this adapter only
+        // formats the wear preview and ships the ConfirmAction.
+        when (val result = wizardBolusExecutor.prepareQuickWizard(command.guid)) {
+            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
+            is WizardBolusExecutor.PrepareResult.Preview -> {
+                // Display config (button text, eCarbs, carb-delay) is a wear-only concern, so the neutral
+                // executor doesn't carry it — re-read the entry here for the ConfirmAction message.
+                val quickWizardEntry = quickWizard.get(command.guid) ?: return
 
-        val wizard = quickWizardEntry.doCalc(profile, profileName, actualBg)
+                var eCarbsMessagePart = ""
+                if (quickWizardEntry.useEcarbs() == QuickWizardEntry.YES) {
+                    val carbs2 = quickWizardEntry.carbs2()
+                    val offset = quickWizardEntry.time()
+                    val duration = quickWizardEntry.duration()
 
-        val carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(quickWizardEntry.carbs(), aapsLogger)).value()
-        if (carbsAfterConstraints != quickWizardEntry.carbs()) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_carbs_constraint))
-            return
-        }
-        val insulinAfterConstraints = wizard.insulinAfterConstraints
-        val minStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)
-        if (abs(insulinAfterConstraints - wizard.calculatedTotalInsulin) >= minStep) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_constraint_bolus_size, wizard.calculatedTotalInsulin))
-            return
-        }
+                    eCarbsMessagePart += "\n+" + carbs2.toString() + rh.gs(R.string.grams_short) + "/" + duration.toString() + rh.gs(R.string.hour_short) + "(+" + offset.toString() +
+                        rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
+                }
 
-        var eCarbsMessagePart = ""
-        if (quickWizardEntry.useEcarbs() == QuickWizardEntry.YES) {
-            val carbs2 = quickWizardEntry.carbs2()
-            val offset = quickWizardEntry.time()
-            val duration = quickWizardEntry.duration()
+                var carbDelayMessagePart = ""
+                if (quickWizardEntry.carbTime() > 0) {
+                    carbDelayMessagePart = "(+" + quickWizardEntry.carbTime().toString() + rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
+                    if (quickWizardEntry.useAlarm() == QuickWizardEntry.YES) {
+                        carbDelayMessagePart += "!"
+                    }
+                }
 
-            eCarbsMessagePart += "\n+" + carbs2.toString() + rh.gs(R.string.grams_short) + "/" + duration.toString() + rh.gs(R.string.hour_short) + "(+" + offset.toString() +
-                rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
-        }
+                val message = rh.gs(R.string.quick_wizard_message, quickWizardEntry.buttonText(), result.insulin, quickWizardEntry.carbs()) +
+                    carbDelayMessagePart +
+                    eCarbsMessagePart + "\n_____________\n" + result.explanation
 
-        var carbDelayMessagePart = ""
-        if (quickWizardEntry.carbTime() > 0) {
-            carbDelayMessagePart = "(+" + quickWizardEntry.carbTime().toString() + rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
-            if (quickWizardEntry.useAlarm() == QuickWizardEntry.YES) {
-                carbDelayMessagePart += "!"
+                rxBus.send(
+                    EventMobileToWear(
+                        EventData.ConfirmAction(
+                            rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
+                            returnCommand = EventData.ActionWizardConfirmed(result.bolusId)
+                        )
+                    )
+                )
             }
         }
-
-        val message = rh.gs(R.string.quick_wizard_message, quickWizardEntry.buttonText(), wizard.calculatedTotalInsulin, quickWizardEntry.carbs()) +
-            carbDelayMessagePart +
-            eCarbsMessagePart + "\n_____________\n" + wizard.explainShort()
-
-        lastBolusWizard = wizard
-        lastQuickWizardEntry = quickWizardEntry
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                    returnCommand = EventData.ActionWizardConfirmed(wizard.timeStamp)
-                )
-            )
-        )
     }
 
     private suspend fun handleBolusPreCheck(command: EventData.ActionBolusPreCheck) {
@@ -1145,8 +1078,7 @@ class DataHandlerMobile @Inject constructor(
         message += rh.gs(app.aaps.core.ui.R.string.carbs) + ": " + carbsAfterConstraints + rh.gs(R.string.grams_short)
         if (insulinAfterConstraints - command.insulin != 0.0 || carbsAfterConstraints - command.carbs != 0)
             message += "\n" + rh.gs(app.aaps.core.ui.R.string.constraint_applied)
-        lastBolusWizard = null
-        lastQuickWizardEntry = null
+        wizardBolusExecutor.clearPending()
         rxBus.send(
             EventMobileToWear(
                 EventData.ConfirmAction(
@@ -1178,8 +1110,7 @@ class DataHandlerMobile @Inject constructor(
             sendError(rh.gs(app.aaps.core.ui.R.string.carb_equal_zero_no_action))
             return
         }
-        lastBolusWizard = null
-        lastQuickWizardEntry = null
+        wizardBolusExecutor.clearPending()
         rxBus.send(
             EventMobileToWear(
                 EventData.ConfirmAction(
@@ -2160,92 +2091,6 @@ class DataHandlerMobile @Inject constructor(
                 note = null,
                 listValues = listOf(ValueWithUnit.TETTReason(TT.Reason.WEAR))
             )
-    }
-
-    private suspend fun doBolus(amount: Double, carbs: Int, carbsTime: Long?, carbsDuration: Int, bolusCalculatorResult: BCR?, notes: String? = null) {
-        val detailedBolusInfo = DetailedBolusInfo()
-        detailedBolusInfo.insulin = amount
-        detailedBolusInfo.carbs = carbs.toDouble()
-        detailedBolusInfo.bolusType = BS.Type.NORMAL
-        detailedBolusInfo.carbsTimestamp = carbsTime
-        detailedBolusInfo.carbsDuration = T.hours(carbsDuration.toLong()).msecs()
-        detailedBolusInfo.notes = notes
-        if (detailedBolusInfo.insulin > 0 || detailedBolusInfo.carbs != 0.0) {
-
-            // Pre-check: if the mode forbids a new bolus, surface the rejection to Wear
-            // without touching commandQueue.
-            if (detailedBolusInfo.insulin > 0) {
-                runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
-                    sendError(it)
-                    return
-                }
-            }
-            val action = when {
-                amount == 0.0     -> Action.CARBS
-                carbs == 0        -> Action.BOLUS
-                carbsDuration > 0 -> Action.EXTENDED_CARBS
-                else              -> Action.TREATMENT
-            }
-            uel.log(
-                action = action, source = Sources.Wear,
-                listValues = listOfNotNull(
-                    ValueWithUnit.Insulin(amount).takeIf { amount != 0.0 },
-                    ValueWithUnit.Gram(carbs).takeIf { carbs != 0 },
-                    ValueWithUnit.Hour(carbsDuration).takeIf { carbsDuration != 0 }
-                )
-            )
-            appScope.launch {
-                val result = commandQueue.bolus(detailedBolusInfo)
-                if (!result.success)
-                    sendError(rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror) + "\n" + result.comment)
-            }
-            bolusCalculatorResult?.let { persistenceLayer.insertOrUpdateBolusCalculatorResult(it) }
-            lastQuickWizardEntry?.let { lastQuickWizardEntry ->
-                if (lastQuickWizardEntry.useSuperBolus() == QuickWizardEntry.YES) {
-                    val profile = profileFunction.getProfile() ?: return
-                    loop.handleRunningModeChange(
-                        newRM = RM.Mode.SUPER_BOLUS,
-                        action = Action.SUPERBOLUS_TBR,
-                        source = Sources.Wear,
-                        durationInMinutes = 2 * 60,
-                        profile = profile
-                    )
-                }
-            }
-        }
-    }
-
-    private suspend fun doFillBolus(amount: Double) {
-        runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
-            sendError(it)
-            return
-        }
-        val detailedBolusInfo = DetailedBolusInfo()
-        detailedBolusInfo.insulin = amount
-        detailedBolusInfo.bolusType = BS.Type.PRIMING
-        uel.log(
-            action = Action.PRIME_BOLUS, source = Sources.Wear,
-            listValues = listOfNotNull(ValueWithUnit.Insulin(amount).takeIf { amount != 0.0 })
-        )
-        appScope.launch {
-            val result = commandQueue.bolus(detailedBolusInfo)
-            if (!result.success) {
-                sendError(rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror) + "\n" + result.comment)
-            }
-        }
-    }
-
-    private suspend fun doECarbs(carbs: Int, carbsTime: Long, duration: Int, notes: String? = null) {
-        uel.log(
-            action = if (duration == 0) Action.CARBS else Action.EXTENDED_CARBS,
-            source = Sources.Wear,
-            listValues = listOfNotNull(
-                ValueWithUnit.Timestamp(carbsTime),
-                ValueWithUnit.Gram(carbs),
-                ValueWithUnit.Hour(duration).takeIf { duration != 0 }
-            )
-        )
-        doBolus(0.0, carbs, carbsTime, duration, null, notes)
     }
 
     private suspend fun doProfileSwitch(command: EventData.ActionProfileSwitchConfirmed) {
