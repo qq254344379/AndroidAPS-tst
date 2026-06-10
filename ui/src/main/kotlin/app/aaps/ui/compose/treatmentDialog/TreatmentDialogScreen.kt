@@ -42,9 +42,8 @@ import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.banner.WarningBanner
 import app.aaps.core.ui.compose.bottomBarSafeArea
-import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
 import app.aaps.core.ui.compose.navigation.ElementType
-import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.compose.navigation.labelResId
 import app.aaps.ui.compose.components.DialogStatusBar
 import app.aaps.ui.compose.overview.chips.CobUiState
@@ -93,11 +92,9 @@ fun TreatmentDialogScreen(
             showConfirmation = false
             showNoAction = true
         } else {
-            val summaryLines = viewModel.buildConfirmationSummary()
-            OkCancelDialog(
-                title = stringResource(ElementType.TREATMENT.labelResId()),
-                message = summaryLines.joinToString("<br/>"),
-                icon = ElementType.TREATMENT.icon(),
+            ElementConfirmationDialog(
+                elementType = ElementType.TREATMENT,
+                lines = viewModel.buildConfirmationSummary(),
                 onConfirm = {
                     viewModel.confirmAndSave()
                     onNavigateBack()
@@ -109,10 +106,9 @@ fun TreatmentDialogScreen(
 
     // No action dialog
     if (showNoAction) {
-        OkCancelDialog(
-            title = stringResource(ElementType.TREATMENT.labelResId()),
+        ElementConfirmationDialog(
+            elementType = ElementType.TREATMENT,
             message = stringResource(CoreUiR.string.no_action_selected),
-            icon = ElementType.TREATMENT.icon(),
             onConfirm = { showNoAction = false },
             onDismiss = { showNoAction = false }
         )

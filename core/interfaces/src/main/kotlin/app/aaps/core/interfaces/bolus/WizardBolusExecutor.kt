@@ -38,6 +38,42 @@ interface WizardBolusExecutor {
      */
     suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit): ConfirmResult
 
+    /**
+     * Canonical wizard / quick-wizard bolus — a type-specific entry point taking exactly the wizard
+     * inputs. The executor preprocesses them into the `BOLUS_WIZARD` end state and funnels into the shared
+     * delivery core, so a wizard bolus is recorded identically from phone or watch — only [source] differs.
+     */
+    suspend fun deliverWizardBolus(
+        insulin: Double,
+        carbs: Int,
+        carbTimeMinutes: Int,
+        mgdlGlucose: Double?,
+        bolusCalculatorResult: BCR?,
+        notes: String?,
+        source: Sources,
+        onError: (String) -> Unit
+    )
+
+    /**
+     * Correction-only advisor bolus (high BG with carbs imminent) — the canonical `CORRECTION_BOLUS` end
+     * state with a `BOLUS_ADVISOR` user entry; the eat reminder is scheduled on delivery success. Shared by
+     * the wizard dialog and the quick-wizard advisor branches so the advisor records identically too.
+     */
+    suspend fun deliverBolusAdvisor(
+        insulin: Double,
+        mgdlGlucose: Double?,
+        bolusCalculatorResult: BCR?,
+        notes: String?,
+        source: Sources,
+        onError: (String) -> Unit
+    )
+
+    /**
+     * Plain correction insulin bolus (e.g. a fixed-amount QuickWizard INSULIN button) — `CORRECTION_BOLUS`
+     * with a `BOLUS` user entry. [note] is logged on the user entry (not stored on the treatment).
+     */
+    suspend fun deliverInsulin(insulin: Double, note: String?, source: Sources, onError: (String) -> Unit)
+
     /** Build + queue a bolus/carbs delivery. [onError] receives the mode-rejection and the async failure. */
     suspend fun deliver(
         amount: Double,
@@ -53,7 +89,7 @@ interface WizardBolusExecutor {
     /** Prime/fill bolus (no carbs). */
     suspend fun deliverFillBolus(amount: Double, source: Sources, onError: (String) -> Unit)
 
-    /** Extended/delayed carbs (delegates to [deliver] with zero insulin). */
+    /** Extended/delayed carbs (zero insulin) — recorded once with the eCarbs timestamp. */
     suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, notes: String?, source: Sources, onError: (String) -> Unit)
 
     sealed interface PrepareResult {

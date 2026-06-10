@@ -5,6 +5,7 @@ import app.aaps.core.interfaces.aps.AutosensDataStore
 import app.aaps.core.interfaces.aps.IobTotal
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.constraints.Constraint
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -51,6 +52,7 @@ class BolusWizardTest : TestBaseWithProfile() {
     @Mock lateinit var persistenceLayer: PersistenceLayer
     @Mock lateinit var runningModeGuard: RunningModeGuard
     @Mock lateinit var activeInsulin: Insulin
+    @Mock lateinit var wizardBolusExecutor: WizardBolusExecutor
 
     @BeforeEach
     fun prepare() {
@@ -97,7 +99,7 @@ class BolusWizardTest : TestBaseWithProfile() {
         aapsLogger, rh, rxBus, preferences, profileFunction, profileUtil, constraintChecker, activePlugin,
         commandQueue, loop, iobCobCalculator, dateUtil, config, uel, automation, glucoseStatusProvider, uiInteraction,
         persistenceLayer, decimalFormatter, processedDeviceStatusData, runningModeGuard, activeInsulin,
-        CoroutineScope(Dispatchers.Unconfined)
+        wizardBolusExecutor, CoroutineScope(Dispatchers.Unconfined)
     )
 
     // ==========================================

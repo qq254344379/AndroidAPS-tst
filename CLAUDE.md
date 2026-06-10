@@ -139,6 +139,24 @@
   `.removeSuffix(":")`, or stripping characters from resource strings breaks localization. Different
   languages have different punctuation and formatting rules. If a string needs different formats,
   create separate resource strings instead.
+- **Never build user-facing text by concatenating strings in code** - Joining pieces like
+  `rh.gs(label) + ": " + value`, `value + " " + unit`, or `"$a/$b h"` is NOT translatable and breaks
+  RTL languages (the translator can't control the separator, order, or direction). Instead use a
+  **format-string resource template** with positional placeholders and let the value carry its own
+  unit:
+    - ❌ BAD: `rh.gs(R.string.bolus) + ": " + decimalFormatter.toPumpSupportedBolus(v, step)`
+    - ✅ GOOD:
+      `rh.gs(R.string.confirmation_line, rh.gs(R.string.bolus), decimalFormatter.toPumpSupportedBolusWithUnits(v, step))`
+      where `confirmation_line` is `"%1$s: %2$s"` — and prefer value+unit templates
+      (`format_insulin_units`, `format_carbs`, `pump_base_basal_rate`, `format_mins`,
+      `ProfileUtil.fromMgdlToStringWithUnits`) over a bare number. Most such templates already exist
+      in
+      `:core:ui`; reuse them before adding a new one.
+- **Add translator context to every new string via the `comment="..."` attribute** (not an XML
+  comment).
+  Explain each placeholder and give an example, mirroring existing strings:
+    - ✅
+      `<string name="preference_range_summary" comment="%1$s=current value, %2$s=unit label, %3$s=min, %4$s=max. Example: 5.0 U (0.0 – 10.0)">%1$s%2$s (%3$s – %4$s)</string>`
 - **In Compose code, use `stringResource()` not `ResourceHelper`** - Compose has built-in
   `stringResource(R.string.xyz)` function. Only use `ResourceHelper` (rh) in non-Composable contexts
   (ViewModels, regular functions). This keeps Compose code cleaner and more idiomatic.

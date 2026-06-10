@@ -61,10 +61,8 @@ import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.consumeOverscroll
-import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
 import app.aaps.core.ui.compose.navigation.ElementType
-import app.aaps.core.ui.compose.navigation.color
-import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.compose.navigation.labelResId
 import app.aaps.core.ui.compose.preference.PreferenceSheetContent
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -122,12 +120,9 @@ fun InsulinDialogScreen(
             showConfirmation = false
             showNoAction = true
         } else {
-            val summaryLines = viewModel.buildConfirmationSummary()
-            OkCancelDialog(
-                title = stringResource(CoreUiR.string.bolus),
-                message = summaryLines.joinToString("<br/>"),
-                icon = ElementType.INSULIN.icon(),
-                iconTint = ElementType.INSULIN.color(),
+            ElementConfirmationDialog(
+                elementType = ElementType.INSULIN,
+                lines = viewModel.buildConfirmationSummary(),
                 onConfirm = {
                     viewModel.confirmAndSave()
                     onNavigateBack()
@@ -139,11 +134,9 @@ fun InsulinDialogScreen(
 
     // No action dialog
     if (showNoAction) {
-        OkCancelDialog(
-            title = stringResource(CoreUiR.string.bolus),
+        ElementConfirmationDialog(
+            elementType = ElementType.INSULIN,
             message = stringResource(CoreUiR.string.no_action_selected),
-            icon = ElementType.INSULIN.icon(),
-            iconTint = ElementType.INSULIN.color(),
             onConfirm = { showNoAction = false },
             onDismiss = { showNoAction = false }
         )

@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.time.T
+import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -388,38 +389,38 @@ class WizardDialogViewModel @Inject constructor(
 
         // Format trend detail: signed 45-min BG projection
         val trendDetail = if (state.useTrend) {
-            val signedTrendValue = (if (w.trend > 0) "+" else "") +
-                profileUtil.fromMgdlToStringInUnits(w.trend * 3, state.units)
+            val signedTrendValue = (if (w.data.trend > 0) "+" else "") +
+                profileUtil.fromMgdlToStringInUnits(w.data.trend * 3, state.units)
             rh.gs(app.aaps.core.ui.R.string.wizard_trend_detail, signedTrendValue, profileUtil.unitLabel)
         } else ""
 
         _uiState.update {
             it.copy(
                 // Calculation results
-                insulinFromBG = w.insulinFromBG,
-                insulinFromTrend = w.insulinFromTrend,
-                insulinFromCarbs = w.insulinFromCarbs,
-                insulinFromCOB = w.insulinFromCOB,
-                insulinFromBolusIOB = w.insulinFromBolusIOB,
-                insulinFromBasalIOB = w.insulinFromBasalIOB,
-                insulinFromCorrection = w.insulinFromCorrection,
+                insulinFromBG = w.data.insulinFromBG,
+                insulinFromTrend = w.data.insulinFromTrend,
+                insulinFromCarbs = w.data.insulinFromCarbs,
+                insulinFromCOB = w.data.insulinFromCOB,
+                insulinFromBolusIOB = w.data.insulinFromBolusIOB,
+                insulinFromBasalIOB = w.data.insulinFromBasalIOB,
+                insulinFromCorrection = w.data.insulinFromCorrection,
                 trendDetail = trendDetail,
-                totalInsulin = w.calculatedTotalInsulin,
-                totalBeforePercentage = w.totalBeforePercentageAdjustment,
-                insulinAfterConstraints = w.insulinAfterConstraints,
-                carbsEquivalent = w.carbsEquivalent,
-                calculatedPercentage = w.calculatedPercentage,
-                constraintApplied = abs(w.insulinAfterConstraints - w.calculatedTotalInsulin) >
-                    activePlugin.activePump.pumpDescription.pumpType.determineCorrectBolusStepSize(w.insulinAfterConstraints),
-                isf = w.sens,
-                ic = w.ic,
+                totalInsulin = w.data.calculatedTotalInsulin,
+                totalBeforePercentage = w.data.totalBeforePercentageAdjustment,
+                insulinAfterConstraints = w.data.insulinAfterConstraints,
+                carbsEquivalent = w.data.carbsEquivalent,
+                calculatedPercentage = w.data.calculatedPercentage,
+                constraintApplied = abs(w.data.insulinAfterConstraints - w.data.calculatedTotalInsulin) >
+                    activePlugin.activePump.pumpDescription.pumpType.determineCorrectBolusStepSize(w.data.insulinAfterConstraints),
+                isf = w.data.sens,
+                ic = w.data.ic,
                 currentCOB = cob,
-                totalIOB = -(w.insulinFromBolusIOB + w.insulinFromBasalIOB),
-                trend = w.trend,
+                totalIOB = -(w.data.insulinFromBolusIOB + w.data.insulinFromBasalIOB),
+                trend = w.data.trend,
                 targetBGLow = 0.0, // not exposed directly
                 targetBGHigh = 0.0,
                 hasResult = true,
-                okVisible = w.calculatedTotalInsulin > 0.0 || carbsAfterConstraint > 0,
+                okVisible = w.data.calculatedTotalInsulin > 0.0 || carbsAfterConstraint > 0,
                 hasTempTarget = hasTT,
                 effectiveCarbs = effectiveCarbs,
                 eCarbs = eCarbs,
@@ -437,7 +438,7 @@ class WizardDialogViewModel @Inject constructor(
     fun needsBolusAdvisor(): Boolean =
         wizard?.needsBolusAdvisor() ?: false
 
-    fun getConfirmationSummary(): List<String> {
+    fun getConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         return wizard?.buildConfirmationLines(
             advisor = false,
@@ -448,7 +449,7 @@ class WizardDialogViewModel @Inject constructor(
         ) ?: emptyList()
     }
 
-    fun getAdvisorSummary(): List<String> {
+    fun getAdvisorSummary(): List<ConfirmationLine> {
         val state = uiState.value
         return wizard?.buildConfirmationLines(
             advisor = true,

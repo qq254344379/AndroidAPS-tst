@@ -14,6 +14,7 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -45,10 +46,10 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneActions
-import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
+import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.ui.IconsProvider
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
@@ -110,6 +111,7 @@ class MainViewModel @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val quickLaunchResolver: QuickLaunchResolver,
     private val commandQueue: CommandQueue,
+    private val wizardBolusExecutor: WizardBolusExecutor,
     private val uiInteraction: UiInteraction,
     private val uel: UserEntryLogger,
     private val loop: Loop,
@@ -476,19 +478,13 @@ class MainViewModel @Inject constructor(
                 title = entry.buttonText(),
                 message = message,
                 onOk = {
-                    uel.log(
-                        Action.BOLUS, Sources.QuickWizard,
-                        entry.buttonText(),
-                        ValueWithUnit.Insulin(insulinAfterConstraints)
+                    // Fixed-amount correction insulin now rides the shared executor (one audited path).
+                    wizardBolusExecutor.deliverInsulin(
+                        insulin = insulinAfterConstraints,
+                        note = entry.buttonText(),
+                        source = Sources.QuickWizard,
+                        onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
                     )
-                    val detailedBolusInfo = DetailedBolusInfo().apply {
-                        eventType = app.aaps.core.data.model.TE.Type.CORRECTION_BOLUS
-                        this.insulin = insulinAfterConstraints
-                    }
-                    val result = commandQueue.bolus(detailedBolusInfo)
-                    if (!result.success) {
-                        uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
-                    }
                     entry.markAsUsed()
                 }
             )
