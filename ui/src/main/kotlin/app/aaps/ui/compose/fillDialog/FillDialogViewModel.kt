@@ -11,6 +11,9 @@ import app.aaps.core.data.model.TE
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -231,78 +234,65 @@ class FillDialogViewModel @Inject constructor(
         _uiState.update { it.copy(siteArrow = arrow) }
     }
 
-    /**
-     * A line in the confirmation summary.
-     * @param text The text to display
-     * @param color Semantic color role: NORMAL (default), INSULIN (accent), WARNING (error/red)
-     */
-    data class SummaryLine(val text: String, val color: SummaryColor = SummaryColor.NORMAL)
-
-    enum class SummaryColor { NORMAL, INSULIN, WARNING }
-
     private var confirmedState: FillDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<SummaryLine> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
-        val lines = mutableListOf<SummaryLine>()
         val bolusStep = state.bolusStep
 
-        if (state.insulinAfterConstraints > 0) {
-            lines.add(SummaryLine(rh.gs(R.string.fill_warning)))
-            lines.add(SummaryLine(""))
-            val bolusText = rh.gs(R.string.fill_prime_amount) + ": " +
-                if (state.siteChange || state.insulinCartridgeChange)
-                    ch.bolusWithVolume(state.insulinAfterConstraints)
-                else
-                    decimalFormatter.toPumpSupportedBolus(state.insulinAfterConstraints, bolusStep)
-            lines.add(SummaryLine(bolusText, SummaryColor.INSULIN))
-            if (state.constraintApplied) {
-                lines.add(
-                    SummaryLine(
+        return confirmationLines {
+            if (state.insulinAfterConstraints > 0) {
+                line(ConfirmationRole.WARNING, rh.gs(R.string.fill_warning))
+                line(ConfirmationRole.NORMAL, "")
+                val bolusValue =
+                    if (state.siteChange || state.insulinCartridgeChange)
+                        ch.bolusWithVolume(state.insulinAfterConstraints)
+                    else
+                        decimalFormatter.toPumpSupportedBolusWithUnits(state.insulinAfterConstraints, bolusStep)
+                line(ConfirmationRole.BOLUS, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.fill_prime_amount), bolusValue))
+                if (state.constraintApplied) {
+                    line(
+                        ConfirmationRole.WARNING,
                         rh.gs(
                             app.aaps.core.ui.R.string.bolus_constraint_applied_warn,
                             state.insulin,
                             state.insulinAfterConstraints
                         )
                     )
+                }
+                pumpUnitsWarningFor(state.selectedInsulin)?.let { warning ->
+                    line(ConfirmationRole.WARNING, warning)
+                }
+            }
+
+            if (state.siteChange) {
+                line(ConfirmationRole.NORMAL, rh.gs(R.string.record_pump_site_change))
+            }
+
+            if (state.insulinCartridgeChange) {
+                line(ConfirmationRole.NORMAL, rh.gs(R.string.record_insulin_cartridge_change))
+            }
+
+            if (state.insulinChanged) {
+                line(
+                    ConfirmationRole.WARNING,
+                    rh.gs(R.string.fill_insulin_change, state.selectedInsulin?.insulinLabel ?: "")
                 )
             }
-            pumpUnitsWarningFor(state.selectedInsulin)?.let { warning ->
-                lines.add(SummaryLine(warning, SummaryColor.WARNING))
+
+            if (state.notes.isNotEmpty()) {
+                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.notes_label), state.notes))
+            }
+
+            if (state.eventTimeChanged) {
+                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.time), dateUtil.dateAndTimeString(state.eventTime)))
+            }
+
+            if (state.siteRotationEnabled && state.siteLocation != TE.Location.NONE) {
+                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.site_location), translator.translate(state.siteLocation)))
             }
         }
-
-        if (state.siteChange) {
-            lines.add(SummaryLine(rh.gs(R.string.record_pump_site_change)))
-        }
-
-        if (state.insulinCartridgeChange) {
-            lines.add(SummaryLine(rh.gs(R.string.record_insulin_cartridge_change)))
-        }
-
-        if (state.insulinChanged) {
-            lines.add(
-                SummaryLine(
-                    rh.gs(R.string.fill_insulin_change, state.selectedInsulin?.insulinLabel ?: ""),
-                    SummaryColor.WARNING
-                )
-            )
-        }
-
-        if (state.notes.isNotEmpty()) {
-            lines.add(SummaryLine(rh.gs(app.aaps.core.ui.R.string.notes_label) + ": " + state.notes))
-        }
-
-        if (state.eventTimeChanged) {
-            lines.add(SummaryLine(rh.gs(app.aaps.core.ui.R.string.time) + ": " + dateUtil.dateAndTimeString(state.eventTime)))
-        }
-
-        if (state.siteRotationEnabled && state.siteLocation != TE.Location.NONE) {
-            lines.add(SummaryLine(rh.gs(app.aaps.core.ui.R.string.site_location) + ": " + translator.translate(state.siteLocation)))
-        }
-
-        return lines
     }
 
     fun confirmAndSave() {

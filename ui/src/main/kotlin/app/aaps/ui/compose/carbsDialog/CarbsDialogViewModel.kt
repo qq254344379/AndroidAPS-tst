@@ -11,6 +11,9 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -253,89 +256,106 @@ class CarbsDialogViewModel @Inject constructor(
 
     private var confirmedState: CarbsDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<String> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
-        val lines = mutableListOf<String>()
         val unitLabel = if (state.units == GlucoseUnit.MMOL) rh.gs(app.aaps.core.ui.R.string.mmol) else rh.gs(app.aaps.core.ui.R.string.mgdl)
 
-        // Temp target info
-        if (state.activityTtChecked) {
-            lines.add(
-                rh.gs(R.string.temp_target_short) + ": " +
-                    decimalFormatter.to1Decimal(state.activityTtTarget) + " " + unitLabel +
-                    " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.activityTtDuration) + ")"
-            )
-        }
-        if (state.eatingSoonTtChecked) {
-            lines.add(
-                rh.gs(R.string.temp_target_short) + ": " +
-                    decimalFormatter.to1Decimal(state.eatingSoonTtTarget) + " " + unitLabel +
-                    " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.eatingSoonTtDuration) + ")"
-            )
-        }
-        if (state.hypoTtChecked) {
-            lines.add(
-                rh.gs(R.string.temp_target_short) + ": " +
-                    decimalFormatter.to1Decimal(state.hypoTtTarget) + " " + unitLabel +
-                    " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.hypoTtDuration) + ")"
-            )
-        }
+        return confirmationLines {
+            // Temp target info
+            if (state.activityTtChecked) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.temp_target_short),
+                        rh.gs(app.aaps.core.ui.R.string.value_with_unit, decimalFormatter.to1Decimal(state.activityTtTarget), unitLabel) +
+                            " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.activityTtDuration) + ")"
+                    )
+                )
+            }
+            if (state.eatingSoonTtChecked) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.temp_target_short),
+                        rh.gs(app.aaps.core.ui.R.string.value_with_unit, decimalFormatter.to1Decimal(state.eatingSoonTtTarget), unitLabel) +
+                            " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.eatingSoonTtDuration) + ")"
+                    )
+                )
+            }
+            if (state.hypoTtChecked) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.temp_target_short),
+                        rh.gs(app.aaps.core.ui.R.string.value_with_unit, decimalFormatter.to1Decimal(state.hypoTtTarget), unitLabel) +
+                            " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.hypoTtDuration) + ")"
+                    )
+                )
+            }
 
-        // Alarm
-        val timeOffset = state.timeOffsetMinutes
-        if (state.alarmChecked && state.carbs > 0 && timeOffset > 0) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.alarminxmin, timeOffset))
-        }
+            // Alarm
+            val timeOffset = state.timeOffsetMinutes
+            if (state.alarmChecked && state.carbs > 0 && timeOffset > 0) {
+                line(ConfirmationRole.INFO, rh.gs(app.aaps.core.ui.R.string.alarminxmin, timeOffset))
+            }
 
-        // Duration
-        val duration = state.durationHours
-        if (duration > 0) {
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.duration) + ": " + duration +
-                    rh.gs(app.aaps.core.interfaces.R.string.shorthour)
-            )
-        }
+            // Duration
+            val duration = state.durationHours
+            if (duration > 0) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.duration),
+                        rh.gs(app.aaps.core.ui.R.string.value_with_unit, duration.toString(), rh.gs(app.aaps.core.interfaces.R.string.shorthour))
+                    )
+                )
+            }
 
-        // Carbs (with constraint check)
-        val carbs = state.carbs
-        var carbsAfterConstraints = constraintChecker.applyCarbsConstraints(
-            ConstraintObject(carbs, aapsLogger)
-        ).value()
+            // Carbs (with constraint check)
+            val carbs = state.carbs
+            var carbsAfterConstraints = constraintChecker.applyCarbsConstraints(
+                ConstraintObject(carbs, aapsLogger)
+            ).value()
 
-        if (carbsAfterConstraints > 0) {
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.carbs) + ": " +
-                    rh.gs(app.aaps.core.ui.R.string.format_carbs, carbsAfterConstraints)
-            )
-            if (carbsAfterConstraints != carbs) {
-                lines.add(rh.gs(R.string.carbs_constraint_applied))
+            if (carbsAfterConstraints > 0) {
+                line(
+                    ConfirmationRole.CARBS,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.carbs),
+                        rh.gs(app.aaps.core.ui.R.string.format_carbs, carbsAfterConstraints)
+                    )
+                )
+                if (carbsAfterConstraints != carbs) {
+                    line(ConfirmationRole.WARNING, rh.gs(R.string.carbs_constraint_applied))
+                }
+            }
+            if (carbsAfterConstraints < 0) {
+                val cob = iobCobCalculator.ads.getLastAutosensData("carbsDialog", aapsLogger, dateUtil)?.cob ?: 0.0
+                if (carbsAfterConstraints < -cob) carbsAfterConstraints = ceil(-cob).toInt()
+                if (timeOffset != 0) carbsAfterConstraints = 0
+                line(
+                    ConfirmationRole.CARBS,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.carbs),
+                        rh.gs(app.aaps.core.ui.R.string.format_carbs, carbsAfterConstraints)
+                    )
+                )
+                if (carbsAfterConstraints != carbs) {
+                    line(ConfirmationRole.WARNING, rh.gs(R.string.carbs_constraint_applied))
+                }
+            }
+
+            // Notes
+            if (state.notes.isNotEmpty()) {
+                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.notes_label), state.notes))
+            }
+
+            // Time
+            if (state.eventTimeChanged) {
+                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.time), dateUtil.dateAndTimeString(state.eventTime)))
             }
         }
-        if (carbsAfterConstraints < 0) {
-            val cob = iobCobCalculator.ads.getLastAutosensData("carbsDialog", aapsLogger, dateUtil)?.cob ?: 0.0
-            if (carbsAfterConstraints < -cob) carbsAfterConstraints = ceil(-cob).toInt()
-            if (timeOffset != 0) carbsAfterConstraints = 0
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.carbs) + ": " +
-                    rh.gs(app.aaps.core.ui.R.string.format_carbs, carbsAfterConstraints)
-            )
-            if (carbsAfterConstraints != carbs) {
-                lines.add(rh.gs(R.string.carbs_constraint_applied))
-            }
-        }
-
-        // Notes
-        if (state.notes.isNotEmpty()) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.notes_label) + ": " + state.notes)
-        }
-
-        // Time
-        if (state.eventTimeChanged) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.time) + ": " + dateUtil.dateAndTimeString(state.eventTime))
-        }
-
-        return lines
     }
 
     fun hasAction(): Boolean {

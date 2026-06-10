@@ -46,17 +46,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.TE
-import app.aaps.core.ui.compose.AapsTheme
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.DateTimeSection
 import app.aaps.core.ui.compose.EventTimeRow
@@ -64,11 +60,9 @@ import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.consumeOverscroll
-import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
 import app.aaps.core.ui.compose.insulin.SelectInsulin
 import app.aaps.core.ui.compose.navigation.ElementType
-import app.aaps.core.ui.compose.navigation.color
-import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.compose.navigation.labelResId
 import app.aaps.core.ui.compose.preference.PreferenceSheetContent
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -136,29 +130,13 @@ fun FillDialogScreen(
 
     // Confirmation dialog
     if (showConfirmation) {
-        val summaryLines = viewModel.buildConfirmationSummary()
-
         if (!uiState.hasAction) {
             showConfirmation = false
             showNoAction = true
         } else {
-            val insulinColor = AapsTheme.elementColors.insulin
-            val warningColor = MaterialTheme.colorScheme.error
-            val message = buildAnnotatedString {
-                summaryLines.forEachIndexed { index, line ->
-                    if (index > 0) append("\n")
-                    when (line.color) {
-                        FillDialogViewModel.SummaryColor.INSULIN -> withStyle(SpanStyle(color = insulinColor)) { append(line.text) }
-                        FillDialogViewModel.SummaryColor.WARNING -> withStyle(SpanStyle(color = warningColor)) { append(line.text) }
-                        FillDialogViewModel.SummaryColor.NORMAL  -> append(line.text)
-                    }
-                }
-            }
-            OkCancelDialog(
-                title = stringResource(ElementType.FILL.labelResId()),
-                message = message,
-                icon = ElementType.FILL.icon(),
-                iconTint = ElementType.FILL.color(),
+            ElementConfirmationDialog(
+                elementType = ElementType.FILL,
+                lines = viewModel.buildConfirmationSummary(),
                 onConfirm = {
                     viewModel.confirmAndSave()
                     onNavigateBack()
@@ -170,11 +148,9 @@ fun FillDialogScreen(
 
     // No action dialog
     if (showNoAction) {
-        OkCancelDialog(
-            title = stringResource(ElementType.FILL.labelResId()),
+        ElementConfirmationDialog(
+            elementType = ElementType.FILL,
             message = stringResource(CoreUiR.string.no_action_selected),
-            icon = ElementType.FILL.icon(),
-            iconTint = ElementType.FILL.color(),
             onConfirm = { showNoAction = false },
             onDismiss = { showNoAction = false }
         )

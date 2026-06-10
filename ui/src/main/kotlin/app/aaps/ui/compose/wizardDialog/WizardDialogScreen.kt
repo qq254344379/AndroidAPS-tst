@@ -85,7 +85,7 @@ import app.aaps.core.ui.compose.banner.WarningBanner
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.consumeOverscroll
-import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
 import app.aaps.core.ui.compose.icons.IcBread
 import app.aaps.core.ui.compose.icons.IcCake
 import app.aaps.core.ui.compose.icons.IcPizza
@@ -162,11 +162,9 @@ fun WizardDialogScreen(
 
     // No action dialog
     if (showNoAction) {
-        OkCancelDialog(
-            title = stringResource(ElementType.BOLUS_WIZARD.labelResId()),
+        ElementConfirmationDialog(
+            elementType = ElementType.BOLUS_WIZARD,
             message = stringResource(CoreUiR.string.no_action_selected),
-            icon = ElementType.BOLUS_WIZARD.icon(),
-            iconTint = ElementType.BOLUS_WIZARD.color(),
             onConfirm = { showNoAction = false },
             onDismiss = { showNoAction = false }
         )
@@ -212,12 +210,9 @@ fun WizardDialogScreen(
 
     // Advisor confirmation: show summary with advisor=true
     if (showAdvisorConfirmation) {
-        val summaryLines = viewModel.getAdvisorSummary()
-        OkCancelDialog(
-            title = stringResource(ElementType.BOLUS_WIZARD.labelResId()),
-            message = summaryLines.joinToString("<br/>"),
-            icon = ElementType.BOLUS_WIZARD.icon(),
-            iconTint = ElementType.BOLUS_WIZARD.color(),
+        ElementConfirmationDialog(
+            elementType = ElementType.BOLUS_WIZARD,
+            lines = viewModel.getAdvisorSummary(),
             onConfirm = {
                 viewModel.executeBolusAdvisor()
                 onNavigateBack()
@@ -228,12 +223,9 @@ fun WizardDialogScreen(
 
     // Normal confirmation: show summary with advisor=false
     if (showNormalConfirmation) {
-        val summaryLines = viewModel.getConfirmationSummary()
-        OkCancelDialog(
-            title = stringResource(ElementType.BOLUS_WIZARD.labelResId()),
-            message = summaryLines.joinToString("<br/>"),
-            icon = ElementType.BOLUS_WIZARD.icon(),
-            iconTint = ElementType.BOLUS_WIZARD.color(),
+        ElementConfirmationDialog(
+            elementType = ElementType.BOLUS_WIZARD,
+            lines = viewModel.getConfirmationSummary(),
             onConfirm = {
                 viewModel.executeNormal()
                 onNavigateBack()

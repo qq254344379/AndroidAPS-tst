@@ -7,6 +7,9 @@ import app.aaps.core.data.model.TE
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -128,10 +131,9 @@ class TreatmentDialogViewModel @Inject constructor(
 
     private var confirmedState: TreatmentDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<String> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
-        val lines = mutableListOf<String>()
         val pumpDescription = activePlugin.activePump.pumpDescription
 
         val insulin = state.insulin
@@ -143,30 +145,38 @@ class TreatmentDialogViewModel @Inject constructor(
             ConstraintObject(carbs, aapsLogger)
         ).value()
 
-        if (insulinAfterConstraints > 0) {
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.bolus) + ": " +
-                    decimalFormatter.toPumpSupportedBolus(insulinAfterConstraints, pumpDescription.bolusStep)
-            )
-            if (state.forcedRecordOnly) {
-                lines.add(rh.gs(app.aaps.core.ui.R.string.bolus_recorded_only))
+        return confirmationLines {
+            if (insulinAfterConstraints > 0) {
+                line(
+                    ConfirmationRole.BOLUS,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.bolus),
+                        decimalFormatter.toPumpSupportedBolusWithUnits(insulinAfterConstraints, pumpDescription.bolusStep)
+                    )
+                )
+                if (state.forcedRecordOnly) {
+                    line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.bolus_recorded_only))
+                }
+                if (abs(insulinAfterConstraints - insulin) > pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)) {
+                    line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.bolus_constraint_applied_warn, insulin, insulinAfterConstraints))
+                }
             }
-            if (abs(insulinAfterConstraints - insulin) > pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)) {
-                lines.add(rh.gs(app.aaps.core.ui.R.string.bolus_constraint_applied_warn, insulin, insulinAfterConstraints))
+
+            if (carbsAfterConstraints > 0) {
+                line(
+                    ConfirmationRole.CARBS,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.carbs),
+                        rh.gs(app.aaps.core.ui.R.string.format_carbs, carbsAfterConstraints)
+                    )
+                )
+                if (carbsAfterConstraints != carbs) {
+                    line(ConfirmationRole.WARNING, rh.gs(app.aaps.ui.R.string.carbs_constraint_applied))
+                }
             }
         }
-
-        if (carbsAfterConstraints > 0) {
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.carbs) + ": " +
-                    rh.gs(app.aaps.core.ui.R.string.format_carbs, carbsAfterConstraints)
-            )
-            if (carbsAfterConstraints != carbs) {
-                lines.add(rh.gs(app.aaps.ui.R.string.carbs_constraint_applied))
-            }
-        }
-
-        return lines
     }
 
     fun confirmAndSave() {

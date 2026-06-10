@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -106,22 +109,28 @@ class ExtendedBolusDialogViewModel @Inject constructor(
 
     private var confirmedState: ExtendedBolusDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<String> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
-        val lines = mutableListOf<String>()
         val durationInMinutes = state.durationMinutes.toInt()
 
         val insulinAfterConstraints = constraintChecker.applyExtendedBolusConstraints(
             ConstraintObject(state.insulin, aapsLogger)
         ).value()
-        lines.add(rh.gs(app.aaps.core.ui.R.string.format_insulin_units, insulinAfterConstraints))
-        lines.add(rh.gs(app.aaps.core.ui.R.string.duration) + ": " + rh.gs(app.aaps.core.ui.R.string.format_mins, durationInMinutes))
-        if (abs(insulinAfterConstraints - state.insulin) > 0.01) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.constraint_applied))
+        return confirmationLines {
+            line(ConfirmationRole.BOLUS, rh.gs(app.aaps.core.ui.R.string.format_insulin_units, insulinAfterConstraints))
+            line(
+                ConfirmationRole.NORMAL,
+                rh.gs(
+                    app.aaps.core.ui.R.string.confirmation_line,
+                    rh.gs(app.aaps.core.ui.R.string.duration),
+                    rh.gs(app.aaps.core.ui.R.string.format_mins, durationInMinutes)
+                )
+            )
+            if (abs(insulinAfterConstraints - state.insulin) > 0.01) {
+                line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.constraint_applied))
+            }
         }
-
-        return lines
     }
 
     fun confirmAndSave() {

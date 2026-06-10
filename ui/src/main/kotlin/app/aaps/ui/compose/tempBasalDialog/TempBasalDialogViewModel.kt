@@ -7,6 +7,9 @@ import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -107,32 +110,59 @@ class TempBasalDialogViewModel @Inject constructor(
 
     private var confirmedState: TempBasalDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<String> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
         val profile = uiState.value.profile ?: return emptyList()
-        val lines = mutableListOf<String>()
         val durationInMinutes = state.durationMinutes.toInt()
 
-        if (state.isPercentPump) {
-            val basalPercentInput = state.basalPercent.toInt()
-            val percent = constraintChecker.applyBasalPercentConstraints(
-                ConstraintObject(basalPercentInput, aapsLogger), profile
-            ).value()
-            lines.add(rh.gs(app.aaps.core.ui.R.string.tempbasal_label) + ": $percent%")
-            lines.add(rh.gs(app.aaps.core.ui.R.string.duration) + ": " + rh.gs(app.aaps.core.ui.R.string.format_mins, durationInMinutes))
-            if (percent != basalPercentInput) lines.add(rh.gs(app.aaps.core.ui.R.string.constraint_applied))
-        } else {
-            val basalAbsoluteInput = state.basalAbsolute
-            val absolute = constraintChecker.applyBasalConstraints(
-                ConstraintObject(basalAbsoluteInput, aapsLogger), profile
-            ).value()
-            lines.add(rh.gs(app.aaps.core.ui.R.string.tempbasal_label) + ": " + rh.gs(app.aaps.core.ui.R.string.pump_base_basal_rate, absolute))
-            lines.add(rh.gs(app.aaps.core.ui.R.string.duration) + ": " + rh.gs(app.aaps.core.ui.R.string.format_mins, durationInMinutes))
-            if (abs(absolute - basalAbsoluteInput) > 0.01) lines.add(rh.gs(app.aaps.core.ui.R.string.constraint_applied))
+        return confirmationLines {
+            if (state.isPercentPump) {
+                val basalPercentInput = state.basalPercent.toInt()
+                val percent = constraintChecker.applyBasalPercentConstraints(
+                    ConstraintObject(basalPercentInput, aapsLogger), profile
+                ).value()
+                line(
+                    ConfirmationRole.PRIMARY,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.tempbasal_label),
+                        rh.gs(app.aaps.core.ui.R.string.format_percent, percent)
+                    )
+                )
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.duration),
+                        rh.gs(app.aaps.core.ui.R.string.format_mins, durationInMinutes)
+                    )
+                )
+                if (percent != basalPercentInput) line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.constraint_applied))
+            } else {
+                val basalAbsoluteInput = state.basalAbsolute
+                val absolute = constraintChecker.applyBasalConstraints(
+                    ConstraintObject(basalAbsoluteInput, aapsLogger), profile
+                ).value()
+                line(
+                    ConfirmationRole.PRIMARY,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.tempbasal_label),
+                        rh.gs(app.aaps.core.ui.R.string.pump_base_basal_rate, absolute)
+                    )
+                )
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.duration),
+                        rh.gs(app.aaps.core.ui.R.string.format_mins, durationInMinutes)
+                    )
+                )
+                if (abs(absolute - basalAbsoluteInput) > 0.01) line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.constraint_applied))
+            }
         }
-
-        return lines
     }
 
     fun confirmAndSave() {

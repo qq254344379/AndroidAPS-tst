@@ -58,10 +58,8 @@ import app.aaps.core.ui.compose.QuickAddButtons
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.consumeOverscroll
-import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
 import app.aaps.core.ui.compose.navigation.ElementType
-import app.aaps.core.ui.compose.navigation.color
-import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.compose.navigation.labelResId
 import app.aaps.core.ui.compose.preference.PreferenceSheetContent
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
@@ -119,12 +117,9 @@ fun CarbsDialogScreen(
             showConfirmation = false
             showNoAction = true
         } else {
-            val summaryLines = viewModel.buildConfirmationSummary()
-            OkCancelDialog(
-                title = stringResource(CoreUiR.string.carbs),
-                message = summaryLines.joinToString("<br/>"),
-                icon = ElementType.CARBS.icon(),
-                iconTint = ElementType.CARBS.color(),
+            ElementConfirmationDialog(
+                elementType = ElementType.CARBS,
+                lines = viewModel.buildConfirmationSummary(),
                 onConfirm = {
                     viewModel.confirmAndSave()
                     onNavigateBack()
@@ -136,11 +131,9 @@ fun CarbsDialogScreen(
 
     // No action dialog
     if (showNoAction) {
-        OkCancelDialog(
-            title = stringResource(CoreUiR.string.carbs),
+        ElementConfirmationDialog(
+            elementType = ElementType.CARBS,
             message = stringResource(CoreUiR.string.no_action_selected),
-            icon = ElementType.CARBS.icon(),
-            iconTint = ElementType.CARBS.color(),
             onConfirm = { showNoAction = false },
             onDismiss = { showNoAction = false }
         )

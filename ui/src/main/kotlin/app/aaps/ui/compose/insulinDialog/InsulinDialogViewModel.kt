@@ -10,6 +10,9 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.configuration.Config
@@ -222,10 +225,9 @@ class InsulinDialogViewModel @Inject constructor(
 
     private var confirmedState: InsulinDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<String> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
-        val lines = mutableListOf<String>()
         val unitLabel = if (state.units == GlucoseUnit.MMOL) rh.gs(app.aaps.core.ui.R.string.mmol) else rh.gs(app.aaps.core.ui.R.string.mgdl)
         val pump = activePlugin.activePump
         val pumpDescription = pump.pumpDescription
@@ -239,44 +241,69 @@ class InsulinDialogViewModel @Inject constructor(
             ).value()
         }
 
-        // Bolus line
-        if (insulinAfterConstraints > 0) {
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.bolus) + ": " +
-                    decimalFormatter.toPumpSupportedBolus(insulinAfterConstraints, pumpDescription.bolusStep)
-            )
-            if (state.recordOnlyChecked) {
-                lines.add(rh.gs(app.aaps.core.ui.R.string.bolus_recorded_only))
-                state.selectedIcfg?.let {
-                    lines.add(rh.gs(app.aaps.core.ui.R.string.selected_insulin, it.insulinLabel))
+        return confirmationLines {
+            // Bolus line
+            if (insulinAfterConstraints > 0) {
+                line(
+                    ConfirmationRole.BOLUS,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.bolus),
+                        decimalFormatter.toPumpSupportedBolusWithUnits(insulinAfterConstraints, pumpDescription.bolusStep)
+                    )
+                )
+                if (state.recordOnlyChecked) {
+                    line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.bolus_recorded_only))
+                    state.selectedIcfg?.let {
+                        line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.selected_insulin, it.insulinLabel))
+                    }
+                }
+                if (abs(insulinAfterConstraints - insulin) > pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)) {
+                    line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.bolus_constraint_applied_warn, insulin, insulinAfterConstraints))
                 }
             }
-            if (abs(insulinAfterConstraints - insulin) > pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)) {
-                lines.add(rh.gs(app.aaps.core.ui.R.string.bolus_constraint_applied_warn, insulin, insulinAfterConstraints))
+
+            // Eating soon TT
+            if (state.eatingSoonTtChecked) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(R.string.temp_target_short),
+                        rh.gs(
+                            app.aaps.core.ui.R.string.value_with_unit,
+                            decimalFormatter.to1Decimal(state.eatingSoonTtTarget),
+                            unitLabel
+                        ) + " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.eatingSoonTtDuration) + ")"
+                    )
+                )
+            }
+
+            // Time offset
+            val timeOffset = state.timeOffsetMinutes
+            if (timeOffset != 0) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.time),
+                        dateUtil.dateAndTimeString(state.eventTime)
+                    )
+                )
+            }
+
+            // Notes
+            if (state.notes.isNotEmpty()) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.notes_label),
+                        state.notes
+                    )
+                )
             }
         }
-
-        // Eating soon TT
-        if (state.eatingSoonTtChecked) {
-            lines.add(
-                rh.gs(R.string.temp_target_short) + ": " +
-                    decimalFormatter.to1Decimal(state.eatingSoonTtTarget) + " " + unitLabel +
-                    " (" + rh.gs(app.aaps.core.ui.R.string.format_mins, state.eatingSoonTtDuration) + ")"
-            )
-        }
-
-        // Time offset
-        val timeOffset = state.timeOffsetMinutes
-        if (timeOffset != 0) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.time) + ": " + dateUtil.dateAndTimeString(state.eventTime))
-        }
-
-        // Notes
-        if (state.notes.isNotEmpty()) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.notes_label) + ": " + state.notes)
-        }
-
-        return lines
     }
 
     fun hasAction(): Boolean {
