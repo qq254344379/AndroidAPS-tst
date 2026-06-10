@@ -2,6 +2,7 @@ package app.aaps.implementation.bolus
 
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
+import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.time.T
@@ -16,6 +17,7 @@ import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
@@ -219,12 +221,25 @@ class WizardBolusExecutorImpl @Inject constructor(
         }
     }
 
-    override suspend fun deliverInsulin(insulin: Double, note: String?, source: Sources, onError: (String) -> Unit) {
-        // Fixed-amount correction insulin (QuickWizard INSULIN button): CORRECTION_BOLUS + BOLUS user entry,
-        // note logged on the user entry only (the legacy path left the treatment notes unset).
+    override suspend fun deliverInsulin(
+        insulin: Double,
+        note: String?,
+        source: Sources,
+        onError: (String) -> Unit,
+        timestamp: Long?,
+        treatmentNote: String?,
+        recordOnly: Boolean,
+        iCfg: ICfg?,
+        onSuccess: () -> Unit
+    ) {
+        // Fixed-amount correction insulin: CORRECTION_BOLUS + BOLUS user entry. [note] is logged on the user
+        // entry; [treatmentNote] (when given) is stored on the bolus treatment; [timestamp] back/forward-dates
+        // it. [recordOnly] persists directly (needs [iCfg]) instead of delivering.
         val detailedBolusInfo = DetailedBolusInfo().apply {
             eventType = TE.Type.CORRECTION_BOLUS
             this.insulin = insulin
+            this.notes = treatmentNote
+            timestamp?.let { this.timestamp = it }
         }
         if (insulin > 0) {
             executeBolus(
@@ -234,7 +249,31 @@ class WizardBolusExecutorImpl @Inject constructor(
                 note = note,
                 bolusCalculatorResult = null,
                 source = source,
-                onError = onError
+                onError = onError,
+                onSuccess = onSuccess,
+                recordOnly = recordOnly,
+                iCfg = iCfg
+            )
+        }
+    }
+
+    override suspend fun deliverCarbs(carbs: Int, note: String?, source: Sources, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        // Instant carbs at now (zero insulin): CARBS_CORRECTION + CARBS user entry; note on the entry only.
+        val detailedBolusInfo = DetailedBolusInfo().apply {
+            eventType = TE.Type.CARBS_CORRECTION
+            this.carbs = carbs.toDouble()
+            carbsTimestamp = dateUtil.now()
+        }
+        if (carbs != 0) {
+            executeBolus(
+                detailedBolusInfo,
+                Action.CARBS,
+                listOf(ValueWithUnit.Gram(carbs)),
+                note = note,
+                bolusCalculatorResult = null,
+                source = source,
+                onError = onError,
+                onSuccess = onSuccess
             )
         }
     }
@@ -247,9 +286,14 @@ class WizardBolusExecutorImpl @Inject constructor(
         bolusCalculatorResult: BCR?,
         notes: String?,
         source: Sources,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        eventType: TE.Type?,
+        recordOnly: Boolean,
+        iCfg: ICfg?,
+        onSuccess: () -> Unit
     ) {
         val detailedBolusInfo = DetailedBolusInfo().apply {
+            eventType?.let { this.eventType = it }
             insulin = amount
             this.carbs = carbs.toDouble()
             bolusType = BS.Type.NORMAL
@@ -269,7 +313,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 ValueWithUnit.Gram(carbs).takeIf { carbs != 0 },
                 ValueWithUnit.Hour(carbsDuration).takeIf { carbsDuration != 0 }
             )
-            executeBolus(detailedBolusInfo, action, uelValues, note = null, bolusCalculatorResult, source, onError)
+            executeBolus(detailedBolusInfo, action, uelValues, note = null, bolusCalculatorResult, source, onError, onSuccess, recordOnly, iCfg)
         }
     }
 
@@ -286,8 +330,31 @@ class WizardBolusExecutorImpl @Inject constructor(
         bolusCalculatorResult: BCR?,
         source: Sources,
         onError: (String) -> Unit,
-        onSuccess: () -> Unit = {}
+        onSuccess: () -> Unit = {},
+        recordOnly: Boolean = false,
+        iCfg: ICfg? = null
     ) {
+        if (recordOnly) {
+            // No pump command (AAPSCLIENT / uninitialized pump / loop forbids a bolus): persist the
+            // treatment(s) directly. The persistence layer emits the user entry, so there's no uel.log
+            // and no running-mode gate here. The user's own notes ride [detailedBolusInfo.notes] onto the
+            // BS/CA; the user entry gets the uniform "record" marker (no fragile "Record: notes" concat).
+            val recordNote = rh.gs(R.string.record)
+            appScope.launch {
+                if (detailedBolusInfo.insulin > 0) {
+                    val cfg = iCfg ?: profileFunction.getProfile()?.iCfg
+                    if (cfg != null)
+                        persistenceLayer.insertOrUpdateBolus(detailedBolusInfo.createBolus(cfg), action = action, source = source, note = recordNote)
+                    else
+                        aapsLogger.error(LTag.UI, "record-only bolus skipped: no insulin config available")
+                }
+                if (detailedBolusInfo.carbs != 0.0)
+                    persistenceLayer.insertOrUpdateCarbs(detailedBolusInfo.createCarbs(), action = action, source = source, note = recordNote)
+                onSuccess()
+            }
+            bolusCalculatorResult?.let { persistenceLayer.insertOrUpdateBolusCalculatorResult(it) }
+            return
+        }
         if (detailedBolusInfo.insulin > 0) {
             runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
                 onError(it)
@@ -305,26 +372,28 @@ class WizardBolusExecutorImpl @Inject constructor(
         bolusCalculatorResult?.let { persistenceLayer.insertOrUpdateBolusCalculatorResult(it) }
     }
 
-    override suspend fun deliverFillBolus(amount: Double, source: Sources, onError: (String) -> Unit) {
-        runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
-            onError(it)
-            return
+    override suspend fun deliverFillBolus(amount: Double, notes: String?, source: Sources, onError: (String) -> Unit, onSuccess: () -> Unit) {
+        // Prime/fill now rides the shared core (one audited path). PRIMING type keeps it out of IOB/TDD.
+        val detailedBolusInfo = DetailedBolusInfo().apply {
+            insulin = amount
+            bolusType = BS.Type.PRIMING
+            this.notes = notes
         }
-        val detailedBolusInfo = DetailedBolusInfo()
-        detailedBolusInfo.insulin = amount
-        detailedBolusInfo.bolusType = BS.Type.PRIMING
-        uel.log(
-            action = Action.PRIME_BOLUS, source = source,
-            listValues = listOfNotNull(ValueWithUnit.Insulin(amount).takeIf { amount != 0.0 })
-        )
-        appScope.launch {
-            val result = commandQueue.bolus(detailedBolusInfo)
-            if (!result.success)
-                onError(rh.gs(R.string.treatmentdeliveryerror) + "\n" + result.comment)
+        if (amount > 0) {
+            executeBolus(
+                detailedBolusInfo,
+                Action.PRIME_BOLUS,
+                listOf(ValueWithUnit.Insulin(amount)),
+                note = notes,
+                bolusCalculatorResult = null,
+                source = source,
+                onError = onError,
+                onSuccess = onSuccess
+            )
         }
     }
 
-    override suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, delayMinutes: Int, notes: String?, source: Sources, onError: (String) -> Unit) {
+    override suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, delayMinutes: Int, notes: String?, source: Sources, onError: (String) -> Unit, onSuccess: () -> Unit) {
         // Funnel straight through the shared core (not via deliver) so the UEL is logged exactly once with
         // the eCarbs Timestamp; routing via deliver would re-log [Gram, Hour] as a second, duplicate row.
         val detailedBolusInfo = DetailedBolusInfo().apply {
@@ -342,7 +411,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 ValueWithUnit.Minute(delayMinutes).takeIf { delayMinutes != 0 },
                 ValueWithUnit.Hour(duration).takeIf { duration != 0 }
             )
-            executeBolus(detailedBolusInfo, action, uelValues, note = notes, bolusCalculatorResult = null, source, onError)
+            executeBolus(detailedBolusInfo, action, uelValues, note = notes, bolusCalculatorResult = null, source, onError, onSuccess)
         }
     }
 }

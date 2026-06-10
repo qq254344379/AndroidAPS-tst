@@ -6,7 +6,6 @@ import android.content.res.Configuration
 import androidx.compose.ui.graphics.toArgb
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.iob.InMemoryGlucoseValue
-import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.GV
 import app.aaps.core.data.model.GlucoseUnit
@@ -47,7 +46,6 @@ import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
-import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.PumpStatusProvider
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.queue.CommandQueue
@@ -99,11 +97,9 @@ import app.aaps.plugins.sync.R
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.rx3.rxCompletable
 import java.text.DateFormat
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.LinkedList
 import java.util.Locale
@@ -441,7 +437,7 @@ class DataHandlerMobile @Inject constructor(
                         rxBus.send(EventShowSnackbar("aborting: previously applied constraint changed", EventShowSnackbar.Type.Warning))
                         sendError("aborting: previously applied constraint changed")
                     } else
-                        wizardBolusExecutor.deliverFillBolus(it.insulin, Sources.Wear, ::sendError)
+                        wizardBolusExecutor.deliverFillBolus(it.insulin, null, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -1010,6 +1006,7 @@ class DataHandlerMobile @Inject constructor(
         // formats the wear preview and ships the ConfirmAction.
         when (val result = wizardBolusExecutor.prepareQuickWizard(command.guid)) {
             is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
+
             is WizardBolusExecutor.PrepareResult.Preview -> {
                 // Display config (button text, eCarbs, carb-delay) is a wear-only concern, so the neutral
                 // executor doesn't carry it — re-read the entry here for the ConfirmAction message.

@@ -10,6 +10,7 @@ import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
@@ -19,6 +20,7 @@ import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +42,8 @@ class ExtendedBolusDialogViewModel @Inject constructor(
     private val uel: UserEntryLogger,
     private val rh: ResourceHelper,
     private val aapsLogger: AAPSLogger,
-    private val runningModeGuard: RunningModeGuard
+    private val runningModeGuard: RunningModeGuard,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ExtendedBolusDialogUiState())
@@ -134,7 +137,9 @@ class ExtendedBolusDialogViewModel @Inject constructor(
     }
 
     fun confirmAndSave() {
-        viewModelScope.launch { confirmAndSaveSuspend() }
+        // appScope, not viewModelScope: the screen navigates back on confirm, cancelling viewModelScope —
+        // a delivery launched there would be cancelled before it runs (the extended bolus would silently drop).
+        appScope.launch { confirmAndSaveSuspend() }
     }
 
     private suspend fun confirmAndSaveSuspend() {

@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.ICfg
-import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
@@ -15,6 +14,7 @@ import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -23,13 +23,10 @@ import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
-import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
-import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
-import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
 import app.aaps.core.interfaces.tempTargets.ttTargetMgdl
@@ -41,7 +38,6 @@ import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.runningMode.PumpCommandGate
-import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.ui.R
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -65,13 +61,11 @@ class InsulinDialogViewModel @Inject constructor(
     private val constraintChecker: ConstraintsChecker,
     private val profileFunction: ProfileFunction,
     private val profileUtil: ProfileUtil,
-    private val commandQueue: CommandQueue,
     private val activePlugin: ActivePlugin,
     val activeInsulin: Insulin,
     val insulinManager: InsulinManager,
     val config: Config,
     private val automation: Automation,
-    private val uel: UserEntryLogger,
     private val persistenceLayer: PersistenceLayer,
     val decimalFormatter: DecimalFormatter,
     private val loop: Loop,
@@ -80,7 +74,7 @@ class InsulinDialogViewModel @Inject constructor(
     val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger,
     hardLimits: HardLimits,
-    private val runningModeGuard: RunningModeGuard,
+    private val wizardBolusExecutor: WizardBolusExecutor,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -371,43 +365,25 @@ class InsulinDialogViewModel @Inject constructor(
             }
         }
 
-        // Send bolus
+        // Bolus now rides the shared executor (one audited path): it logs the user entry and either
+        // delivers via the queue or — when record-only — persists the bolus directly with the resolved
+        // insulin config. The eating-soon TT above stays here (it must run even with no insulin).
         if (insulinAfterConstraints > 0) {
-            val detailedBolusInfo = DetailedBolusInfo().also {
-                it.eventType = TE.Type.CORRECTION_BOLUS
-                it.insulin = insulinAfterConstraints
-                it.notes = notes
-                it.timestamp = time
-            }
-
-            if (recordOnlyChecked) {
-                // appScope, not viewModelScope: the screen navigates back immediately after
-                // confirm, which cancels viewModelScope and could drop this direct DB write.
-                appScope.launch {
-                    persistenceLayer.insertOrUpdateBolus(
-                        bolus = detailedBolusInfo.createBolus(iCfg),
-                        action = Action.BOLUS,
-                        source = Sources.InsulinDialog,
-                        note = rh.gs(app.aaps.core.ui.R.string.record) + if (notes.isNotEmpty()) ": $notes" else ""
-                    )
+            wizardBolusExecutor.deliverInsulin(
+                insulin = insulinAfterConstraints,
+                note = notes,
+                source = Sources.InsulinDialog,
+                onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
+                timestamp = time,
+                treatmentNote = notes,
+                recordOnly = recordOnlyChecked,
+                iCfg = iCfg,
+                onSuccess = {
+                    // Non-record: remove on delivery success. Record-only: only when not back/forward-dated.
+                    if (!recordOnlyChecked || timeOffset == 0)
+                        automation.removeAutomationEventBolusReminder()
                 }
-                if (timeOffset == 0) {
-                    automation.removeAutomationEventBolusReminder()
-                }
-            } else {
-                if (runningModeGuard.checkWithSnackbar(PumpCommandGate.CommandKind.BOLUS)) return
-                uel.log(
-                    Action.BOLUS, Sources.InsulinDialog,
-                    notes,
-                    ValueWithUnit.Insulin(insulinAfterConstraints)
-                )
-                val result = commandQueue.bolus(detailedBolusInfo)
-                if (!result.success) {
-                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(result.comment))
-                } else {
-                    automation.removeAutomationEventBolusReminder()
-                }
-            }
+            )
         }
     }
 }

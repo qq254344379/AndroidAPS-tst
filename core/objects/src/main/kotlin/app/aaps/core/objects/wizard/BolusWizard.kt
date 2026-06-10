@@ -589,9 +589,9 @@ class BolusWizard @Inject constructor(
                 val buttonText = quickWizardEntry.storage.get("buttonText").toString()
                 // eCarbs delivery now rides the shared executor (one audited path).
                 appScope.launch {
-                    wizardBolusExecutor.deliverECarbs(carbs2, eventTime, duration, timeOffset, buttonText, Sources.QuickWizard) { comment ->
+                    wizardBolusExecutor.deliverECarbs(carbs2, eventTime, duration, timeOffset, buttonText, Sources.QuickWizard, onError = { comment ->
                         uiInteraction.runAlarm(comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
-                    }
+                    })
                 }
             }
 

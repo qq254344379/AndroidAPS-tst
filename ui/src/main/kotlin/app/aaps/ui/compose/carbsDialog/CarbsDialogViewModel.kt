@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.model.GlucoseUnit
-import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
@@ -15,6 +14,7 @@ import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -23,10 +23,7 @@ import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
-import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.profile.ProfileUtil
-import app.aaps.core.interfaces.pump.DetailedBolusInfo
-import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
 import app.aaps.core.interfaces.tempTargets.ttTargetMgdl
@@ -61,9 +58,8 @@ class CarbsDialogViewModel @Inject constructor(
     private val profileUtil: ProfileUtil,
     private val iobCobCalculator: IobCobCalculator,
     private val glucoseStatusProvider: GlucoseStatusProvider,
-    private val uel: UserEntryLogger,
     private val automation: Automation,
-    private val commandQueue: CommandQueue,
+    private val wizardBolusExecutor: WizardBolusExecutor,
     private val persistenceLayer: PersistenceLayer,
     val preferences: Preferences,
     val config: Config,
@@ -435,34 +431,23 @@ class CarbsDialogViewModel @Inject constructor(
             }
         }
 
-        // Send carbs via command queue
+        // Carbs delivery now rides the shared executor (one audited path): it logs the user entry + delivers.
         if (carbsAfterConstraints != 0) {
-            val detailedBolusInfo = DetailedBolusInfo().also {
-                it.eventType = TE.Type.CORRECTION_BOLUS
-                it.carbs = carbsAfterConstraints.toDouble()
-                it.notes = notes
-                it.carbsDuration = T.hours(duration.toLong()).msecs()
-                it.carbsTimestamp = eventTime
-            }
-            uel.log(
-                action = if (duration == 0) Action.CARBS else Action.EXTENDED_CARBS,
-                source = Sources.CarbDialog,
-                note = notes,
-                listValues = listOfNotNull(
-                    ValueWithUnit.Timestamp(eventTime).takeIf { state.eventTimeChanged },
-                    ValueWithUnit.Gram(carbsAfterConstraints),
-                    ValueWithUnit.Minute(timeOffset).takeIf { timeOffset != 0 },
-                    ValueWithUnit.Hour(duration).takeIf { duration != 0 }
+            appScope.launch {
+                wizardBolusExecutor.deliverECarbs(
+                    carbs = carbsAfterConstraints,
+                    carbsTime = eventTime,
+                    duration = duration,
+                    delayMinutes = timeOffset,
+                    notes = notes,
+                    source = Sources.CarbDialog,
+                    onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
+                    onSuccess = {
+                        if (preferences.get(BooleanKey.OverviewUseBolusReminder) && remindBolus)
+                            automation.scheduleAutomationEventBolusReminder()
+                    }
                 )
-            )
-            viewModelScope.launch {
-                val result = commandQueue.bolus(detailedBolusInfo)
                 automation.removeAutomationEventEatReminder()
-                if (!result.success) {
-                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(result.comment))
-                } else if (preferences.get(BooleanKey.OverviewUseBolusReminder) && remindBolus) {
-                    automation.scheduleAutomationEventBolusReminder()
-                }
             }
         }
 

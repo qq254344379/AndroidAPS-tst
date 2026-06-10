@@ -37,10 +37,8 @@ import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
-import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
-import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
@@ -110,7 +108,6 @@ class MainViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val aapsLogger: AAPSLogger,
     private val quickLaunchResolver: QuickLaunchResolver,
-    private val commandQueue: CommandQueue,
     private val wizardBolusExecutor: WizardBolusExecutor,
     private val uiInteraction: UiInteraction,
     private val uel: UserEntryLogger,
@@ -504,20 +501,13 @@ class MainViewModel @Inject constructor(
                 title = entry.buttonText(),
                 message = message,
                 onOk = {
-                    uel.log(
-                        Action.CARBS, Sources.QuickWizard,
-                        entry.buttonText(),
-                        ValueWithUnit.Gram(carbs)
+                    // Instant carbs now ride the shared executor (one audited path).
+                    wizardBolusExecutor.deliverCarbs(
+                        carbs = carbs,
+                        note = entry.buttonText(),
+                        source = Sources.QuickWizard,
+                        onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
                     )
-                    val detailedBolusInfo = DetailedBolusInfo().apply {
-                        eventType = app.aaps.core.data.model.TE.Type.CARBS_CORRECTION
-                        this.carbs = carbs.toDouble()
-                        carbsTimestamp = dateUtil.now()
-                    }
-                    val result = commandQueue.bolus(detailedBolusInfo)
-                    if (!result.success) {
-                        uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
-                    }
                     entry.markAsUsed()
                 }
             )
