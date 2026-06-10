@@ -552,7 +552,10 @@ class PersistenceLayerImpl @Inject constructor(
                 aapsLogger.debug(LTag.DATABASE, "Inserted Carbs $it")
                 transactionResult.updated.add(it.fromDb())
             }
-            log(ueValues)
+            // Skip the user-entry for an internal (command-queue) carbs persist: the queue uses
+            // Sources.Database and the originating caller (executor / SMS / wizard) already logged the
+            // real-source user entry — a second Database-sourced row would just duplicate it in the log.
+            if (source != Sources.Database) log(ueValues)
             transactionResult
         } catch (e: Exception) {
             aapsLogger.error(LTag.DATABASE, "Error while saving Carbs", e)
