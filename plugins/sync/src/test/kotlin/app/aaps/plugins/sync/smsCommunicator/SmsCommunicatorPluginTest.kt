@@ -993,6 +993,14 @@ class SmsCommunicatorPluginTest : TestBaseWithProfile() {
         smsCommunicatorPlugin.processSms(Sms("1234", passCode))
         assertThat(smsCommunicatorPlugin.messages[2].text).isEqualTo(passCode)
         assertThat(smsCommunicatorPlugin.messages[3].text).isEqualTo("Meal Bolus 1.00U delivered successfully\nVirtual Pump\nTarget 5.0 for 45 minutes")
+
+        //BOLUS 1 MEAL within the minimum remote-bolus distance must be rejected (meal form previously bypassed the spacing guard)
+        smsCommunicatorPlugin.lastRemoteBolusTime = dateUtilMocked.now() - 100
+        smsCommunicatorPlugin.messages = ArrayList()
+        sms = Sms("1234", "BOLUS 1 MEAL")
+        smsCommunicatorPlugin.processSms(sms)
+        assertThat(smsCommunicatorPlugin.messages[0].text).isEqualTo("BOLUS 1 MEAL")
+        assertThat(smsCommunicatorPlugin.messages[1].text).isEqualTo("Remote bolus not available. Try again later.")
     }
 
     @Test fun processCalTest() = runBlocking {
