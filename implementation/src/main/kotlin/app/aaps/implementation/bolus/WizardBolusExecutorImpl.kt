@@ -109,13 +109,15 @@ class WizardBolusExecutorImpl @Inject constructor(
         var eventTime = currentTime
         var carbs2 = 0
         var duration = 0
+        var eCarbsDelay = 0
         var notes: String? = null
         p.entry?.let { qwe ->
             carbTimeOffset = qwe.carbTime().toLong()
             useAlarm = qwe.useAlarm() == QuickWizardEntry.YES
             notes = qwe.buttonText()
             if (qwe.useEcarbs() == QuickWizardEntry.YES) {
-                eventTime += (qwe.time() * 60000)
+                eCarbsDelay = qwe.time()
+                eventTime += (eCarbsDelay * 60000)
                 carbs2 = qwe.carbs2()
                 duration = qwe.duration()
             }
@@ -138,7 +140,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         // Canonical: a wear wizard bolus now records identically to the phone (BOLUS_WIZARD + mgdlGlucose).
         // The mg/dL BG comes from the BCR's glucoseValue (== profileUtil.convertToMgdl(bg, units)).
         deliverWizardBolus(p.insulin, p.carbs, carbTimeOffset.toInt(), p.bcr?.glucoseValue, p.bcr, notes, source, onError)
-        if (carbs2 > 0) deliverECarbs(carbs2, eventTime, duration, notes, source, onError)
+        if (carbs2 > 0) deliverECarbs(carbs2, eventTime, duration, eCarbsDelay, notes, source, onError)
         if (useAlarm && p.carbs > 0 && carbTimeOffset > 0)
             automation.scheduleTimeToEatReminder(T.mins(carbTimeOffset).secs().toInt())
         p.entry?.markAsUsed()
@@ -322,10 +324,11 @@ class WizardBolusExecutorImpl @Inject constructor(
         }
     }
 
-    override suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, notes: String?, source: Sources, onError: (String) -> Unit) {
+    override suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, delayMinutes: Int, notes: String?, source: Sources, onError: (String) -> Unit) {
         // Funnel straight through the shared core (not via deliver) so the UEL is logged exactly once with
         // the eCarbs Timestamp; routing via deliver would re-log [Gram, Hour] as a second, duplicate row.
         val detailedBolusInfo = DetailedBolusInfo().apply {
+            eventType = TE.Type.CORRECTION_BOLUS
             this.carbs = carbs.toDouble()
             carbsTimestamp = carbsTime
             carbsDuration = T.hours(duration.toLong()).msecs()
@@ -336,9 +339,10 @@ class WizardBolusExecutorImpl @Inject constructor(
             val uelValues = listOfNotNull(
                 ValueWithUnit.Timestamp(carbsTime),
                 ValueWithUnit.Gram(carbs),
+                ValueWithUnit.Minute(delayMinutes).takeIf { delayMinutes != 0 },
                 ValueWithUnit.Hour(duration).takeIf { duration != 0 }
             )
-            executeBolus(detailedBolusInfo, action, uelValues, note = null, bolusCalculatorResult = null, source, onError)
+            executeBolus(detailedBolusInfo, action, uelValues, note = notes, bolusCalculatorResult = null, source, onError)
         }
     }
 }

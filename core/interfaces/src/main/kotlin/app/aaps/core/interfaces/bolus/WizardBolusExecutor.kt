@@ -89,8 +89,12 @@ interface WizardBolusExecutor {
     /** Prime/fill bolus (no carbs). */
     suspend fun deliverFillBolus(amount: Double, source: Sources, onError: (String) -> Unit)
 
-    /** Extended/delayed carbs (zero insulin) — recorded once with the eCarbs timestamp. */
-    suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, notes: String?, source: Sources, onError: (String) -> Unit)
+    /**
+     * Extended/delayed carbs (zero insulin) — recorded once with the eCarbs timestamp. [delayMinutes] is the
+     * delay from now used in the user entry (0 = no `Minute` value). The single audited eCarbs path for the
+     * wizard, quick-wizard and wear.
+     */
+    suspend fun deliverECarbs(carbs: Int, carbsTime: Long, duration: Int, delayMinutes: Int, notes: String?, source: Sources, onError: (String) -> Unit)
 
     sealed interface PrepareResult {
 

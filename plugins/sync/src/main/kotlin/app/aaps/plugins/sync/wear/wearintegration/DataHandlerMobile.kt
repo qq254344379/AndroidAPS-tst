@@ -400,7 +400,7 @@ class DataHandlerMobile @Inject constructor(
             .concatMapCompletable {
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionECarbsConfirmed received $it from ${it.sourceNodeId}")
-                    wizardBolusExecutor.deliverECarbs(it.carbs, it.carbsTime, it.duration, null, Sources.Wear, ::sendError)
+                    wizardBolusExecutor.deliverECarbs(it.carbs, it.carbsTime, it.duration, 0, null, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()

@@ -34,7 +34,6 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
-import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
@@ -69,7 +68,6 @@ class BolusWizard @Inject constructor(
     private val profileUtil: ProfileUtil,
     private val constraintChecker: ConstraintsChecker,
     private val activePlugin: ActivePlugin,
-    private val commandQueue: CommandQueue,
     private val loop: Loop,
     private val iobCobCalculator: IobCobCalculator,
     private val dateUtil: DateUtil,
@@ -588,27 +586,11 @@ class BolusWizard @Inject constructor(
             val eventTime: Long = currentTime + (timeOffset * 60000)
 
             if (carbs2 > 0) {
-                val detailedBolusInfo = DetailedBolusInfo()
-                detailedBolusInfo.eventType = TE.Type.CORRECTION_BOLUS
-                detailedBolusInfo.carbs = carbs2.toDouble()
-                detailedBolusInfo.notes = quickWizardEntry.storage.get("buttonText").toString()
-                detailedBolusInfo.carbsDuration = T.hours(duration.toLong()).msecs()
-                detailedBolusInfo.carbsTimestamp = eventTime
-                uel.log(
-                    action = Action.EXTENDED_CARBS,
-                    source = Sources.QuickWizard,
-                    note = quickWizardEntry.storage.get("buttonText").toString(),
-                    listValues = listOfNotNull(
-                        ValueWithUnit.Timestamp(eventTime),
-                        ValueWithUnit.Gram(carbs2),
-                        ValueWithUnit.Minute(timeOffset).takeIf { timeOffset != 0 },
-                        ValueWithUnit.Hour(duration).takeIf { duration != 0 }
-                    )
-                )
+                val buttonText = quickWizardEntry.storage.get("buttonText").toString()
+                // eCarbs delivery now rides the shared executor (one audited path).
                 appScope.launch {
-                    val result = commandQueue.bolus(detailedBolusInfo)
-                    if (!result.success) {
-                        uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
+                    wizardBolusExecutor.deliverECarbs(carbs2, eventTime, duration, timeOffset, buttonText, Sources.QuickWizard) { comment ->
+                        uiInteraction.runAlarm(comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
                     }
                 }
             }
@@ -653,7 +635,7 @@ class BolusWizard @Inject constructor(
             return
         }
         // Pre-check: if the mode forbids a new bolus, show a snackbar and skip without ever
-        // hitting commandQueue (avoids the alarm-on-failure callback path).
+        // reaching the delivery path (avoids the alarm-on-failure callback path).
         // When forcedRecordOnly is true the caller has already shown a banner and confirmation
         // line stating the entry will be recorded only — we bypass the snackbar guard and route
         // to the record-only path below.
@@ -826,12 +808,7 @@ class BolusWizard @Inject constructor(
         // Do NOT add carbTime again here or the eCarbs record lands carbTime minutes too late.
         val totalDelayMinutes = delayMinutes
         val eventTime = Calendar.getInstance().timeInMillis + (totalDelayMinutes * 60000L)
-        DetailedBolusInfo().apply {
-            eventType = TE.Type.CORRECTION_BOLUS
-            carbs = eCarbsGrams.toDouble()
-            carbsDuration = T.hours(durationHours.toLong()).msecs()
-            carbsTimestamp = eventTime
-            notes = this@BolusWizard.notes
+        if (forcedRecordOnly) {
             uel.log(
                 action = Action.EXTENDED_CARBS,
                 source = Sources.WizardDialog,
@@ -843,23 +820,24 @@ class BolusWizard @Inject constructor(
                     ValueWithUnit.Hour(durationHours).takeIf { durationHours != 0 }
                 )
             )
-            if (forcedRecordOnly) {
-                appScope.launch {
-                    persistenceLayer.insertOrUpdateCarbs(
-                        carbs = createCarbs(),
-                        action = Action.EXTENDED_CARBS,
-                        source = Sources.WizardDialog,
-                        note = notes.orEmpty().ifEmpty { rh.gs(app.aaps.core.ui.R.string.record) }
-                    )
-                }
-            } else {
-                val info = this
-                appScope.launch {
-                    val result = commandQueue.bolus(info)
-                    if (!result.success) {
-                        onError(result.comment)
-                    }
-                }
+            val detailedBolusInfo = DetailedBolusInfo().apply {
+                carbs = eCarbsGrams.toDouble()
+                carbsDuration = T.hours(durationHours.toLong()).msecs()
+                carbsTimestamp = eventTime
+                notes = this@BolusWizard.notes
+            }
+            appScope.launch {
+                persistenceLayer.insertOrUpdateCarbs(
+                    carbs = detailedBolusInfo.createCarbs(),
+                    action = Action.EXTENDED_CARBS,
+                    source = Sources.WizardDialog,
+                    note = notes.ifEmpty { rh.gs(app.aaps.core.ui.R.string.record) }
+                )
+            }
+        } else {
+            // eCarbs delivery now rides the shared executor (one audited path).
+            appScope.launch {
+                wizardBolusExecutor.deliverECarbs(eCarbsGrams, eventTime, durationHours, totalDelayMinutes, notes, Sources.WizardDialog, onError)
             }
         }
     }
@@ -875,25 +853,25 @@ class BolusWizard @Inject constructor(
             val eventTime: Long = currentTime + (timeOffset * 60000)
 
             if (carbs2 > 0) {
-                val detailedBolusInfo = DetailedBolusInfo()
-                detailedBolusInfo.eventType = TE.Type.CORRECTION_BOLUS
-                detailedBolusInfo.carbs = carbs2.toDouble()
-                detailedBolusInfo.notes = quickWizardEntry.storage.get("buttonText").toString()
-                detailedBolusInfo.carbsDuration = T.hours(duration.toLong()).msecs()
-                detailedBolusInfo.carbsTimestamp = eventTime
                 val buttonText = quickWizardEntry.storage.get("buttonText").toString()
-                uel.log(
-                    action = Action.EXTENDED_CARBS,
-                    source = Sources.QuickWizard,
-                    note = buttonText,
-                    listValues = listOfNotNull(
-                        ValueWithUnit.Timestamp(eventTime),
-                        ValueWithUnit.Gram(carbs2),
-                        ValueWithUnit.Minute(timeOffset).takeIf { timeOffset != 0 },
-                        ValueWithUnit.Hour(duration).takeIf { duration != 0 }
-                    )
-                )
                 if (forcedRecordOnly) {
+                    uel.log(
+                        action = Action.EXTENDED_CARBS,
+                        source = Sources.QuickWizard,
+                        note = buttonText,
+                        listValues = listOfNotNull(
+                            ValueWithUnit.Timestamp(eventTime),
+                            ValueWithUnit.Gram(carbs2),
+                            ValueWithUnit.Minute(timeOffset).takeIf { timeOffset != 0 },
+                            ValueWithUnit.Hour(duration).takeIf { duration != 0 }
+                        )
+                    )
+                    val detailedBolusInfo = DetailedBolusInfo().apply {
+                        carbs = carbs2.toDouble()
+                        notes = buttonText
+                        carbsDuration = T.hours(duration.toLong()).msecs()
+                        carbsTimestamp = eventTime
+                    }
                     appScope.launch {
                         persistenceLayer.insertOrUpdateCarbs(
                             carbs = detailedBolusInfo.createCarbs(),
@@ -903,11 +881,9 @@ class BolusWizard @Inject constructor(
                         )
                     }
                 } else {
+                    // eCarbs delivery now rides the shared executor (one audited path).
                     appScope.launch {
-                        val result = commandQueue.bolus(detailedBolusInfo)
-                        if (!result.success) {
-                            onError(result.comment)
-                        }
+                        wizardBolusExecutor.deliverECarbs(carbs2, eventTime, duration, timeOffset, buttonText, Sources.QuickWizard, onError)
                     }
                 }
             }
