@@ -89,6 +89,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import javax.inject.Inject
@@ -153,6 +154,14 @@ class LoopPlugin @Inject constructor(
     override var closedLoopEnabled: Constraint<Boolean>? = null
 
     private var handler: Handler? = null
+
+    // Serializes loop runs. Master's invoke() was @Synchronized; the suspend migration dropped that
+    // (and @Synchronized cannot span suspension points). invoke() is reachable concurrently — the
+    // per-BG PostCalculationWorker, the Accept-temp button, loop pull-to-refresh, the temp-target
+    // change flow, and the deferred SMB fallback — so without this lock two runs can overlap and
+    // double-apply or mis-order TBR/SMB commands. Not reentrant: the SMB fallback re-invoke is
+    // deferred (postDelayed + appScope.launch) and runs after the current run releases the lock.
+    private val invokeMutex = Mutex()
 
     @OptIn(FlowPreview::class)
     override suspend fun onStart() {
@@ -442,6 +451,8 @@ class LoopPlugin @Inject constructor(
     }
 
     override suspend fun invoke(initiator: String, allowNotification: Boolean, tempBasalFallback: Boolean): Unit = withContext(Dispatchers.Default) {
+        // Restores master's @Synchronized contract: serialize loop runs so they cannot overlap.
+        invokeMutex.lock()
         try {
             aapsLogger.debug(LTag.APS, "invoke from $initiator")
             if (runningMode() == RM.Mode.DISABLED_LOOP) {
@@ -662,6 +673,7 @@ class LoopPlugin @Inject constructor(
                 rxBus.send(EventLoopUpdateGui())
             }
         } finally {
+            invokeMutex.unlock()
             aapsLogger.debug(LTag.APS, "invoke end")
         }
     }

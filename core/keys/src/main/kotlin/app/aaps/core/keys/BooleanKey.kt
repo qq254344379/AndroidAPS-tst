@@ -56,7 +56,6 @@ enum class BooleanKey(
     @Deprecated("Remove support")
     OverviewUseSuperBolus("key_usersuperbolus", false, R.string.pref_title_use_super_bolus, R.string.pref_summary_use_super_bolus, defaultedBySM = true, hideParentScreenIfHidden = true),
 
-    @Deprecated("High SDK")
     PumpBtWatchdog(
         "bt_watchdog", false, R.string.pref_title_bt_watchdog, R.string.pref_summary_bt_watchdog,
         sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
