@@ -16,11 +16,13 @@ import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.ConfigPluginUiModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @Immutable
@@ -65,29 +67,40 @@ class ConfigurationViewModel @Inject constructor(
 
     fun togglePluginEnabled(pluginId: String, type: PluginType, enabled: Boolean) {
         val plugin = pluginLookup[pluginId] ?: return
-        val confirmationMessage = configBuilder.requestPluginSwitch(plugin, enabled, type)
-        if (confirmationMessage != null) {
-            _uiState.update { state ->
-                state.copy(
-                    hardwarePumpConfirmation = HardwarePumpConfirmation(
-                        message = confirmationMessage,
-                        pluginId = pluginId,
-                        type = type,
-                        enabled = enabled
-                    )
-                )
+        // requestPluginSwitch persists settings and runs blocking pump-sync DB work (runBlocking in
+        // connectNewPump), so run it off the main thread to avoid stalling the UI on toggle.
+        viewModelScope.launch {
+            val confirmationMessage = withContext(Dispatchers.IO) {
+                configBuilder.requestPluginSwitch(plugin, enabled, type)
             }
-        } else {
-            refreshCategories()
+            if (confirmationMessage != null) {
+                _uiState.update { state ->
+                    state.copy(
+                        hardwarePumpConfirmation = HardwarePumpConfirmation(
+                            message = confirmationMessage,
+                            pluginId = pluginId,
+                            type = type,
+                            enabled = enabled
+                        )
+                    )
+                }
+            } else {
+                refreshCategories()
+            }
         }
     }
 
     fun confirmHardwarePumpSwitch() {
         val confirmation = uiState.value.hardwarePumpConfirmation ?: return
         val plugin = pluginLookup[confirmation.pluginId] ?: return
-        configBuilder.confirmPumpPluginSwitch(plugin, confirmation.enabled, confirmation.type)
-        _uiState.update { it.copy(hardwarePumpConfirmation = null) }
-        refreshCategories()
+        // confirmPumpPluginSwitch also reaches the blocking connectNewPump path — keep it off main.
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                configBuilder.confirmPumpPluginSwitch(plugin, confirmation.enabled, confirmation.type)
+            }
+            _uiState.update { it.copy(hardwarePumpConfirmation = null) }
+            refreshCategories()
+        }
     }
 
     fun dismissHardwarePumpDialog() {
