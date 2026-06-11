@@ -117,6 +117,85 @@ sealed class ClientControlMessage {
     @Serializable
     @SerialName("temp_target_cancel")
     data object TempTargetCancel : ClientControlMessage()
+
+    /**
+     * Client asks the master to PREPARE a QuickWizard (WIZARD-mode) bolus: the master computes + constraint-caps
+     * the dose on its own live state and returns the preview in the signed ack. Nothing is delivered yet. [guid]
+     * identifies the QuickWizard entry (defs are synced to the client).
+     */
+    @Serializable
+    @SerialName("bolus_prepare")
+    data class BolusPrepare(
+        val guid: String
+    ) : ClientControlMessage()
+
+    /**
+     * Client confirms a prepared bolus: the master delivers the parked dose matching [bolusId] exactly once
+     * (a re-sent commit finds the slot drained → no double-dose). [asAdvisor] = the user took the high-BG
+     * "correct now, eat later" branch → deliver the correction-only advisor bolus instead of the carb wizard bolus.
+     */
+    @Serializable
+    @SerialName("bolus_commit")
+    data class BolusCommit(
+        val bolusId: Long,
+        val asAdvisor: Boolean = false
+    ) : ClientControlMessage()
+
+    /**
+     * Client asks the master to PREPARE a MANUAL bolus-wizard bolus from these raw inputs: the master recomputes
+     * the dose on its OWN profile/COB/IOB, constraint-caps it, and returns the preview in the signed ack. Nothing
+     * is delivered yet (a `BolusCommit` follows). Mirrors `BolusPrepare` (QuickWizard) but carries the full wizard
+     * inputs instead of a synced guid.
+     */
+    @Serializable
+    @SerialName("wizard_prepare")
+    data class WizardPrepare(
+        val bg: Double,
+        val carbs: Int,
+        val percentage: Int,
+        val directCorrection: Double,
+        val carbTime: Int,
+        val useBg: Boolean,
+        val useCob: Boolean,
+        val useIob: Boolean,
+        val useTt: Boolean,
+        val useTrend: Boolean,
+        val alarm: Boolean,
+        val notes: String,
+        val eCarbsGrams: Int = 0,
+        val eCarbsDelayMinutes: Int = 0,
+        val eCarbsDurationHours: Int = 0
+    ) : ClientControlMessage()
+
+    /**
+     * Client asks the master to PREPARE a FIXED-amount bolus/carbs (Insulin / Treatment / Carbs dialogs): the master
+     * constraint-caps the amounts (no recompute — they are the user's fixed values), derives the event type, parks,
+     * and returns the confirmation in the signed ack. [insulin] or [carbs] may be 0 (carbs-only / insulin-only).
+     */
+    @Serializable
+    @SerialName("fixed_bolus_prepare")
+    data class FixedBolusPrepare(
+        val insulin: Double,
+        val carbs: Int,
+        val carbsTimeOffsetMinutes: Int = 0,
+        val carbsDurationHours: Int = 0,
+        val notes: String
+    ) : ClientControlMessage()
+
+    /**
+     * Client asks the master to STORE (record-only — no pump) a treatment it gave outside AAPS (e.g. a pen bolus).
+     * Fire-and-ack, NOT prepare→confirm: there's nothing for the master to recompute/cap (a record must not be
+     * altered) and the client already confirmed. The master persists it immediately so its loop accounts for the
+     * insulin at once, then it syncs back to the client (master = SSOT). [iCfgJson] = the logged insulin's config.
+     */
+    @Serializable
+    @SerialName("record_treatment")
+    data class RecordTreatment(
+        val insulin: Double,
+        val notes: String,
+        val timestamp: Long,
+        val iCfgJson: String
+    ) : ClientControlMessage()
 }
 
 /** One synced preference on the wire: its value (serialized as a string) and edit timestamp. */

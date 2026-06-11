@@ -1,11 +1,14 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.utils.DateUtil
@@ -19,8 +22,6 @@ import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
-import app.aaps.core.interfaces.db.PersistenceLayer
-import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -100,6 +101,7 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
     @Mock private lateinit var persistenceLayer: PersistenceLayer
+    @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
     @Mock private lateinit var rh: ResourceHelper
     private var masterAuthorizedClients = "[]"
     private var masterModified = 0L
@@ -166,7 +168,7 @@ class ClientControlUplinkIntegrationTest {
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, aapsLogger
+            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, aapsLogger
         )
 
         // ---------- pairing: same secret on both sides ----------

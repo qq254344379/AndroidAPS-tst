@@ -9,11 +9,13 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.objects.runningMode.RunningModeGuard
+import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
@@ -28,8 +30,10 @@ import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import javax.inject.Provider
 
 /**
  * Focused tests for the canonical [WizardBolusExecutorImpl.deliverWizardBolus] entry point — the shared
@@ -40,6 +44,7 @@ import org.mockito.kotlin.whenever
 class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
     @Mock lateinit var quickWizard: QuickWizard
+    @Mock lateinit var bolusWizardProvider: Provider<BolusWizard>
     @Mock lateinit var runningModeGuard: RunningModeGuard
     @Mock lateinit var commandQueue: CommandQueue
     @Mock lateinit var persistenceLayer: PersistenceLayer
@@ -48,7 +53,7 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     @Mock lateinit var automation: Automation
 
     private fun create() = WizardBolusExecutorImpl(
-        aapsLogger, rh, quickWizard, profileFunction, iobCobCalculator, constraintsChecker, activePlugin,
+        aapsLogger, rh, quickWizard, bolusWizardProvider, profileFunction, iobCobCalculator, constraintsChecker, activePlugin,
         runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, automation,
         CoroutineScope(Dispatchers.Unconfined)
     )
@@ -176,6 +181,71 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         // Eat reminder fires on delivery success
         verify(automation).scheduleAutomationEventEatReminder()
         assertThat(errored).isFalse()
+    }
+
+    // ---- confirm(): the consume-once delivery the remote-bolus commit (and local QuickWizard) relies on ----
+
+    @Test
+    fun confirm_drainsSlotAndDeliversOnce_secondConfirmIsNoPending() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+        executor.setPending(insulin = 2.0, carbs = 0, bolusCalculatorResult = null, bolusId = 999L)
+
+        val first = executor.confirm(999L, Sources.NSClient, { })
+        val second = executor.confirm(999L, Sources.NSClient, { })
+
+        assertThat(first).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        assertThat(second).isEqualTo(WizardBolusExecutor.ConfirmResult.NoPending)
+        // The consume-once slot guarantees the pump fires EXACTLY once — no double-dose on a re-sent commit.
+        verify(commandQueue, times(1)).bolus(anyOrNull())
+    }
+
+    @Test
+    fun confirm_wrongBolusId_isNoPending_andDeliversNothing() = runTest {
+        val executor = create()
+        executor.setPending(insulin = 2.0, carbs = 0, bolusCalculatorResult = null, bolusId = 999L)
+
+        val result = executor.confirm(123L, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.NoPending)
+        verify(commandQueue, never()).bolus(anyOrNull())
+    }
+
+    @Test
+    fun confirm_parkedDosesAreIsolatedByBolusId_aSecondPrepareDoesNotClobberTheFirst() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+        executor.setPending(insulin = 1.0, carbs = 0, bolusCalculatorResult = null, bolusId = 100L)
+        // A second actor's prepare (different bolusId) must NOT clobber the first — per-id slots, not one shared var.
+        executor.setPending(insulin = 2.0, carbs = 0, bolusCalculatorResult = null, bolusId = 200L)
+
+        // The first parked dose still delivers (not overwritten), and a re-sent commit of it finds the slot drained.
+        assertThat(executor.confirm(100L, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        assertThat(executor.confirm(100L, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.NoPending)
+        // The second parked dose is intact and delivers on its own commit.
+        assertThat(executor.confirm(200L, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(commandQueue, times(2)).bolus(anyOrNull())
+    }
+
+    @Test
+    fun confirm_asAdvisor_deliversCorrectionAdvisorNotCarbWizardBolus() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+        // Parked WITH carbs, but the user took the high-BG advisor branch → correction-only delivery.
+        executor.setPending(insulin = 1.5, carbs = 40, bolusCalculatorResult = null, bolusId = 999L)
+
+        val result = executor.confirm(999L, Sources.NSClient, { }, asAdvisor = true)
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        val dbiCaptor = argumentCaptor<DetailedBolusInfo>()
+        verify(commandQueue).bolus(dbiCaptor.capture())
+        val dbi = dbiCaptor.firstValue
+        assertThat(dbi.eventType).isEqualTo(TE.Type.CORRECTION_BOLUS)
+        assertThat(dbi.insulin).isEqualTo(1.5)
+        assertThat(dbi.carbs).isEqualTo(0.0) // advisor = correction only; the parked carbs are NOT delivered
     }
 
     @Test

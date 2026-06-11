@@ -165,8 +165,9 @@ class ClientControlCryptoTest {
         phase: AckPhase = AckPhase.Done,
         status: AckStatus = AckStatus.Ok,
         reason: String? = null,
+        payload: String? = null,
         timestamp: Long = 1_700_000_000_000L
-    ) = AckEnvelope(clientId, commandCounter, phase, status, reason, timestamp, signature = "")
+    ) = AckEnvelope(clientId, commandCounter, phase, status, reason, payload, timestamp, signature = "")
 
     @Test
     fun ackSignVerifyRoundtrip() {
@@ -201,12 +202,27 @@ class ClientControlCryptoTest {
     @Test
     fun ackCanonicalStringMatchesPipeFormat() {
         val ack = ackDraft(clientId = "c", commandCounter = 7L, phase = AckPhase.Done, status = AckStatus.Failed, reason = "x", timestamp = 12345L)
-        assertThat(ack.canonicalString()).isEqualTo("c|7|Done|Failed|x|12345")
+        assertThat(ack.canonicalString()).isEqualTo("c|7|Done|Failed|x||12345")
     }
 
     @Test
     fun ackCanonicalStringNullReasonIsEmpty() {
         val ack = ackDraft(clientId = "c", commandCounter = 7L, phase = AckPhase.Executing, status = AckStatus.Pending, reason = null, timestamp = 12345L)
-        assertThat(ack.canonicalString()).isEqualTo("c|7|Executing|Pending||12345")
+        assertThat(ack.canonicalString()).isEqualTo("c|7|Executing|Pending|||12345")
+    }
+
+    @Test
+    fun ackCanonicalStringIncludesPayload() {
+        val ack = ackDraft(clientId = "c", commandCounter = 7L, phase = AckPhase.Done, status = AckStatus.Ok, reason = null, payload = "{\"bolusId\":42}", timestamp = 12345L)
+        assertThat(ack.canonicalString()).isEqualTo("c|7|Done|Ok||{\"bolusId\":42}|12345")
+    }
+
+    @Test
+    fun ackVerifyRejectsTamperedPayload() {
+        // A forged dose must be no more believable than a forged "Ok" — the payload is HMAC-covered.
+        val secret = ClientControlCrypto.newSecretBytes()
+        val signed = ClientControlCrypto.signAck(secret, ackDraft(status = AckStatus.Ok, payload = "{\"bolusId\":42,\"insulin\":1.0}"))
+        val tampered = signed.copy(payload = "{\"bolusId\":42,\"insulin\":9.9}")
+        assertThat(ClientControlCrypto.verifyAck(secret, tampered)).isFalse()
     }
 }

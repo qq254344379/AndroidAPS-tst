@@ -9,6 +9,8 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
@@ -29,12 +31,15 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
+import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.ui.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.math.abs
 
@@ -48,6 +53,7 @@ class WizardBolusExecutorImpl @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val rh: ResourceHelper,
     private val quickWizard: QuickWizard,
+    private val bolusWizardProvider: Provider<BolusWizard>,
     private val profileFunction: ProfileFunction,
     private val iobCobCalculator: IobCobCalculator,
     private val constraintChecker: ConstraintsChecker,
@@ -62,17 +68,52 @@ class WizardBolusExecutorImpl @Inject constructor(
     @ApplicationScope private val appScope: CoroutineScope
 ) : WizardBolusExecutor {
 
-    /** The consumed-once slot. [entry] is non-null only for a quick-wizard prepare (carb timing / super-bolus). */
-    private data class PendingBolus(val insulin: Double, val carbs: Int, val bcr: BCR?, val bolusId: Long, val entry: QuickWizardEntry?)
+    /**
+     * The consumed-once slot. [entry] is non-null only for a quick-wizard prepare (carb timing / super-bolus /
+     * eCarbs). [carbTimeMinutes]/[notes] are carried so a manual-wizard prepare (no entry) delivers identically.
+     */
+    private enum class BolusMode {
 
-    private var pending: PendingBolus? = null
+        WIZARD, FIXED
+    }
+
+    private data class PendingBolus(
+        val insulin: Double,
+        val carbs: Int,
+        val bcr: BCR?,
+        val bolusId: Long,
+        val entry: QuickWizardEntry?,
+        val carbTimeMinutes: Int = 0,
+        val notes: String? = null,
+        val mode: BolusMode = BolusMode.WIZARD,
+        val eventType: TE.Type? = null,
+        val carbsDurationHours: Int = 0,
+        val eCarbsGrams: Int = 0,
+        val eCarbsDelayMinutes: Int = 0,
+        val eCarbsDurationHours: Int = 0
+    )
+
+    // Consume-once slots keyed by bolusId — a map, NOT a single var, so prepares from different actors (the
+    // master's own dialogs, the watch, and EVERY paired client) don't clobber each other's parked dose, and a
+    // commit only ever consumes the dose with the MATCHING id. remove(bolusId) is atomic, so two concurrent
+    // commits of the same id can't both deliver — the loser gets null → NoPending (no double bolus).
+    private val pending = ConcurrentHashMap<Long, PendingBolus>()
+    private val pendingTtlMs = 10 * 60_000L // a parked dose unconfirmed this long is abandoned; trimmed on the next prepare
+
+    // bolusId is a timestamp, so a key older than the TTL is an abandoned prepare — drop it so the map can't grow.
+    private fun evictStalePending() {
+        val cutoff = dateUtil.now() - pendingTtlMs
+        pending.keys.removeIf { it < cutoff }
+    }
 
     override fun setPending(insulin: Double, carbs: Int, bolusCalculatorResult: BCR?, bolusId: Long) {
-        pending = PendingBolus(insulin, carbs, bolusCalculatorResult, bolusId, entry = null)
+        evictStalePending()
+        pending[bolusId] = PendingBolus(insulin, carbs, bolusCalculatorResult, bolusId, entry = null)
     }
 
     override fun clearPending() {
-        pending = null
+        // Per-id keying already prevents a stale prepare from leaking into an unrelated commit; just trim stale ids.
+        evictStalePending()
     }
 
     override suspend fun prepareQuickWizard(guid: String): WizardBolusExecutor.PrepareResult {
@@ -83,8 +124,8 @@ class WizardBolusExecutorImpl @Inject constructor(
         val entry = quickWizard.get(guid) ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.quick_wizard_not_available))
         if (actualBg == null) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_actual_bg))
         if (profile == null) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_active_profile))
-        val cobInfo = iobCobCalculator.getCobInfo("QuickWizard")
-        if (cobInfo.displayCob == null) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_cob))
+        // No COB gate: QuickWizardEntry.doCalc treats a null COB as 0 (only ever LOWERS the dose = safe),
+        // so requiring COB here was stricter than the local QuickWizard and the real "missing data" mismatch.
         val pump = activePlugin.activePump
         if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
 
@@ -97,32 +138,150 @@ class WizardBolusExecutorImpl @Inject constructor(
         if (abs(insulinAfterConstraints - wizard.calculatedTotalInsulin) >= minStep)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_constraint_bolus_size, wizard.calculatedTotalInsulin))
 
-        pending = PendingBolus(wizard.calculatedTotalInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry)
-        return WizardBolusExecutor.PrepareResult.Preview(wizard.calculatedTotalInsulin, wizard.carbs, wizard.explainShort(), wizard.timeStamp)
+        evictStalePending()
+        pending[wizard.timeStamp] = PendingBolus(wizard.calculatedTotalInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry, carbTimeMinutes = entry.carbTime(), notes = entry.buttonText())
+        // Build the master's color-coded confirmation lines here so the client renders the master's EXACT
+        // wizard confirmation (shared builder). advisorApplies offers the high-BG "correct now, eat later" fork.
+        val advisorApplies = wizard.needsBolusAdvisor()
+        return WizardBolusExecutor.PrepareResult.Preview(
+            insulin = wizard.calculatedTotalInsulin,
+            carbs = wizard.carbs,
+            explanation = wizard.explainShort(),
+            bolusId = wizard.timeStamp,
+            lines = wizard.buildConfirmationLines(advisor = false, quickWizardEntry = entry),
+            advisorApplies = advisorApplies,
+            advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true, quickWizardEntry = entry) else emptyList()
+        )
     }
 
-    override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit): WizardBolusExecutor.ConfirmResult {
-        val p = pending.also { pending = null } ?: return WizardBolusExecutor.ConfirmResult.NoPending
-        if (p.bolusId != bolusId) return WizardBolusExecutor.ConfirmResult.NoPending
+    override suspend fun prepareWizard(inputs: WizardBolusExecutor.WizardInputs): WizardBolusExecutor.PrepareResult {
+        runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
+        val profile = profileFunction.getProfile() ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_active_profile))
+        val profileName = profileFunction.getProfileName()
+        val pump = activePlugin.activePump
+        if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
+        // Recompute on the MASTER's live state (active profile + temp target + COB) using the client's inputs.
+        // The stored-profile selection isn't honored yet — the master uses its active profile (a refinement).
+        val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
+        val cob = if (inputs.useCob) iobCobCalculator.getCobInfo("WizardPrepare").displayCob ?: 0.0 else 0.0
+        val carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(inputs.carbs, aapsLogger)).value()
+        if (carbsAfterConstraints != inputs.carbs) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_carbs_constraint))
+        val wizard = bolusWizardProvider.get().doCalc(
+            profile, profileName, tempTarget, carbsAfterConstraints, cob, inputs.bg, inputs.directCorrection, inputs.percentage,
+            inputs.useBg, inputs.useCob, inputs.useIob, inputs.useIob, false, inputs.useTt, inputs.useTrend, inputs.alarm, inputs.notes, inputs.carbTime
+        )
+        val insulinAfterConstraints = wizard.insulinAfterConstraints
+        val minStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)
+        if (abs(insulinAfterConstraints - wizard.calculatedTotalInsulin) >= minStep)
+            return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_constraint_bolus_size, wizard.calculatedTotalInsulin))
+        evictStalePending()
+        pending[wizard.timeStamp] =
+            PendingBolus(
+                wizard.calculatedTotalInsulin,
+                wizard.carbs,
+                wizard.createBolusCalculatorResult(),
+                wizard.timeStamp,
+                entry = null,
+                carbTimeMinutes = inputs.carbTime,
+                notes = inputs.notes,
+                eCarbsGrams = inputs.eCarbsGrams,
+                eCarbsDelayMinutes = inputs.eCarbsDelayMinutes,
+                eCarbsDurationHours = inputs.eCarbsDurationHours
+            )
+        val advisorApplies = wizard.needsBolusAdvisor()
+        return WizardBolusExecutor.PrepareResult.Preview(
+            insulin = wizard.calculatedTotalInsulin,
+            carbs = wizard.carbs,
+            explanation = wizard.explainShort(),
+            bolusId = wizard.timeStamp,
+            lines = wizard.buildConfirmationLines(advisor = false),
+            advisorApplies = advisorApplies,
+            advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true) else emptyList()
+        )
+    }
 
-        var carbTimeOffset = 0L
+    override suspend fun prepareFixedBolus(insulin: Double, carbs: Int, carbsTimeOffsetMinutes: Int, carbsDurationHours: Int, notes: String): WizardBolusExecutor.PrepareResult {
+        runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
+        val pump = activePlugin.activePump
+        if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
+        // Fixed amounts: cap, don't recompute. Derive the event type the dialogs would (MEAL/CORRECTION/CARBS).
+        val insulinAfterConstraints = constraintChecker.applyBolusConstraints(ConstraintObject(insulin, aapsLogger)).value()
+        val carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(carbs, aapsLogger)).value()
+        if (insulinAfterConstraints <= 0.0 && carbsAfterConstraints <= 0)
+            return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_action_selected))
+        val eventType = when {
+            insulinAfterConstraints > 0.0 && carbsAfterConstraints > 0 -> TE.Type.MEAL_BOLUS
+            insulinAfterConstraints > 0.0                              -> TE.Type.CORRECTION_BOLUS
+            else                                                       -> TE.Type.CARBS_CORRECTION
+        }
+        val bolusId = dateUtil.now()
+        evictStalePending()
+        pending[bolusId] =
+            PendingBolus(insulinAfterConstraints, carbsAfterConstraints, null, bolusId, entry = null, carbTimeMinutes = carbsTimeOffsetMinutes, notes = notes, mode = BolusMode.FIXED, eventType = eventType, carbsDurationHours = carbsDurationHours)
+        val minStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)
+        val lines = listOfNotNull(
+            ConfirmationLine(ConfirmationRole.BOLUS, rh.gs(R.string.format_insulin_units, insulinAfterConstraints)).takeIf { insulinAfterConstraints > 0.0 },
+            ConfirmationLine(ConfirmationRole.CARBS, rh.gs(R.string.format_carbs, carbsAfterConstraints)).takeIf { carbsAfterConstraints > 0 },
+            ConfirmationLine(ConfirmationRole.WARNING, rh.gs(R.string.bolus_constraint_applied_warn, insulin, insulinAfterConstraints)).takeIf { abs(insulinAfterConstraints - insulin) > minStep }
+        )
+        return WizardBolusExecutor.PrepareResult.Preview(insulinAfterConstraints, carbsAfterConstraints, "", bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
+    }
+
+    override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean): WizardBolusExecutor.ConfirmResult {
+        // Atomic consume-once: remove(bolusId) returns the parked dose and removes it in one step, so two
+        // concurrent commits of the same id can't both deliver (the loser gets null → NoPending). A non-matching
+        // id removes nothing, leaving other actors' parked doses intact.
+        val p = pending.remove(bolusId) ?: return WizardBolusExecutor.ConfirmResult.NoPending
+
+        val notes = p.notes
+
+        // Fixed-amount bolus/carbs (Insulin / Treatment / Carbs dialogs): deliver the parked amounts as-is through
+        // the shared core — no wizard recompute, no super-bolus/eCarbs/advisor (all wizard-only).
+        if (p.mode == BolusMode.FIXED) {
+            if (p.insulin == 0.0 && p.carbs > 0) {
+                // Carbs-only: funnel through the SAME eCarbs path the local Carbs dialog uses, so a client carb
+                // entry and a master carb entry are identical (TE.Type, duration, delay) — not the generic deliver()
+                // which would tag it CARBS_CORRECTION instead of deliverECarbs's CORRECTION_BOLUS convention.
+                deliverECarbs(p.carbs, dateUtil.now() + T.mins(p.carbTimeMinutes.toLong()).msecs(), p.carbsDurationHours, p.carbTimeMinutes, notes, source, onError)
+            } else {
+                // Insulin (± carbs): deliver the parked amounts as-is. carbsTime = now + offset; carbsDuration in hours.
+                val carbsTime = if (p.carbs > 0) dateUtil.now() + T.mins(p.carbTimeMinutes.toLong()).msecs() else null
+                deliver(p.insulin, p.carbs, carbsTime = carbsTime, carbsDuration = p.carbsDurationHours, bolusCalculatorResult = p.bcr, notes = notes, source = source, onError = onError, eventType = p.eventType)
+            }
+            return WizardBolusExecutor.ConfirmResult.Delivered
+        }
+
+        // High-BG advisor branch (user chose "correct now, eat later"): a correction-only CORRECTION_BOLUS —
+        // no carbs, no eCarbs, no super-bolus, no eat reminder. mg/dL BG comes from the BCR's glucoseValue.
+        if (asAdvisor) {
+            deliverBolusAdvisor(p.insulin, p.bcr?.glucoseValue, p.bcr, notes, source, onError)
+            p.entry?.markAsUsed()
+            return WizardBolusExecutor.ConfirmResult.Delivered
+        }
+
+        val carbTimeOffset = p.carbTimeMinutes.toLong()
         var useAlarm = false
         val currentTime = dateUtil.now()
         var eventTime = currentTime
         var carbs2 = 0
         var duration = 0
         var eCarbsDelay = 0
-        var notes: String? = null
-        p.entry?.let { qwe ->
-            carbTimeOffset = qwe.carbTime().toLong()
+        val qwe = p.entry
+        if (qwe != null) {
             useAlarm = qwe.useAlarm() == QuickWizardEntry.YES
-            notes = qwe.buttonText()
             if (qwe.useEcarbs() == QuickWizardEntry.YES) {
                 eCarbsDelay = qwe.time()
                 eventTime += (eCarbsDelay * 60000)
                 carbs2 = qwe.carbs2()
                 duration = qwe.duration()
             }
+        } else if (p.eCarbsGrams > 0) {
+            // Manual wizard from a client (no QuickWizardEntry): the eCarbs split travels in PendingBolus so the
+            // extended-carbs portion is still scheduled on the master — matching the phone's executeNormal.
+            eCarbsDelay = p.eCarbsDelayMinutes
+            eventTime += (eCarbsDelay * 60000)
+            carbs2 = p.eCarbsGrams
+            duration = p.eCarbsDurationHours
         }
         // Super-bolus (a quick-wizard with useSuperBolus): write the SUPER_BOLUS mode change before the
         // bolus, driven off the CONSUMED entry — never the shared `pending` slot, which a stale unconfirmed

@@ -157,8 +157,7 @@
     <string name="clientcontrol_pending_working_text">Waiting for the master to confirm…</string>
     <string name="clientcontrol_pending_rejected_title">Not applied</string>
     <string name="clientcontrol_pending_rejected_text">The master could not apply this request.</string>
-    <!-- %1$s = action label (e.g. "set temp target"), %2$s = failure reason -->
-    <string name="clientcontrol_pending_failed_format">Couldn\'t %1$s.\n%2$s</string>
+    <string name="clientcontrol_pending_failed_format">%1$s couldn\'t be done.\n%2$s</string>
     <!-- Partial success (e.g. a scene chained but some of the target\'s actions failed) — not a rejection -->
     <string name="clientcontrol_pending_partial_title">Partly applied</string>
     <!-- %1$s = action label -->

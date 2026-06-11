@@ -6,6 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -18,6 +21,8 @@ import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.keys.BooleanKey
@@ -65,6 +70,8 @@ class WizardDialogViewModel @Inject constructor(
     val decimalFormatter: DecimalFormatter,
     private val aapsLogger: AAPSLogger,
     private val runningModeGuard: RunningModeGuard,
+    private val clientControlDispatcher: ClientControlActionDispatcher,
+    private val rxBus: RxBus,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -134,7 +141,9 @@ class WizardDialogViewModel @Inject constructor(
         val totalIOB = bolusIob.iob + basalIob.basaliob
 
         val cantDeliverBolus = runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS) != null
-        val forcedRecordOnly = cantDeliverBolus || !activePlugin.activePump.isInitialized() || config.AAPSCLIENT
+        // An AAPSCLIENT delivers via the master (see confirmRemote), so it is NOT forced into record-only here —
+        // only the master's own can't-deliver conditions force it. (The client routes remote before reaching this.)
+        val forcedRecordOnly = cantDeliverBolus || !activePlugin.activePump.isInitialized()
 
         _uiState.update {
             WizardDialogUiState(
@@ -500,5 +509,49 @@ class WizardDialogViewModel @Inject constructor(
         val state = uiState.value
         preferences.put(BooleanNonKey.WizardIncludeCob, state.useCOB)
         preferences.put(BooleanNonKey.WizardIncludeTrend, state.useTrend)
+    }
+
+    /** AAPSCLIENT → the manual wizard bolus delivers via the master (see [confirmRemote]), never record-only. */
+    val isAapsClient: Boolean get() = config.AAPSCLIENT
+
+    /**
+     * AAPSCLIENT path: send the wizard inputs to the master, which recomputes + constraint-caps the dose on its
+     * OWN profile/COB/IOB and returns its color-coded confirmation (a real delivery — no "recorded only"). The
+     * client confirms the MASTER's number, then commits; the master decides the high-BG advisor fork. No dose
+     * leaves the client. Mirrors the remote QuickWizard path. (Dedupe with `MainViewModel.confirmWizardBolus` later.)
+     */
+    fun confirmRemote() {
+        val state = uiState.value
+        val effectiveCarbs = state.carbs * state.carbsType.carbsPercent / 100
+        val inputs = WizardBolusExecutor.WizardInputs(
+            bg = state.bg, carbs = effectiveCarbs, percentage = state.percentage, directCorrection = state.directCorrection,
+            carbTime = state.carbTime, useBg = state.useBg, useCob = state.useCOB, useIob = state.useIOB,
+            useTt = state.useTT, useTrend = state.useTrend, alarm = state.alarmChecked, notes = state.notes,
+            eCarbsGrams = state.eCarbs, eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime, eCarbsDurationHours = state.eCarbsDurationHours
+        )
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_deliver_bolus)
+        val title = rh.gs(app.aaps.core.ui.R.string.boluswizard)
+        // appScope, not viewModelScope: the screen pops right after this call (see executeNormal).
+        appScope.launch {
+            val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.WizardPrepare(inputs), label)
+            if (prepared !is ActionProgress.Prepared) return@launch // a failure already surfaced through the pending modal
+            fun showConfirm(lines: List<ConfirmationLine>, asAdvisor: Boolean) =
+                rxBus.send(
+                    EventShowDialog.OkCancel(
+                        title = title, message = "", confirmationLines = lines,
+                        onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, asAdvisor), label) } }
+                    )
+                )
+            if (prepared.advisorApplies)
+                rxBus.send(
+                    EventShowDialog.YesNoCancel(
+                        title = rh.gs(app.aaps.core.ui.R.string.bolus_advisor),
+                        message = rh.gs(app.aaps.core.ui.R.string.bolus_advisor_message),
+                        onYes = { showConfirm(prepared.advisorLines, true) },
+                        onNo = { showConfirm(prepared.lines, false) }
+                    )
+                )
+            else showConfirm(prepared.lines, false)
+        }
     }
 }

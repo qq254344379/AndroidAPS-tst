@@ -12,13 +12,17 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -69,6 +73,7 @@ import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -120,7 +125,9 @@ class MainViewModel @Inject constructor(
     private val activeSceneManager: ActiveSceneSync,
     private val rxBus: RxBus,
     private val runningModeGuard: RunningModeGuard,
-    private val nsClient: NsClient
+    private val nsClient: NsClient,
+    private val clientControlDispatcher: ClientControlActionDispatcher,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
     // Event-driven state (drawer, dialogs, simple-mode preference). Imperative .update{} calls
@@ -425,30 +432,86 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * Execute QuickWizard by GUID: re-validates at execution time and calls confirmAndExecute.
-     * Needs Activity context for the confirmation dialog.
+     * Execute QuickWizard by GUID. WIZARD mode runs the shared prepare→confirm spine (master delivers
+     * locally; an AAPSCLIENT routes prepare/commit to its master over the signed round-trip).
      */
     fun executeQuickWizard(guid: String) {
         viewModelScope.launch {
             val entry = quickWizard.get(guid) ?: return@launch
             if (!entry.isActive()) return@launch
             when (entry.mode()) {
-                QuickWizardMode.WIZARD  -> executeQuickWizardMode(entry)
+                QuickWizardMode.WIZARD  -> if (config.AAPSCLIENT) executeRemoteQuickWizard(entry, guid) else executeQuickWizardMode(entry, guid)
                 QuickWizardMode.INSULIN -> executeInsulinMode(entry)
-                QuickWizardMode.CARBS   -> executeCarbsMode(entry)
+                QuickWizardMode.CARBS   -> if (config.AAPSCLIENT) executeRemoteCarbs(entry) else executeCarbsMode(entry)
             }
         }
     }
 
-    private suspend fun executeQuickWizardMode(entry: QuickWizardEntry) {
-        val bg = iobCobCalculator.ads.actualBg() ?: return
-        val profile = profileFunction.getProfile() ?: return
-        val profileName = profileFunction.getProfileName()
-        val wizard = entry.doCalc(profile, profileName, bg)
-        if (wizard.calculatedTotalInsulin > 0.0 && entry.carbs() > 0) {
-            wizard.confirmAndExecute(entry)
+    /**
+     * Master local QuickWizard (WIZARD mode): the SAME prepare→confirm spine the client and watch use — only
+     * the transport differs (the master delivers locally via [WizardBolusExecutor.confirm]). The master builds
+     * + renders its own color-coded confirmation; the advisor fork is shared with the client.
+     */
+    private suspend fun executeQuickWizardMode(entry: QuickWizardEntry, guid: String) {
+        when (val prep = wizardBolusExecutor.prepareQuickWizard(guid)) {
+            is WizardBolusExecutor.PrepareResult.Error   ->
+                rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.boluswizard), message = prep.message))
+
+            is WizardBolusExecutor.PrepareResult.Preview ->
+                confirmWizardBolus(entry, prep.advisorApplies, prep.lines, prep.advisorLines) { asAdvisor ->
+                    appScope.launch {
+                        wizardBolusExecutor.confirm(prep.bolusId, Sources.QuickWizard, { runDeliveryAlarm(it) }, asAdvisor)
+                    }
+                }
         }
     }
+
+    /**
+     * Client (AAPSCLIENT) QuickWizard (WIZARD mode): the master computes + caps the dose and returns its
+     * confirmation in the signed ack; the client renders the master's EXACT lines, and the user's OK rides back
+     * as a signed BolusCommit the master delivers once. No dose ever leaves the client.
+     */
+    private suspend fun executeRemoteQuickWizard(entry: QuickWizardEntry, guid: String) {
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_deliver_bolus)
+        val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusPrepare(guid), label)
+        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
+        confirmWizardBolus(entry, prepared.advisorApplies, prepared.lines, prepared.advisorLines) { asAdvisor ->
+            appScope.launch {
+                clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, asAdvisor), label)
+            }
+        }
+    }
+
+    /**
+     * Shared wizard-bolus confirmation for BOTH master (local confirm) and client (round-trip commit) — the
+     * master already built [normalLines]/[advisorLines]; this only renders them and routes the user's choice.
+     * When [advisorApplies], the high-BG "correct now, eat later?" Yes/No precedes the OkCancel; [onCommit]
+     * receives the chosen asAdvisor flag.
+     */
+    private fun confirmWizardBolus(
+        entry: QuickWizardEntry,
+        advisorApplies: Boolean,
+        normalLines: List<ConfirmationLine>,
+        advisorLines: List<ConfirmationLine>,
+        onCommit: (asAdvisor: Boolean) -> Unit
+    ) {
+        fun showConfirm(lines: List<ConfirmationLine>, asAdvisor: Boolean) =
+            rxBus.send(EventShowDialog.OkCancel(title = entry.buttonText(), message = "", confirmationLines = lines, onOk = { onCommit(asAdvisor) }))
+        if (advisorApplies)
+            rxBus.send(
+                EventShowDialog.YesNoCancel(
+                    title = rh.gs(app.aaps.core.ui.R.string.bolus_advisor),
+                    message = rh.gs(app.aaps.core.ui.R.string.bolus_advisor_message),
+                    onYes = { showConfirm(advisorLines, true) },
+                    onNo = { showConfirm(normalLines, false) }
+                )
+            )
+        else
+            showConfirm(normalLines, false)
+    }
+
+    private fun runDeliveryAlarm(comment: String) =
+        uiInteraction.runAlarm(comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
 
     private suspend fun executeInsulinMode(entry: QuickWizardEntry) {
         val pump = activePlugin.activePump
@@ -482,6 +545,28 @@ class MainViewModel @Inject constructor(
                         source = Sources.QuickWizard,
                         onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
                     )
+                    entry.markAsUsed()
+                }
+            )
+        )
+    }
+
+    /**
+     * Client (AAPSCLIENT) QuickWizard CARBS: route the fixed carbs to the master (SSOT) via the same signed
+     * FixedBolusPrepare/commit the Carbs dialog uses — instant carbs (no offset/duration). The master records them
+     * and they sync back; nothing is recorded on the client (no bypass of the master prepare/commit spine).
+     */
+    private suspend fun executeRemoteCarbs(entry: QuickWizardEntry) {
+        val carbs = entry.carbs()
+        if (carbs <= 0) return
+        val label = rh.gs(app.aaps.core.ui.R.string.carbs)
+        val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.FixedBolusPrepare(0.0, carbs, 0, 0, entry.buttonText()), label)
+        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
+        rxBus.send(
+            EventShowDialog.OkCancel(
+                title = entry.buttonText(), message = "", confirmationLines = prepared.lines,
+                onOk = {
+                    appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, false), label) }
                     entry.markAsUsed()
                 }
             )

@@ -1,5 +1,6 @@
 package app.aaps.core.interfaces.clientcontrol
 
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -81,6 +82,21 @@ interface ClientControlActionDispatcher {
 
         /** Cancel the master's currently active temp target. */
         data object TempTargetCancel : Command
+
+        /** Prepare a QuickWizard (WIZARD-mode) bolus on the master ([guid] = the synced entry); master returns the preview. */
+        data class BolusPrepare(val guid: String) : Command
+
+        /** Confirm a prepared bolus by [bolusId] (master delivers once); [asAdvisor] = the high-BG correction-only branch. */
+        data class BolusCommit(val bolusId: Long, val asAdvisor: Boolean = false) : Command
+
+        /** Prepare a MANUAL bolus-wizard bolus on the master from raw [inputs] (master recomputes + returns the preview). */
+        data class WizardPrepare(val inputs: WizardBolusExecutor.WizardInputs) : Command
+
+        /** Prepare a FIXED-amount bolus/carbs on the master ([insulin]/[carbs] capped, not recomputed; carbs may be delayed/extended). */
+        data class FixedBolusPrepare(val insulin: Double, val carbs: Int, val carbsTimeOffsetMinutes: Int, val carbsDurationHours: Int, val notes: String) : Command
+
+        /** Store a record-only treatment on the master (a pen bolus etc.) — fire-and-ack, no recompute/cap; master = SSOT. */
+        data class RecordTreatment(val insulin: Double, val notes: String, val timestamp: Long, val iCfgJson: String) : Command
     }
 
     companion object {

@@ -19,6 +19,7 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
+import app.aaps.core.interfaces.insulin.InsulinActions
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -69,6 +70,7 @@ class FillDialogViewModel @Inject constructor(
     insulinManager: InsulinManager,
     private val profileFunction: ProfileFunction,
     private val wizardBolusExecutor: WizardBolusExecutor,
+    private val insulinActions: InsulinActions,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -318,7 +320,7 @@ class FillDialogViewModel @Inject constructor(
                         // After successful prime, do profile switch if insulin changed
                         if (doProfileSwitch) {
                             appScope.launch {
-                                profileFunction.createProfileSwitchWithNewInsulin(state.selectedInsulin!!, Sources.FillDialog)
+                                insulinActions.activate(state.selectedInsulin!!)
                             }
                         }
                     }
@@ -328,7 +330,7 @@ class FillDialogViewModel @Inject constructor(
             // No prime — do profile switch immediately if insulin changed
             if (doProfileSwitch) {
                 appScope.launch {
-                    profileFunction.createProfileSwitchWithNewInsulin(state.selectedInsulin!!, Sources.FillDialog)
+                    insulinActions.activate(state.selectedInsulin!!)
                 }
             }
         }

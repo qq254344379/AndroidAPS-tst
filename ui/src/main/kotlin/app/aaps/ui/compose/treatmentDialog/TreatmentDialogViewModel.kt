@@ -10,6 +10,8 @@ import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.di.ApplicationScope
@@ -19,6 +21,8 @@ import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.objects.constraints.ConstraintObject
@@ -43,7 +47,7 @@ class TreatmentDialogViewModel @Inject constructor(
     private val constraintChecker: ConstraintsChecker,
     private val activePlugin: ActivePlugin,
     private val activeInsulin: Insulin,
-    config: Config,
+    private val config: Config,
     val decimalFormatter: DecimalFormatter,
     private val rh: ResourceHelper,
     private val aapsLogger: AAPSLogger,
@@ -51,6 +55,8 @@ class TreatmentDialogViewModel @Inject constructor(
     hardLimits: HardLimits,
     private val loop: Loop,
     private val wizardBolusExecutor: WizardBolusExecutor,
+    private val clientControlDispatcher: ClientControlActionDispatcher,
+    private val rxBus: RxBus,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -96,7 +102,9 @@ class TreatmentDialogViewModel @Inject constructor(
         viewModelScope.launch {
             val mode = loop.runningMode()
             val cantDeliverBolus = PumpCommandGate.check(mode, PumpCommandGate.CommandKind.BOLUS) is PumpCommandGate.Decision.Reject
-            val forcedRecordOnly = cantDeliverBolus || !pumpInitialized || isAapsClient
+            // A client delivers via the master (see confirmRemoteBolus), so its local pump state must NOT force
+            // record-only; only a master's own can't-deliver conditions do.
+            val forcedRecordOnly = if (isAapsClient) false else (cantDeliverBolus || !pumpInitialized)
             _uiState.update { it.copy(forcedRecordOnly = forcedRecordOnly) }
         }
     }
@@ -177,6 +185,24 @@ class TreatmentDialogViewModel @Inject constructor(
         appScope.launch { confirmAndSaveSuspend() }
     }
 
+    /**
+     * AAPSCLIENT deliver-via-master for a fixed treatment (insulin and/or carbs): the master constraint-caps +
+     * delivers, the client confirms the master's number then commits. No dose leaves the client. (B.2b: this confirm
+     * shows AFTER the dialog's own confirm — a second confirm; a later refinement can skip the local one.)
+     */
+    private suspend fun confirmRemoteBolus(insulin: Double, carbs: Int, notes: String?) {
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_deliver_bolus)
+        val title = rh.gs(app.aaps.core.ui.R.string.bolus)
+        val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.FixedBolusPrepare(insulin, carbs, 0, 0, notes ?: ""), label)
+        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
+        rxBus.send(
+            EventShowDialog.OkCancel(
+                title = title, message = "", confirmationLines = prepared.lines,
+                onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, false), label) } }
+            )
+        )
+    }
+
     private suspend fun confirmAndSaveSuspend() {
         val state = confirmedState ?: return
         val insulin = state.insulin
@@ -196,18 +222,37 @@ class TreatmentDialogViewModel @Inject constructor(
         // Bolus and/or carbs now ride the shared executor (one audited path): it classifies the action,
         // logs the user entry, and either delivers via the queue or — when record-only — persists the
         // treatment(s) directly with the resolved insulin config + the localized "record" marker.
-        wizardBolusExecutor.deliver(
-            amount = insulinAfterConstraints,
-            carbs = carbsAfterConstraints,
-            carbsTime = null,
-            carbsDuration = 0,
-            bolusCalculatorResult = null,
-            notes = null,
-            source = Sources.TreatmentDialog,
-            onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
-            eventType = eventType,
-            recordOnly = state.forcedRecordOnly,
-            iCfg = iCfg
-        )
+        if (state.forcedRecordOnly) {
+            wizardBolusExecutor.deliver(
+                amount = insulinAfterConstraints,
+                carbs = carbsAfterConstraints,
+                carbsTime = null,
+                carbsDuration = 0,
+                bolusCalculatorResult = null,
+                notes = null,
+                source = Sources.TreatmentDialog,
+                onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
+                eventType = eventType,
+                recordOnly = true,
+                iCfg = iCfg
+            )
+        } else if (config.AAPSCLIENT) {
+            // Client deliver-via-master: the master caps + delivers both insulin and carbs; the client confirms its number.
+            confirmRemoteBolus(insulinAfterConstraints, carbsAfterConstraints, null)
+        } else {
+            wizardBolusExecutor.deliver(
+                amount = insulinAfterConstraints,
+                carbs = carbsAfterConstraints,
+                carbsTime = null,
+                carbsDuration = 0,
+                bolusCalculatorResult = null,
+                notes = null,
+                source = Sources.TreatmentDialog,
+                onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
+                eventType = eventType,
+                recordOnly = false,
+                iCfg = iCfg
+            )
+        }
     }
 }

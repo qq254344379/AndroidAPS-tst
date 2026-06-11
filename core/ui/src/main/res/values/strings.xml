@@ -397,12 +397,14 @@
     <string name="scene_lock_reason_scene_active">Stop the running scene first</string>
 
     <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
-    <string name="clientcontrol_action_set_temp_target">set temp target</string>
-    <string name="clientcontrol_action_cancel_temp_target">cancel temp target</string>
-    <string name="clientcontrol_action_activate_scene">activate scene %1$s</string>
-    <string name="clientcontrol_action_deactivate_scene">end scene</string>
-    <string name="clientcontrol_action_activate_insulin">activate insulin %1$s</string>
-    <string name="clientcontrol_action_update_settings">update settings</string>
+    <string name="clientcontrol_action_set_temp_target">Set temp target</string>
+    <string name="clientcontrol_action_cancel_temp_target">Cancel temp target</string>
+    <string name="clientcontrol_action_activate_scene">Activate scene %1$s</string>
+    <string name="clientcontrol_action_deactivate_scene">End scene</string>
+    <string name="clientcontrol_action_activate_insulin">Activate insulin %1$s</string>
+    <string name="clientcontrol_action_update_settings">Update settings</string>
+    <string name="clientcontrol_action_deliver_bolus">Deliver bolus</string>
+    <string name="clientcontrol_action_record_bolus">Record bolus</string>
 
     <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <string name="clientcontrol_fail_not_paired">This device isn\'t paired with a master.</string>
@@ -416,6 +418,8 @@
     <string name="clientcontrol_fail_scene_disabled">The scene is disabled.</string>
     <string name="clientcontrol_fail_partial">Some actions couldn\'t be applied.</string>
     <string name="clientcontrol_fail_execution">The master couldn\'t apply it.</string>
+    <string name="clientcontrol_fail_no_pending_bolus">The prepared bolus expired or was superseded. Tap the button again.</string>
+    <string name="clientcontrol_fail_bolus_compute">The master couldn\'t calculate the bolus (missing glucose / profile, or pump not ready).</string>
     <string name="clientcontrol_fail_internal">Something went wrong.</string>
     <string name="clientcontrol_fail_unknown">The command failed.</string>
     <string name="scene_revert_tt">Cancel temporary target</string>

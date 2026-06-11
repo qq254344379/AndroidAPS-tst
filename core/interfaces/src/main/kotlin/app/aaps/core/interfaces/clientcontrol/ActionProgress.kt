@@ -1,5 +1,7 @@
 package app.aaps.core.interfaces.clientcontrol
 
+import app.aaps.core.data.ui.ConfirmationLine
+
 /**
  * Progress/outcome of an action dispatched through [ClientControlActionDispatcher]. A `dispatch`
  * emits a sequence ending in exactly one terminal value.
@@ -23,6 +25,18 @@ sealed interface ActionProgress {
 
     /** Terminal: applied successfully (locally, or confirmed by the master's Done/Ok ack). */
     data object Applied : ActionProgress
+
+    /**
+     * Terminal (remote only): a `BolusPrepare` succeeded — the master computed + constraint-capped the dose
+     * and returned its confirmation [lines] (and [advisorLines] when [advisorApplies]) for the user to confirm
+     * before the matching `BolusCommit`. The client must NOT treat this as "delivered".
+     */
+    data class Prepared(
+        val bolusId: Long,
+        val lines: List<ConfirmationLine> = emptyList(),
+        val advisorApplies: Boolean = false,
+        val advisorLines: List<ConfirmationLine> = emptyList()
+    ) : ActionProgress
 
     /** Terminal: definitely not applied — master refused / failed, or it never reached NS. */
     data class Rejected(val reason: FailureReason, val detail: String? = null) : ActionProgress
@@ -52,6 +66,8 @@ enum class FailureReason {
     SceneDisabled,   // scene is disabled
     PartialFailure,  // scene chained but some actions failed (detail = "x/y")
     ExecutionFailed, // master-side execution failed (detail = message)
+    NoPendingBolus,  // bolus commit: the prepared dose was already consumed / superseded → re-prepare
+    BolusComputeFailed, // bolus prepare: master couldn't compute the dose (no BG / profile / pump not ready)
 
     // --- catch-alls ---
     Internal,        // a bug / unexpected state (shouldn't normally surface)

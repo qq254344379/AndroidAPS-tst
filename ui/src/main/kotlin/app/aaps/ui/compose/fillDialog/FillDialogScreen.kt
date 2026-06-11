@@ -369,28 +369,32 @@ private fun FillDialogContent(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     // Fill/prime amount + presets
-                    if (uiState.showBolus) {
-                        Column(modifier = itemModifier) {
-                            NumberInputRow(
-                                labelResId = R.string.fill_prime_amount,
-                                value = uiState.insulin,
-                                onValueChange = onInsulinChange,
-                                valueRange = 0.0..uiState.maxInsulin,
-                                step = uiState.bolusStep,
-                                valueFormat = bolusFormat,
-                                unitLabel = stringResource(CoreUiR.string.insulin_unit_shortname)
+                    // Prime/fill amount + presets. On an AAPSCLIENT the prime can't be delivered remotely (it's a
+                    // physical at-the-pump action), so the input is shown but DISABLED (grayed); only the logging
+                    // actions (site / cartridge / insulin-type change) work on a client. showBolus = !AAPSCLIENT.
+                    Column(modifier = itemModifier) {
+                        NumberInputRow(
+                            labelResId = R.string.fill_prime_amount,
+                            value = uiState.insulin,
+                            onValueChange = onInsulinChange,
+                            valueRange = 0.0..uiState.maxInsulin,
+                            step = uiState.bolusStep,
+                            valueFormat = bolusFormat,
+                            unitLabel = stringResource(CoreUiR.string.insulin_unit_shortname),
+                            enabled = uiState.showBolus
+                        )
+
+                        if (uiState.pumpUnitsWarning != null) {
+                            Text(
+                                text = uiState.pumpUnitsWarning,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center
                             )
+                        }
 
-                            if (uiState.pumpUnitsWarning != null) {
-                                Text(
-                                    text = uiState.pumpUnitsWarning,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-
+                        if (uiState.showBolus) {
                             PresetButtonsRow(
                                 presetButton1 = uiState.presetButton1,
                                 presetButton2 = uiState.presetButton2,

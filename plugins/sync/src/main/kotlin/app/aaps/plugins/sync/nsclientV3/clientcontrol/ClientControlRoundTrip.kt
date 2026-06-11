@@ -1,5 +1,7 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
@@ -13,6 +15,7 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
+import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
 import app.aaps.core.nssdk.utils.ClientControlCrypto
@@ -155,14 +158,14 @@ class ClientControlRoundTrip @Inject constructor(
                 dispatch(command).collect { p ->
                     terminal = p
                     // Applied is cleared after the loop (with the min-visible hold); show the rest live.
-                    if (p !is ActionProgress.Applied) _pending.value = PendingAction(p, label)
+                    if (p !is ActionProgress.Applied && p !is ActionProgress.Prepared) _pending.value = PendingAction(p, label)
                 }
             }
             // No ack came back (timeout / connection lost) → we don't actually know the master's state.
             // Flip offline so the app-level probe pings + re-pulls and the real result reconciles, rather
             // than leaving a stale optimistic guess. Self-heals on the next pong/heartbeat.
             if (terminal is ActionProgress.Unconfirmed) nsClientV3Plugin.get().markMasterUnreachable()
-            if (terminal is ActionProgress.Applied) {
+            if (terminal is ActionProgress.Applied || terminal is ActionProgress.Prepared) {
                 val visibleMs = dateUtil.now() - shownAt
                 if (visibleMs < ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS)
                     delay(ClientControlActionDispatcher.MIN_MODAL_VISIBLE_MS - visibleMs)
@@ -186,14 +189,24 @@ class ClientControlRoundTrip @Inject constructor(
         try {
             send(ActionProgress.Sending)
             val message = when (command) {
-                is ClientControlActionDispatcher.Command.InsulinActivate -> ClientControlMessage.InsulinActivate(command.iCfgJson)
-                is ClientControlActionDispatcher.Command.PreferenceEdit  ->
+                is ClientControlActionDispatcher.Command.InsulinActivate   -> ClientControlMessage.InsulinActivate(command.iCfgJson)
+                is ClientControlActionDispatcher.Command.PreferenceEdit    ->
                     ClientControlMessage.PreferencesUpdate(command.prefs.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) })
-                is ClientControlActionDispatcher.Command.SceneStart      -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
-                is ClientControlActionDispatcher.Command.SceneStop       -> ClientControlMessage.SceneStop(command.triggerChain)
-                is ClientControlActionDispatcher.Command.TempTargetSet   ->
+
+                is ClientControlActionDispatcher.Command.SceneStart        -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
+                is ClientControlActionDispatcher.Command.SceneStop         -> ClientControlMessage.SceneStop(command.triggerChain)
+                is ClientControlActionDispatcher.Command.TempTargetSet     ->
                     ClientControlMessage.TempTargetSet(command.timestamp, command.lowTargetMgdl, command.highTargetMgdl, command.durationMinutes, command.reason)
-                is ClientControlActionDispatcher.Command.TempTargetCancel -> ClientControlMessage.TempTargetCancel
+
+                is ClientControlActionDispatcher.Command.TempTargetCancel  -> ClientControlMessage.TempTargetCancel
+                is ClientControlActionDispatcher.Command.BolusPrepare      -> ClientControlMessage.BolusPrepare(command.guid)
+                is ClientControlActionDispatcher.Command.BolusCommit       -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)
+                is ClientControlActionDispatcher.Command.WizardPrepare     -> with(command.inputs) {
+                    ClientControlMessage.WizardPrepare(bg, carbs, percentage, directCorrection, carbTime, useBg, useCob, useIob, useTt, useTrend, alarm, notes, eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours)
+                }
+
+                is ClientControlActionDispatcher.Command.FixedBolusPrepare -> ClientControlMessage.FixedBolusPrepare(command.insulin, command.carbs, command.carbsTimeOffsetMinutes, command.carbsDurationHours, command.notes)
+                is ClientControlActionDispatcher.Command.RecordTreatment   -> ClientControlMessage.RecordTreatment(command.insulin, command.notes, command.timestamp, command.iCfgJson)
             }
             val validUntil = dateUtil.now() + ROUND_TRIP_TTL_MS
             val tracked = publisher.publishTracked(message, validUntil)
@@ -244,12 +257,30 @@ class ClientControlRoundTrip @Inject constructor(
     }
 
     private fun doneOutcome(ack: AckEnvelope): ActionProgress? = when (ack.status) {
-        AckStatus.Ok      -> ActionProgress.Applied
+        // A BolusPrepare ack carries the signed BolusPreview payload → Prepared (hand off to the confirm
+        // dialog); every other Ok is a plain Applied (payload PRESENCE disambiguates prepare from commit/scene/TT).
+        AckStatus.Ok      -> ack.payload?.let { payloadToPrepared(it) } ?: ActionProgress.Applied
         // ack.reason carries the FailureReason code NAME (set master-side); map it back, Unknown if newer.
-        AckStatus.Failed  -> ActionProgress.Rejected(ack.reason.toFailureReason())
+        // ack.payload carries the master's specific detail (e.g. "no BG") for a BolusComputeFailed.
+        AckStatus.Failed  -> ActionProgress.Rejected(ack.reason.toFailureReason(), ack.payload)
         AckStatus.Expired -> ActionProgress.Rejected(FailureReason.Expired)
         AckStatus.Pending -> null // not terminal
     }
+
+    /** Parse the signed [BolusPreview] payload of a BolusPrepare ack into an [ActionProgress.Prepared]. */
+    private fun payloadToPrepared(payload: String): ActionProgress {
+        val preview = runCatching { json.decodeFromString<BolusPreview>(payload) }.getOrNull()
+            ?: return ActionProgress.Rejected(FailureReason.Internal)
+        return ActionProgress.Prepared(
+            bolusId = preview.bolusId,
+            lines = preview.lines.map { ConfirmationLine(roleOf(it.role), it.text) },
+            advisorApplies = preview.advisorApplies,
+            advisorLines = preview.advisorLines.map { ConfirmationLine(roleOf(it.role), it.text) }
+        )
+    }
+
+    private fun roleOf(name: String): ConfirmationRole =
+        ConfirmationRole.entries.firstOrNull { it.name == name } ?: ConfirmationRole.NORMAL
 
     private fun String?.toFailureReason(): FailureReason =
         FailureReason.entries.firstOrNull { it.name == this } ?: FailureReason.Unknown

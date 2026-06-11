@@ -151,6 +151,11 @@ fun WizardDialogScreen(
         if (!viewModel.hasAction()) {
             showConfirmation = false
             showNoAction = true
+        } else if (viewModel.isAapsClient) {
+            // Client: deliver via the master (prepare → master's confirm → commit); skip the local confirmation.
+            showConfirmation = false
+            viewModel.confirmRemote()
+            onNavigateBack()
         } else if (viewModel.needsBolusAdvisor()) {
             showConfirmation = false
             showBolusAdvisorPrompt = true

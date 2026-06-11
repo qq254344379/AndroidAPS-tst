@@ -15,6 +15,8 @@ import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -28,6 +30,9 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowDialog
+import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
 import app.aaps.core.interfaces.tempTargets.ttTargetMgdl
 import app.aaps.core.interfaces.utils.DateUtil
@@ -37,6 +42,7 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
+import app.aaps.core.objects.extensions.toJsonObject
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.ui.R
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -75,6 +81,9 @@ class InsulinDialogViewModel @Inject constructor(
     private val aapsLogger: AAPSLogger,
     hardLimits: HardLimits,
     private val wizardBolusExecutor: WizardBolusExecutor,
+    private val clientControlDispatcher: ClientControlActionDispatcher,
+    private val rxBus: RxBus,
+    private val nsClient: NsClient,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -116,7 +125,7 @@ class InsulinDialogViewModel @Inject constructor(
                 insulin = 0.0,
                 timeOffsetMinutes = 0,
                 eatingSoonTtChecked = false,
-                recordOnlyChecked = initialForcedRecordOnly || isAapsClient,
+                recordOnlyChecked = initialForcedRecordOnly,
                 notes = "",
                 eventTime = now,
                 eventTimeOriginal = now,
@@ -139,12 +148,14 @@ class InsulinDialogViewModel @Inject constructor(
             val runningIcfg = getRunningIcfg()
             val mode = loop.runningMode()
             val cantDeliverBolus = PumpCommandGate.check(mode, PumpCommandGate.CommandKind.BOLUS) is PumpCommandGate.Decision.Reject
-            val forcedRecordOnly = cantDeliverBolus || !pumpInitialized
+            // A client delivers via the master (see confirmRemoteBolus), so its local pump state must NOT force
+            // record-only; only a master's own can't-deliver conditions do. The record-only toggle still works.
+            val forcedRecordOnly = if (isAapsClient) false else (cantDeliverBolus || !pumpInitialized)
             _uiState.update {
                 it.copy(
                     selectedIcfg = runningIcfg,
                     forcedRecordOnly = forcedRecordOnly,
-                    recordOnlyChecked = forcedRecordOnly || isAapsClient
+                    recordOnlyChecked = forcedRecordOnly
                 )
             }
         }
@@ -319,6 +330,41 @@ class InsulinDialogViewModel @Inject constructor(
         appScope.launch { confirmAndSaveSuspend() }
     }
 
+    /**
+     * AAPSCLIENT deliver-via-master for a fixed insulin bolus: the master constraint-caps + delivers, the client
+     * confirms the master's number then commits. No dose leaves the client. (B.2b: this confirm shows AFTER the
+     * dialog's own confirm — a second confirm; a later refinement can skip the local one, like the wizard's Screen branch.)
+     */
+    private suspend fun confirmRemoteBolus(insulin: Double, notes: String) {
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_deliver_bolus)
+        val title = rh.gs(app.aaps.core.ui.R.string.bolus)
+        val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.FixedBolusPrepare(insulin, 0, 0, 0, notes), label)
+        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
+        rxBus.send(
+            EventShowDialog.OkCancel(
+                title = title, message = "", confirmationLines = prepared.lines,
+                onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, false), label) } }
+            )
+        )
+    }
+
+    /**
+     * AAPSCLIENT record-only (a pen bolus the user gave outside AAPS): the master is the single source of truth, so
+     * the entry is STORED ON THE MASTER (immediately, so its loop accounts for the insulin at once) and syncs back
+     * here — never persisted on the client. If the master is offline we block (no client-local copy): the record-only
+     * toggle on a client needs the master reachable.
+     */
+    private suspend fun recordRemote(insulin: Double, notes: String, timestamp: Long, iCfg: ICfg) {
+        if (!nsClient.masterReachable.value) {
+            _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+            return
+        }
+        clientControlDispatcher.run(
+            ClientControlActionDispatcher.Command.RecordTreatment(insulin, notes, timestamp, iCfg.toJsonObject().toString()),
+            rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_record_bolus)
+        )
+    }
+
     private suspend fun confirmAndSaveSuspend() {
         val state = confirmedState ?: return
         val insulin = state.insulin
@@ -369,21 +415,31 @@ class InsulinDialogViewModel @Inject constructor(
         // delivers via the queue or — when record-only — persists the bolus directly with the resolved
         // insulin config. The eating-soon TT above stays here (it must run even with no insulin).
         if (insulinAfterConstraints > 0) {
-            wizardBolusExecutor.deliverInsulin(
-                insulin = insulinAfterConstraints,
-                note = notes,
-                source = Sources.InsulinDialog,
-                onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
-                timestamp = time,
-                treatmentNote = notes,
-                recordOnly = recordOnlyChecked,
-                iCfg = iCfg,
-                onSuccess = {
-                    // Non-record: remove on delivery success. Record-only: only when not back/forward-dated.
-                    if (!recordOnlyChecked || timeOffset == 0)
-                        automation.removeAutomationEventBolusReminder()
-                }
-            )
+            if (config.AAPSCLIENT && !recordOnlyChecked) {
+                // Client deliver-via-master: the master caps + delivers; the client confirms its number.
+                // (The eating-soon TT above already ran locally.)
+                confirmRemoteBolus(insulinAfterConstraints, notes)
+            } else if (config.AAPSCLIENT && recordOnlyChecked) {
+                // Client record-only (a pen bolus etc.): the master is the SSOT, so we store it ON THE MASTER
+                // immediately (it syncs back) rather than persisting on the client. Blocks if the master is offline.
+                recordRemote(insulinAfterConstraints, notes, time, iCfg)
+            } else {
+                wizardBolusExecutor.deliverInsulin(
+                    insulin = insulinAfterConstraints,
+                    note = notes,
+                    source = Sources.InsulinDialog,
+                    onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
+                    timestamp = time,
+                    treatmentNote = notes,
+                    recordOnly = recordOnlyChecked,
+                    iCfg = iCfg,
+                    onSuccess = {
+                        // Non-record: remove on delivery success. Record-only: only when not back/forward-dated.
+                        if (!recordOnlyChecked || timeOffset == 0)
+                            automation.removeAutomationEventBolusReminder()
+                    }
+                )
+            }
         }
     }
 }

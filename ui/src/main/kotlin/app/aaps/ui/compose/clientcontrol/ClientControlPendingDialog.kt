@@ -45,7 +45,7 @@ fun ClientControlPendingDialog(
     val partial = progress is ActionProgress.Rejected && progress.reason == FailureReason.PartialFailure
 
     val title = when {
-        partial                            -> stringResource(R.string.clientcontrol_pending_partial_title)
+        partial                                -> stringResource(R.string.clientcontrol_pending_partial_title)
         progress is ActionProgress.Rejected    -> stringResource(R.string.clientcontrol_pending_rejected_title)
         progress is ActionProgress.Unconfirmed -> stringResource(R.string.clientcontrol_pending_unconfirmed_title)
         else                                   -> stringResource(R.string.clientcontrol_pending_working_title) // Sending/MasterExecuting
@@ -91,18 +91,20 @@ fun ClientControlPendingDialog(
 @Composable
 private fun reasonText(reason: FailureReason): String = stringResource(
     when (reason) {
-        FailureReason.NotPaired       -> CoreUiR.string.clientcontrol_fail_not_paired
-        FailureReason.NotReachable    -> CoreUiR.string.clientcontrol_fail_not_reachable
-        FailureReason.NoReply         -> CoreUiR.string.clientcontrol_fail_no_reply
-        FailureReason.Expired         -> CoreUiR.string.clientcontrol_fail_expired
-        FailureReason.Busy            -> CoreUiR.string.clientcontrol_fail_busy
-        FailureReason.SendFailed      -> CoreUiR.string.clientcontrol_fail_send_failed
-        FailureReason.NoActiveProfile -> CoreUiR.string.clientcontrol_fail_no_active_profile
-        FailureReason.SceneNotFound   -> CoreUiR.string.clientcontrol_fail_scene_not_found
-        FailureReason.SceneDisabled   -> CoreUiR.string.clientcontrol_fail_scene_disabled
-        FailureReason.PartialFailure  -> CoreUiR.string.clientcontrol_fail_partial
-        FailureReason.ExecutionFailed -> CoreUiR.string.clientcontrol_fail_execution
-        FailureReason.Internal        -> CoreUiR.string.clientcontrol_fail_internal
-        FailureReason.Unknown         -> CoreUiR.string.clientcontrol_fail_unknown
+        FailureReason.NotPaired          -> CoreUiR.string.clientcontrol_fail_not_paired
+        FailureReason.NotReachable       -> CoreUiR.string.clientcontrol_fail_not_reachable
+        FailureReason.NoReply            -> CoreUiR.string.clientcontrol_fail_no_reply
+        FailureReason.Expired            -> CoreUiR.string.clientcontrol_fail_expired
+        FailureReason.Busy               -> CoreUiR.string.clientcontrol_fail_busy
+        FailureReason.SendFailed         -> CoreUiR.string.clientcontrol_fail_send_failed
+        FailureReason.NoActiveProfile    -> CoreUiR.string.clientcontrol_fail_no_active_profile
+        FailureReason.SceneNotFound      -> CoreUiR.string.clientcontrol_fail_scene_not_found
+        FailureReason.SceneDisabled      -> CoreUiR.string.clientcontrol_fail_scene_disabled
+        FailureReason.PartialFailure     -> CoreUiR.string.clientcontrol_fail_partial
+        FailureReason.ExecutionFailed    -> CoreUiR.string.clientcontrol_fail_execution
+        FailureReason.NoPendingBolus     -> CoreUiR.string.clientcontrol_fail_no_pending_bolus
+        FailureReason.BolusComputeFailed -> CoreUiR.string.clientcontrol_fail_bolus_compute
+        FailureReason.Internal           -> CoreUiR.string.clientcontrol_fail_internal
+        FailureReason.Unknown            -> CoreUiR.string.clientcontrol_fail_unknown
     }
 )

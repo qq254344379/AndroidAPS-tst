@@ -15,6 +15,8 @@ import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -25,6 +27,8 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
 import app.aaps.core.interfaces.tempTargets.ttTargetMgdl
 import app.aaps.core.interfaces.utils.DateUtil
@@ -67,6 +71,8 @@ class CarbsDialogViewModel @Inject constructor(
     val rh: ResourceHelper,
     val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger,
+    private val clientControlDispatcher: ClientControlActionDispatcher,
+    private val rxBus: RxBus,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -363,6 +369,27 @@ class CarbsDialogViewModel @Inject constructor(
         return carbsAfterConstraints != 0 || state.activityTtChecked || state.eatingSoonTtChecked || state.hypoTtChecked
     }
 
+    /**
+     * AAPSCLIENT deliver-via-master for carbs: the master constraint-caps + records the carbs, the client
+     * confirms the master's number then commits. No carbs are recorded on the client itself. Carbs are
+     * carbs-only — [FixedBolusPrepare] carries insulin = 0.0 and there is no advisor, so we always commit
+     * asAdvisor = false and show prepared.lines. (Like the insulin dialog this shows a second confirm AFTER
+     * the dialog's own confirm; a later refinement can skip the local one.)
+     */
+    private suspend fun confirmRemoteBolus(carbs: Int, carbsTimeOffsetMinutes: Int, carbsDurationHours: Int, notes: String?) {
+        val label = rh.gs(app.aaps.core.ui.R.string.carbs)
+        val title = rh.gs(app.aaps.core.ui.R.string.carbs)
+        val prepared =
+            clientControlDispatcher.run(ClientControlActionDispatcher.Command.FixedBolusPrepare(insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = carbsTimeOffsetMinutes, carbsDurationHours = carbsDurationHours, notes = notes ?: ""), label)
+        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
+        rxBus.send(
+            EventShowDialog.OkCancel(
+                title = title, message = "", confirmationLines = prepared.lines,
+                onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, false), label) } }
+            )
+        )
+    }
+
     fun confirmAndSave() {
         val state = confirmedState ?: return
         val carbs = state.carbs
@@ -433,21 +460,35 @@ class CarbsDialogViewModel @Inject constructor(
 
         // Carbs delivery now rides the shared executor (one audited path): it logs the user entry + delivers.
         if (carbsAfterConstraints != 0) {
-            appScope.launch {
-                wizardBolusExecutor.deliverECarbs(
-                    carbs = carbsAfterConstraints,
-                    carbsTime = eventTime,
-                    duration = duration,
-                    delayMinutes = timeOffset,
-                    notes = notes,
-                    source = Sources.CarbDialog,
-                    onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
-                    onSuccess = {
-                        if (preferences.get(BooleanKey.OverviewUseBolusReminder) && remindBolus)
-                            automation.scheduleAutomationEventBolusReminder()
-                    }
-                )
-                automation.removeAutomationEventEatReminder()
+            if (config.AAPSCLIENT) {
+                // Client routes carbs through the master too (maintainer decision): the master records them and the
+                // client confirms its number. Carbs are carbs-only (no pump gate / record-only forcing like insulin).
+                appScope.launch {
+                    confirmRemoteBolus(carbsAfterConstraints, timeOffset, duration, notes)
+                    // Mirror the local path's opt-in bolus reminder — a device-LOCAL notification, so it must be
+                    // scheduled on the client even though the master records the carbs. Optimistic: confirmRemoteBolus
+                    // is a fire-and-forget signed round-trip with no delivery-success hook.
+                    if (preferences.get(BooleanKey.OverviewUseBolusReminder) && remindBolus)
+                        automation.scheduleAutomationEventBolusReminder()
+                    automation.removeAutomationEventEatReminder()
+                }
+            } else {
+                appScope.launch {
+                    wizardBolusExecutor.deliverECarbs(
+                        carbs = carbsAfterConstraints,
+                        carbsTime = eventTime,
+                        duration = duration,
+                        delayMinutes = timeOffset,
+                        notes = notes,
+                        source = Sources.CarbDialog,
+                        onError = { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) },
+                        onSuccess = {
+                            if (preferences.get(BooleanKey.OverviewUseBolusReminder) && remindBolus)
+                                automation.scheduleAutomationEventBolusReminder()
+                        }
+                    )
+                    automation.removeAutomationEventEatReminder()
+                }
             }
         }
 

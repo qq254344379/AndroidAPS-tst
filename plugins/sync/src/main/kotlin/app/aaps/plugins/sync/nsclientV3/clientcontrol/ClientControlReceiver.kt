@@ -5,11 +5,12 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
-import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
@@ -28,13 +29,17 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
+import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
+import app.aaps.core.nssdk.localmodel.clientcontrol.ConfirmationLineDto
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.json.JSONObject
@@ -86,10 +91,17 @@ class ClientControlReceiver @Inject constructor(
     private val uel: UserEntryLogger,
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val persistenceLayer: PersistenceLayer,
+    private val wizardBolusExecutor: WizardBolusExecutor,
     private val aapsLogger: AAPSLogger
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    // Serialize the whole verify→dispatch→counter-bump pipeline. The replay gate reads counterReceived and the
+    // handler advances it (bumpLastSeen) — a check-then-act gap: two coroutines handling the SAME doc concurrently
+    // (a WS re-notify, or WS+poll overlap) could both pass the gate and both execute → double bolus / double record.
+    // One command in flight at a time closes that window (the executor's atomic slot is the second line of defense).
+    private val commandMutex = Mutex()
 
     /**
      * Polling fallback. Lists NS settings, filters to client-control identifiers, and
@@ -129,7 +141,7 @@ class ClientControlReceiver @Inject constructor(
         verifyAndAck(identifier, doc, dateUtil.now())
     }
 
-    private suspend fun verifyAndAck(identifier: String, doc: JSONObject, now: Long) {
+    private suspend fun verifyAndAck(identifier: String, doc: JSONObject, now: Long) = commandMutex.withLock {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: return
         val envelopeObj = doc.optJSONObject("envelope") ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: $identifier has no envelope field, deleting")
@@ -180,7 +192,7 @@ class ClientControlReceiver @Inject constructor(
             authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
             nsClientRepository.addLog("◄ CLIENTCTL", "expired ${envelope.type} from ${entry.name}")
             aapsLogger.warn(LTag.NSCLIENT, "ClientControl: $identifier expired (validUntil=${envelope.validUntil} < now=$now), not executing")
-            if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, AckStatus.Expired, "expired before master applied it", now)
+            if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, AckStatus.Expired, "expired before master applied it", null, now)
             return
         }
         // Decode the payload into the sealed message family. A failure here means the verified
@@ -197,7 +209,7 @@ class ClientControlReceiver @Inject constructor(
         // Round-trip commands (wantsAck) get the two-step ACK: Executing before dispatch, then the
         // result. Fire-and-forget commands (scenes, pref sync) skip it — no client is waiting, so the
         // ACK doc would be pure write amplification.
-        if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Executing, AckStatus.Pending, null, now)
+        if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Executing, AckStatus.Pending, null, null, now)
         val outcome = when (message) {
             null                                      -> {
                 onVerifiedUndecodablePayload(entry, envelope, now)
@@ -212,8 +224,13 @@ class ClientControlReceiver @Inject constructor(
             is ClientControlMessage.TempTargetSet     -> onVerifiedTempTargetSet(entry, envelope, message, now)
             ClientControlMessage.TempTargetCancel     -> onVerifiedTempTargetCancel(entry, envelope, now)
             is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
+            is ClientControlMessage.BolusPrepare      -> onVerifiedBolusPrepare(entry, envelope, message, now)
+            is ClientControlMessage.BolusCommit       -> onVerifiedBolusCommit(entry, envelope, message, now)
+            is ClientControlMessage.WizardPrepare     -> onVerifiedWizardPrepare(entry, envelope, message, now)
+            is ClientControlMessage.FixedBolusPrepare -> onVerifiedFixedBolusPrepare(entry, envelope, message, now)
+            is ClientControlMessage.RecordTreatment   -> onVerifiedRecordTreatment(entry, envelope, message, now)
         }
-        if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, now)
+        if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, outcome.payload, now)
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
         // legitimate same-type command from the same client would PUT to that identifier and
         // hit HTTP 410. Counter dedup (line above) prevents replay; the doc just lingers in
@@ -337,6 +354,146 @@ class ClientControlReceiver @Inject constructor(
     }
 
     /**
+     * Client asked to PREPARE a QuickWizard bolus: compute + constraint-cap the dose on the master's OWN live
+     * state, park it, and return the preview (the master's color-coded confirmation lines + advisor flags) in
+     * the SIGNED ack payload so the client renders the master's exact confirmation. Nothing is delivered yet.
+     */
+    private suspend fun onVerifiedBolusPrepare(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.BolusPrepare, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        return when (val result = wizardBolusExecutor.prepareQuickWizard(message.guid)) {
+            is WizardBolusExecutor.PrepareResult.Error   -> {
+                nsClientRepository.addLog("◄ CLIENTCTL", "bolus.prepare from ${entry.name}: ${result.message}")
+                // Surface the master's specific reason (no BG / profile / pump) to the client via the payload.
+                AckOutcome(AckStatus.Failed, FailureReason.BolusComputeFailed.name, result.message)
+            }
+
+            is WizardBolusExecutor.PrepareResult.Preview -> {
+                val preview = BolusPreview(
+                    bolusId = result.bolusId,
+                    lines = result.lines.map { ConfirmationLineDto(it.role.name, it.text) },
+                    advisorApplies = result.advisorApplies,
+                    advisorLines = result.advisorLines.map { ConfirmationLineDto(it.role.name, it.text) }
+                )
+                nsClientRepository.addLog("◄ CLIENTCTL", "bolus.prepare from ${entry.name}: ${result.insulin}U ${result.carbs}g" + if (result.advisorApplies) " advisor" else "")
+                AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
+            }
+        }
+    }
+
+    /**
+     * Client confirmed a prepared bolus: deliver the parked dose matching [message.bolusId] EXACTLY once. A
+     * re-sent commit finds the slot drained → NoPending → NoPendingBolus (no double-dose). A synchronous
+     * mode-gate rejection rides back through deliverError → ExecutionFailed. [asAdvisor] picks the correction-only path.
+     */
+    private suspend fun onVerifiedBolusCommit(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.BolusCommit, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        var deliverError: String? = null
+        val result = wizardBolusExecutor.confirm(message.bolusId, Sources.NSClient, { deliverError = it }, message.asAdvisor)
+        val delivered = result is WizardBolusExecutor.ConfirmResult.Delivered
+        nsClientRepository.addLog("◄ CLIENTCTL", "bolus.commit id=${message.bolusId}${if (message.asAdvisor) " advisor" else ""} from ${entry.name}: ${if (delivered) "delivered" else "no-pending"}")
+        val err = deliverError
+        return when {
+            result is WizardBolusExecutor.ConfirmResult.NoPending -> AckOutcome(AckStatus.Failed, FailureReason.NoPendingBolus.name)
+            err != null                                           -> AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name, err)
+            else                                                  -> AckOutcome(AckStatus.Ok, null)
+        }
+    }
+
+    /**
+     * Client asked to PREPARE a MANUAL bolus-wizard bolus: recompute the dose on the master's OWN profile/COB/IOB
+     * from the client's raw inputs, park it, and return the master's color-coded confirmation in the SIGNED payload
+     * (same `BolusPreview`/commit as QuickWizard). Nothing is delivered yet.
+     */
+    private suspend fun onVerifiedWizardPrepare(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.WizardPrepare, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val inputs = WizardBolusExecutor.WizardInputs(
+            bg = message.bg, carbs = message.carbs, percentage = message.percentage, directCorrection = message.directCorrection,
+            carbTime = message.carbTime, useBg = message.useBg, useCob = message.useCob, useIob = message.useIob,
+            useTt = message.useTt, useTrend = message.useTrend, alarm = message.alarm, notes = message.notes,
+            eCarbsGrams = message.eCarbsGrams, eCarbsDelayMinutes = message.eCarbsDelayMinutes, eCarbsDurationHours = message.eCarbsDurationHours
+        )
+        return when (val result = wizardBolusExecutor.prepareWizard(inputs)) {
+            is WizardBolusExecutor.PrepareResult.Error   -> {
+                nsClientRepository.addLog("◄ CLIENTCTL", "wizard.prepare from ${entry.name}: ${result.message}")
+                AckOutcome(AckStatus.Failed, FailureReason.BolusComputeFailed.name, result.message)
+            }
+
+            is WizardBolusExecutor.PrepareResult.Preview -> {
+                val preview = BolusPreview(
+                    bolusId = result.bolusId,
+                    lines = result.lines.map { ConfirmationLineDto(it.role.name, it.text) },
+                    advisorApplies = result.advisorApplies,
+                    advisorLines = result.advisorLines.map { ConfirmationLineDto(it.role.name, it.text) }
+                )
+                nsClientRepository.addLog("◄ CLIENTCTL", "wizard.prepare from ${entry.name}: ${result.insulin}U ${result.carbs}g" + if (result.advisorApplies) " advisor" else "")
+                AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
+            }
+        }
+    }
+
+    /**
+     * Client asked to PREPARE a FIXED-amount bolus/carbs (Insulin / Treatment / Carbs): the master caps the amounts
+     * (no recompute), parks, and returns its confirmation in the signed payload (same commit path). Nothing delivered yet.
+     */
+    private suspend fun onVerifiedFixedBolusPrepare(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.FixedBolusPrepare, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        return when (val result = wizardBolusExecutor.prepareFixedBolus(message.insulin, message.carbs, message.carbsTimeOffsetMinutes, message.carbsDurationHours, message.notes)) {
+            is WizardBolusExecutor.PrepareResult.Error   -> {
+                nsClientRepository.addLog("◄ CLIENTCTL", "fixed.prepare from ${entry.name}: ${result.message}")
+                AckOutcome(AckStatus.Failed, FailureReason.BolusComputeFailed.name, result.message)
+            }
+
+            is WizardBolusExecutor.PrepareResult.Preview -> {
+                val preview = BolusPreview(
+                    bolusId = result.bolusId,
+                    lines = result.lines.map { ConfirmationLineDto(it.role.name, it.text) },
+                    advisorApplies = false,
+                    advisorLines = emptyList()
+                )
+                nsClientRepository.addLog("◄ CLIENTCTL", "fixed.prepare from ${entry.name}: ${result.insulin}U ${result.carbs}g")
+                AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
+            }
+        }
+    }
+
+    /**
+     * Client asked to STORE a record-only treatment it gave outside AAPS (a pen bolus): persist it on the master
+     * NOW (record-only — no pump command) with the logged insulin's config, so the master's loop accounts for the
+     * insulin at once. The master is the SSOT; the stored bolus syncs back to the client. Invalid iCfg → Failed.
+     */
+    private suspend fun onVerifiedRecordTreatment(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.RecordTreatment, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        val iCfg = runCatching {
+            (Json.parseToJsonElement(message.iCfgJson) as? JsonObject)?.let { ICfg.fromJsonObject(it) }
+        }.getOrNull()
+        if (iCfg == null) {
+            nsClientRepository.addLog("◄ CLIENTCTL", "record.treatment from ${entry.name}: invalid iCfg JSON")
+            return AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
+        }
+        // Clamp the client-supplied treatment time: a future-dated record would add IOB for a bolus that (by its
+        // own timestamp) hasn't happened. Back-dating a pen bolus is the legit use case → allow generous past,
+        // reject the future beyond clock skew (and the absurd past).
+        if (message.timestamp > now + 5 * 60_000L || message.timestamp < now - 24 * 60 * 60_000L) {
+            nsClientRepository.addLog("◄ CLIENTCTL", "record.treatment from ${entry.name}: timestamp out of window")
+            return AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
+        }
+        var error: String? = null
+        wizardBolusExecutor.deliverInsulin(
+            insulin = message.insulin,
+            note = message.notes,
+            source = Sources.NSClient,
+            onError = { error = it },
+            timestamp = message.timestamp,
+            treatmentNote = message.notes,
+            recordOnly = true,
+            iCfg = iCfg
+        )
+        val err = error
+        nsClientRepository.addLog("◄ CLIENTCTL", "record.treatment from ${entry.name}: ${message.insulin}U" + if (err != null) " failed: $err" else " recorded")
+        return if (err != null) AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name, err) else AckOutcome(AckStatus.Ok, null)
+    }
+
+    /**
      * Generic apply of client-pushed bidirectionally-synced preference values. Per key: resolve it
      * from the registry, reject anything not declared `Bidirectional` (authority), drop stale pushes
      * by per-key last-writer-wins, and write the winners via [Preferences.putRemote] — which stamps
@@ -451,11 +608,12 @@ class ClientControlReceiver @Inject constructor(
         phase: AckPhase,
         status: AckStatus,
         reason: String?,
+        payload: String?,
         now: Long
     ) {
         val ack = ClientControlCrypto.signAck(
             secret,
-            AckEnvelope(clientId = clientId, commandCounter = commandCounter, phase = phase, status = status, reason = reason, timestamp = now, signature = "")
+            AckEnvelope(clientId = clientId, commandCounter = commandCounter, phase = phase, status = status, reason = reason, payload = payload, timestamp = now, signature = "")
         )
         val identifier = ClientControlPublisher.IDENTIFIER_ACK_PREFIX + clientId
         val doc = JSONObject().apply {
@@ -471,5 +629,5 @@ class ClientControlReceiver @Inject constructor(
     }
 
     /** Result a command handler reports back so [verifyAndAck] can write the terminal Done ack. */
-    private data class AckOutcome(val status: AckStatus, val reason: String?)
+    private data class AckOutcome(val status: AckStatus, val reason: String?, val payload: String? = null)
 }

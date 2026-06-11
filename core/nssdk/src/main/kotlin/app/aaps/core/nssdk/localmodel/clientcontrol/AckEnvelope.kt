@@ -15,6 +15,10 @@ import kotlinx.serialization.Serializable
  * [commandCounter] echoes the command envelope's `counter`, the correlation id the client matches
  * against its outstanding request (a stale ack from a previous command carries a different counter
  * and is ignored).
+ *
+ * [payload] is optional signed result data a command may return to the client — currently the prepared-bolus
+ * preview JSON for a `BolusPrepare` ack. It is part of [canonicalString] so a forged dose is no more believable
+ * than a forged "Ok".
  */
 @Serializable
 data class AckEnvelope(
@@ -23,13 +27,14 @@ data class AckEnvelope(
     val phase: AckPhase,
     val status: AckStatus,
     val reason: String? = null,
+    val payload: String? = null,
     val timestamp: Long,
     val signature: String
 ) {
 
     /** Byte-stable HMAC input over every field except the signature. */
     fun canonicalString(): String =
-        "$clientId|$commandCounter|$phase|$status|${reason ?: ""}|$timestamp"
+        "$clientId|$commandCounter|$phase|$status|${reason ?: ""}|${payload ?: ""}|$timestamp"
 }
 
 enum class AckPhase { Executing, Done }

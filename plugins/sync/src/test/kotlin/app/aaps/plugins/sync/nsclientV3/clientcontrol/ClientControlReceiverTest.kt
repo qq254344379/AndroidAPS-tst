@@ -1,17 +1,20 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.ICfg
-import app.aaps.core.data.model.Scene
-import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.data.model.TT
+import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
-import app.aaps.core.interfaces.scenes.ActiveSceneSnapshot
-import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
@@ -24,6 +27,7 @@ import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
@@ -31,9 +35,6 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.localmodel.treatment.CreateUpdateResponse
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
-import app.aaps.core.data.model.TT
-import app.aaps.core.data.ue.Action
-import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
@@ -68,6 +69,7 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var uel: UserEntryLogger
     @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
     @Mock private lateinit var persistenceLayer: PersistenceLayer
+    @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
 
     // Same deterministic fake as the repository tests — encrypt/decrypt round-trip via reverse,
     // so the persisted form does not contain the original plaintext.
@@ -124,6 +126,7 @@ internal class ClientControlReceiverTest {
             uel,
             runningConfigurationPublisher,
             persistenceLayer,
+            wizardBolusExecutor,
             aapsLogger
         )
     }
@@ -486,6 +489,168 @@ internal class ClientControlReceiverTest {
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.TempTargetCancel, counter = 5L)))
 
         verify(persistenceLayer).cancelCurrentTemporaryTargetIfAny(any(), eq(Action.CANCEL_TT), eq(Sources.NSClient), anyOrNull(), any())
+    }
+
+    @Test
+    fun bolusPrepareAcksOkWithSignedPreviewPayload() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.prepareQuickWizard(any())).thenReturn(
+            WizardBolusExecutor.PrepareResult.Preview(
+                insulin = 2.0, carbs = 30, explanation = "calc", bolusId = 42L,
+                lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "2 U")),
+                advisorApplies = true,
+                advisorLines = listOf(ConfirmationLine(ConfirmationRole.WARNING, "correct now"))
+            )
+        )
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}bolus_prepare_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.BolusPrepare("guid-1"), counter = 5L, wantsAck = true)))
+
+        val done = acks.last()
+        assertThat(done.status.name).isEqualTo("Ok")
+        // The dose + the master's confirmation lines ride back in the SIGNED payload.
+        val preview = Json.decodeFromString<BolusPreview>(done.payload!!)
+        assertThat(preview.bolusId).isEqualTo(42L)
+        assertThat(preview.advisorApplies).isTrue()
+        assertThat(preview.lines.single().text).isEqualTo("2 U")
+    }
+
+    @Test
+    fun bolusPrepareErrorAcksBolusComputeFailedWithReasonInPayload() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.prepareQuickWizard(any())).thenReturn(WizardBolusExecutor.PrepareResult.Error("no bg"))
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}bolus_prepare_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.BolusPrepare("guid-1"), counter = 5L, wantsAck = true)))
+
+        val done = acks.last()
+        assertThat(done.status.name).isEqualTo("Failed")
+        assertThat(done.reason).isEqualTo(FailureReason.BolusComputeFailed.name)
+        assertThat(done.payload).isEqualTo("no bg") // the master's specific reason for the client to show
+    }
+
+    @Test
+    fun bolusCommitDeliversAndAcksOk() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.confirm(any(), any(), any(), any())).thenReturn(WizardBolusExecutor.ConfirmResult.Delivered)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}bolus_commit_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.BolusCommit(42L, asAdvisor = false), counter = 5L, wantsAck = true)))
+
+        verify(wizardBolusExecutor).confirm(eq(42L), eq(Sources.NSClient), any(), eq(false))
+        assertThat(acks.last().status.name).isEqualTo("Ok")
+    }
+
+    @Test
+    fun bolusCommitNoPendingAcksNoPendingBolus() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.confirm(any(), any(), any(), any())).thenReturn(WizardBolusExecutor.ConfirmResult.NoPending)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}bolus_commit_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.BolusCommit(42L), counter = 5L, wantsAck = true)))
+
+        val done = acks.last()
+        assertThat(done.status.name).isEqualTo("Failed")
+        assertThat(done.reason).isEqualTo(FailureReason.NoPendingBolus.name)
+    }
+
+    @Test
+    fun bolusCommitAsAdvisorDeliversAdvisorVariant() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.confirm(any(), any(), any(), any())).thenReturn(WizardBolusExecutor.ConfirmResult.Delivered)
+        captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}bolus_commit_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.BolusCommit(42L, asAdvisor = true), counter = 5L, wantsAck = true)))
+
+        verify(wizardBolusExecutor).confirm(eq(42L), eq(Sources.NSClient), any(), eq(true))
+    }
+
+    @Test
+    fun wizardPrepareAcksOkWithSignedPreviewPayload() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.prepareWizard(any())).thenReturn(
+            WizardBolusExecutor.PrepareResult.Preview(
+                insulin = 2.0, carbs = 30, explanation = "calc", bolusId = 77L,
+                lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "2 U")),
+                advisorApplies = false, advisorLines = emptyList()
+            )
+        )
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}wizard_prepare_$clientId"
+
+        sut.onSettingsDocChanged(
+            identifier,
+            wrap(
+                envelope(
+                    clientId, secret,
+                    message = ClientControlMessage.WizardPrepare(
+                        bg = 120.0, carbs = 30, percentage = 100, directCorrection = 0.0, carbTime = 0,
+                        useBg = true, useCob = true, useIob = true, useTt = true, useTrend = false, alarm = false, notes = ""
+                    ),
+                    counter = 5L, wantsAck = true
+                )
+            )
+        )
+
+        val done = acks.last()
+        assertThat(done.status.name).isEqualTo("Ok")
+        val preview = Json.decodeFromString<BolusPreview>(done.payload!!)
+        assertThat(preview.bolusId).isEqualTo(77L)
+        assertThat(preview.lines.single().text).isEqualTo("2 U")
+    }
+
+    @Test
+    fun fixedBolusPrepareAcksOkWithSignedPreviewPayload() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.prepareFixedBolus(any(), any(), any(), any(), any())).thenReturn(
+            WizardBolusExecutor.PrepareResult.Preview(
+                insulin = 1.0, carbs = 0, explanation = "", bolusId = 88L,
+                lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "1 U")),
+                advisorApplies = false, advisorLines = emptyList()
+            )
+        )
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}fixed_bolus_prepare_$clientId"
+
+        sut.onSettingsDocChanged(
+            identifier,
+            wrap(envelope(clientId, secret, message = ClientControlMessage.FixedBolusPrepare(insulin = 1.0, carbs = 0, notes = ""), counter = 5L, wantsAck = true))
+        )
+
+        val done = acks.last()
+        assertThat(done.status.name).isEqualTo("Ok")
+        val preview = Json.decodeFromString<BolusPreview>(done.payload!!)
+        assertThat(preview.bolusId).isEqualTo(88L)
+        assertThat(preview.lines.single().text).isEqualTo("1 U")
+    }
+
+    @Test
+    fun recordTreatmentRecordsOnMasterAndAcksOk() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}record_treatment_$clientId"
+
+        sut.onSettingsDocChanged(
+            identifier,
+            wrap(envelope(clientId, secret, message = ClientControlMessage.RecordTreatment(insulin = 2.0, notes = "pen", timestamp = now, iCfgJson = iCfgJson("rapid")), counter = 5L, wantsAck = true))
+        )
+
+        assertThat(acks.last().status.name).isEqualTo("Ok")
+        // Master stored it record-only (no pump): deliverInsulin(recordOnly = true).
+        verify(wizardBolusExecutor).deliverInsulin(eq(2.0), any(), any(), any(), any(), any(), eq(true), any(), any())
     }
 
     @Test

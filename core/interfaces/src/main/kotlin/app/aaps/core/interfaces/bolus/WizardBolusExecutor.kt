@@ -4,6 +4,7 @@ import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.ue.Sources
+import app.aaps.core.data.ui.ConfirmationLine
 
 /**
  * Transport-neutral spine for wizard / quick-wizard bolus **prepare → confirm → deliver**. Owns the
@@ -35,10 +36,26 @@ interface WizardBolusExecutor {
     suspend fun prepareQuickWizard(guid: String): PrepareResult
 
     /**
-     * Drain the slot, verify [bolusId] matches the parked bolus, and deliver. Idempotent: a second
-     * confirm finds the slot empty → [ConfirmResult.NoPending], never a second bolus.
+     * Manual-wizard prepare: recompute the dose on the master's own profile / temp target / COB / IOB from the
+     * client's raw wizard [inputs], constraint-cap, and park. Same shape + [confirm] as [prepareQuickWizard],
+     * but driven by inputs rather than a synced QuickWizard entry — so the master is authoritative for a
+     * client's manual wizard bolus too.
      */
-    suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit): ConfirmResult
+    suspend fun prepareWizard(inputs: WizardInputs): PrepareResult
+
+    /**
+     * Fixed-amount prepare (Insulin / Treatment / Carbs dialogs): constraint-cap [insulin] + [carbs] (no recompute
+     * — they are the user's fixed values), derive the event type, park, and return the [PrepareResult.Preview].
+     * Delivered via [confirm] like the wizard prepares. [insulin] or [carbs] may be 0 (insulin-only / carbs-only).
+     */
+    suspend fun prepareFixedBolus(insulin: Double, carbs: Int, carbsTimeOffsetMinutes: Int, carbsDurationHours: Int, notes: String): PrepareResult
+
+    /**
+     * Drain the slot, verify [bolusId] matches the parked bolus, and deliver. Idempotent: a second
+     * confirm finds the slot empty → [ConfirmResult.NoPending], never a second bolus. [asAdvisor] delivers the
+     * correction-only advisor bolus (high-BG "eat later" branch) instead of the carb wizard bolus.
+     */
+    suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean = false): ConfirmResult
 
     /**
      * Canonical wizard / quick-wizard bolus — a type-specific entry point taking exactly the wizard
@@ -134,8 +151,21 @@ interface WizardBolusExecutor {
 
     sealed interface PrepareResult {
 
-        /** Computed, constraint-capped, parked. [bolusId] is the confirm id; [explanation] is the short reasoning. */
-        data class Preview(val insulin: Double, val carbs: Int, val explanation: String, val bolusId: Long) : PrepareResult
+        /**
+         * Computed, constraint-capped, parked. [bolusId] is the confirm id; [insulin]/[carbs]/[explanation] are
+         * for the master's own log/render; [lines] are the master-built color-coded confirmation rows the client
+         * renders verbatim; [advisorApplies] (with [advisorLines]) offers the high-BG "correct now, eat later" choice.
+         */
+        data class Preview(
+            val insulin: Double,
+            val carbs: Int,
+            val explanation: String,
+            val bolusId: Long,
+            val lines: List<ConfirmationLine> = emptyList(),
+            val advisorApplies: Boolean = false,
+            val advisorLines: List<ConfirmationLine> = emptyList()
+        ) : PrepareResult
+
         data class Error(val message: String) : PrepareResult
     }
 
@@ -147,4 +177,27 @@ interface WizardBolusExecutor {
         /** Slot empty or id mismatch — nothing delivered (idempotent retry / stale confirm). */
         data object NoPending : ConfirmResult
     }
+
+    /**
+     * The manual Bolus Wizard's user inputs, sent client→master for [prepareWizard]. Only these user-entered
+     * values travel; the master fills in its own live profile / temp target / COB / IOB. [bg] is the value in
+     * the client's BG field (user-overridable); the rest mirror the wizard dialog's toggles + amounts.
+     */
+    data class WizardInputs(
+        val bg: Double,
+        val carbs: Int,
+        val percentage: Int,
+        val directCorrection: Double,
+        val carbTime: Int,
+        val useBg: Boolean,
+        val useCob: Boolean,
+        val useIob: Boolean,
+        val useTt: Boolean,
+        val useTrend: Boolean,
+        val alarm: Boolean,
+        val notes: String,
+        val eCarbsGrams: Int = 0,
+        val eCarbsDelayMinutes: Int = 0,
+        val eCarbsDurationHours: Int = 0
+    )
 }

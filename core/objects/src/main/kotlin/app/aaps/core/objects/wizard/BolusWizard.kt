@@ -1,6 +1,5 @@
 package app.aaps.core.objects.wizard
 
-import android.annotation.SuppressLint
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BolusWizardData
 import app.aaps.core.data.model.RM
@@ -37,7 +36,6 @@ import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
-import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
@@ -449,57 +447,6 @@ class BolusWizard @Inject constructor(
             }
         }
 
-    suspend fun confirmAndExecute(quickWizardEntry: QuickWizardEntry? = null) {
-        if (calculatedTotalInsulin > 0.0 || carbs > 0.0) {
-            // Pre-check the running mode gate for the insulin path; if the mode forbids
-            // a new bolus, show a snackbar and skip the confirmation flow entirely so the
-            // user never hits the alarm-on-failure callback.
-            if (calculatedTotalInsulin > 0.0 &&
-                runningModeGuard.checkWithSnackbar(PumpCommandGate.CommandKind.BOLUS)
-            ) return
-            if (accepted) {
-                aapsLogger.debug(LTag.UI, "guarding: already accepted")
-                return
-            }
-            accepted = true
-            if (calculatedTotalInsulin > 0.0)
-                automation.removeAutomationEventBolusReminder()
-            if (carbs > 0.0)
-                automation.removeAutomationEventEatReminder()
-            if (preferences.get(BooleanKey.OverviewUseBolusAdvisor) && profileUtil.convertToMgdl(bg, profile.units) > 180 && carbs > 0 && carbTime >= 0)
-                rxBus.send(
-                    EventShowDialog.YesNoCancel(
-                        title = rh.gs(app.aaps.core.ui.R.string.bolus_advisor),
-                        message = rh.gs(app.aaps.core.ui.R.string.bolus_advisor_message),
-                        onYes = { bolusAdvisorProcessing() },
-                        onNo = { appScope.launch { commonProcessing(quickWizardEntry) } }
-                    )
-                )
-            else
-                commonProcessing(quickWizardEntry)
-        } else {
-            rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.boluswizard), message = rh.gs(app.aaps.core.ui.R.string.no_action_selected)))
-        }
-    }
-
-    private fun bolusAdvisorProcessing() {
-        val confirmationLines = buildConfirmationLines(advisor = true)
-        rxBus.send(EventShowDialog.OkCancel(title = rh.gs(app.aaps.core.ui.R.string.boluswizard), message = "", confirmationLines = confirmationLines, onOk = {
-            // Advisor bolus now rides the shared canonical executor entry point — one audited path; the
-            // executor logs the BOLUS_ADVISOR entry, delivers, and schedules the eat reminder on success.
-            appScope.launch {
-                wizardBolusExecutor.deliverBolusAdvisor(
-                    insulin = insulinAfterConstraints,
-                    mgdlGlucose = profileUtil.convertToMgdl(bg, profile.units),
-                    bolusCalculatorResult = createBolusCalculatorResult(),
-                    notes = notes,
-                    source = if (quickWizard) Sources.QuickWizard else Sources.WizardDialog,
-                    onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
-                )
-            }
-        }))
-    }
-
     fun explainShort(): String {
         var message = rh.gs(app.aaps.core.ui.R.string.wizard_explain_calc, ic, sens)
         message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_carbs, insulinFromCarbs)
@@ -523,81 +470,6 @@ class BolusWizard @Inject constructor(
         return message
     }
 
-    @SuppressLint("CheckResult")
-    private suspend fun commonProcessing(quickWizardEntry: QuickWizardEntry? = null) {
-        val profile = profileFunction.getProfile() ?: return
-
-        val confirmationLines = buildConfirmationLines(advisor = false, quickWizardEntry)
-        rxBus.send(EventShowDialog.OkCancel(title = rh.gs(app.aaps.core.ui.R.string.boluswizard), message = "", confirmationLines = confirmationLines, onOk = {
-            if (insulinAfterConstraints > 0 || carbs > 0) {
-                if (useSuperBolus) {
-                    // onOk fires on the UI thread. Loop.handleRunningModeChange is suspend, so we
-                    // hop off Main via appScope.launch. Writing the SUPER_BOLUS row is enough —
-                    // RunningModeReconciler observes the change and issues the zero-TBR.
-                    appScope.launch {
-                        if (loop.allowedNextModes().contains(RM.Mode.SUPER_BOLUS)) {
-                            loop.handleRunningModeChange(
-                                durationInMinutes = 2 * 60,
-                                profile = profile,
-                                newRM = RM.Mode.SUPER_BOLUS,
-                                action = Action.SUPERBOLUS_TBR,
-                                source = Sources.WizardDialog
-                            )
-                            rxBus.send(EventRefreshOverview("WizardDialog"))
-                        }
-                    }
-                }
-                val source = if (quickWizard) Sources.QuickWizard else Sources.WizardDialog
-                quickWizardEntry?.markAsUsed()
-                // Schedule carb timer before bolus delivery. Scheduling in the bolus completion callback
-                // fails when the screen is off because Android blocks startActivity() from the background.
-                if (useAlarm && carbs > 0 && carbTime > 0) {
-                    automation.scheduleTimeToEatReminder(T.mins(carbTime.toLong()).secs().toInt())
-                }
-                // Phone QuickWizard now rides the shared canonical executor entry point — one audited path
-                // to the pump, recorded identically to the wizard dialog and the watch (source aside).
-                appScope.launch {
-                    wizardBolusExecutor.deliverWizardBolus(
-                        insulin = insulinAfterConstraints,
-                        carbs = carbs,
-                        carbTimeMinutes = carbTime,
-                        mgdlGlucose = profileUtil.convertToMgdl(bg, profile.units),
-                        bolusCalculatorResult = createBolusCalculatorResult(),
-                        notes = notes,
-                        source = source,
-                        onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
-                    )
-                }
-            }
-            if (quickWizardEntry != null) {
-                scheduleECarbsFromQuickWizard(quickWizardEntry)
-            }
-        }))
-    }
-
-    private fun scheduleECarbsFromQuickWizard(quickWizardEntry: QuickWizardEntry) {
-        val eCarbsYesNo = JsonHelper.safeGetInt(quickWizardEntry.storage, "useEcarbs", QuickWizardEntry.NO)
-        if (eCarbsYesNo == QuickWizardEntry.YES) {
-            val timeOffset = JsonHelper.safeGetInt(quickWizardEntry.storage, "time", 0)
-            val duration = JsonHelper.safeGetInt(quickWizardEntry.storage, "duration", 0)
-            val carbs2 = JsonHelper.safeGetInt(quickWizardEntry.storage, "carbs2", 0)
-
-            val currentTime = Calendar.getInstance().timeInMillis
-            val eventTime: Long = currentTime + (timeOffset * 60000)
-
-            if (carbs2 > 0) {
-                val buttonText = quickWizardEntry.storage.get("buttonText").toString()
-                // eCarbs delivery now rides the shared executor (one audited path).
-                appScope.launch {
-                    wizardBolusExecutor.deliverECarbs(carbs2, eventTime, duration, timeOffset, buttonText, Sources.QuickWizard, onError = { comment ->
-                        uiInteraction.runAlarm(comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
-                    })
-                }
-            }
-
-        }
-    }
-
     private fun calcPercentageWithConstraints() {
         calculatedPercentage = 100
         if (totalBeforePercentageAdjustment != insulinFromCorrection)
@@ -616,8 +488,9 @@ class BolusWizard @Inject constructor(
     // --- Compose-friendly methods (no Context/attrs dependency) ---
 
     /**
-     * Pure logic check whether bolus advisor should be offered.
-     * Extracted from confirmAndExecute() line 399.
+     * Pure-logic SSOT for whether the high-BG bolus advisor ("correct now, eat later?") should be offered:
+     * the pref is on, BG > 180 mg/dL, carbs are present, and the carb time isn't in the past. Used by the
+     * wizard-dialog / quick-wizard prepare path on both master and client.
      */
     fun needsBolusAdvisor(): Boolean =
         preferences.get(BooleanKey.OverviewUseBolusAdvisor) &&
