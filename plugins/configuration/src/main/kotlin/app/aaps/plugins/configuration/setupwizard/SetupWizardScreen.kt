@@ -133,17 +133,25 @@ fun SetupWizardScreen(
         visibleScreens.indexOf(currentScreen).coerceAtLeast(0)
     }
 
-    // Navigate over the precomputed visible list so we never re-invoke visibility (and its I/O) here.
+    // Scan from the current page using the precomputed visible set (instead of re-invoking
+    // visibility() and its I/O). Preserves the original forward/backward semantics: skip hidden
+    // screens, and stay on the current page when there is no visible screen in that direction.
     fun nextPage(): Int {
-        val idx = visibleScreens.indexOf(screens.getOrNull(currentPage))
-        val next = if (idx >= 0) visibleScreens.getOrNull(idx + 1) else visibleScreens.firstOrNull()
-        return next?.let { screens.indexOf(it) } ?: currentPage
+        var page = currentPage + 1
+        while (page < screens.size) {
+            if (screens[page] in visibleScreens) return page
+            page++
+        }
+        return currentPage
     }
 
     fun previousPage(): Int {
-        val idx = visibleScreens.indexOf(screens.getOrNull(currentPage))
-        val prev = if (idx >= 0) visibleScreens.getOrNull(idx - 1) else null
-        return prev?.let { screens.indexOf(it) } ?: currentPage
+        var page = currentPage - 1
+        while (page >= 0) {
+            if (screens[page] in visibleScreens) return page
+            page--
+        }
+        return currentPage
     }
 
     val currentScreen = screens.getOrNull(currentPage)
