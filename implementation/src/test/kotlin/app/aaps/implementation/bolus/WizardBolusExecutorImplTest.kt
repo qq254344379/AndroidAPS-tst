@@ -2,14 +2,18 @@ package app.aaps.implementation.bolus
 
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
+import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.TE
+import app.aaps.core.data.model.TT
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.constraints.Constraint
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
@@ -54,9 +58,21 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
     private fun create() = WizardBolusExecutorImpl(
         aapsLogger, rh, quickWizard, bolusWizardProvider, profileFunction, iobCobCalculator, constraintsChecker, activePlugin,
-        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, automation,
+        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation,
         CoroutineScope(Dispatchers.Unconfined)
     )
+
+    // The base mocks ConstraintsChecker without a default answer; the FIXED/batch cap path needs a passthrough.
+    private fun stubPassthroughConstraints() {
+        whenever(constraintsChecker.applyBolusConstraints(any())).thenAnswer { it.getArgument<Constraint<Double>>(0) }
+        whenever(constraintsChecker.applyCarbsConstraints(any())).thenAnswer { it.getArgument<Constraint<Int>>(0) }
+        // The merged-confirmation line builders (prepareBatch) call rh.gs(...) + getUnits() heavily; the @Mock rh /
+        // profileFunction return null by default → NPE in ConfirmationLine / ProfileUtil. Stub them to non-null.
+        whenever(rh.gs(any<Int>())).thenReturn("s")
+        whenever(rh.gs(any<Int>(), anyOrNull())).thenReturn("s")
+        whenever(rh.gs(any<Int>(), anyOrNull(), anyOrNull())).thenReturn("s")
+        whenever(profileFunction.getUnits()).thenReturn(GlucoseUnit.MGDL)
+    }
 
     @Test
     fun deliverWizardBolus_recordsCanonicalBolusWizardAndPersistsBcrOnce() = runTest {
@@ -217,16 +233,60 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
         whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
         val executor = create()
-        executor.setPending(insulin = 1.0, carbs = 0, bolusCalculatorResult = null, bolusId = 100L)
+        // bolusId is a timestamp; use realistic recent ids so evictStalePending's TTL window keeps them parked.
+        executor.setPending(insulin = 1.0, carbs = 0, bolusCalculatorResult = null, bolusId = now)
         // A second actor's prepare (different bolusId) must NOT clobber the first — per-id slots, not one shared var.
-        executor.setPending(insulin = 2.0, carbs = 0, bolusCalculatorResult = null, bolusId = 200L)
+        executor.setPending(insulin = 2.0, carbs = 0, bolusCalculatorResult = null, bolusId = now - 1000)
 
         // The first parked dose still delivers (not overwritten), and a re-sent commit of it finds the slot drained.
-        assertThat(executor.confirm(100L, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
-        assertThat(executor.confirm(100L, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.NoPending)
+        assertThat(executor.confirm(now, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        assertThat(executor.confirm(now, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.NoPending)
         // The second parked dose is intact and delivers on its own commit.
-        assertThat(executor.confirm(200L, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        assertThat(executor.confirm(now - 1000, Sources.NSClient, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
         verify(commandQueue, times(2)).bolus(anyOrNull())
+    }
+
+    // ---- prepareBatch() → confirm(): the two-step multi-action transaction (decision-B ordering) ----
+
+    @Test
+    fun prepareBatch_raisingTtFirstThenBolus_bothAppliedOnConfirm() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
+        stubPassthroughConstraints()
+        val executor = create()
+        val actions = listOf(
+            BatchAction.TempTarget(reason = TT.Reason.HYPOGLYCEMIA.text, lowMgdl = 120.0, highMgdl = 120.0, durationMinutes = 60, startOffsetMinutes = 0),
+            BatchAction.Bolus(insulin = 1.0, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null)
+        )
+
+        val prepared = executor.prepareBatch(actions) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(persistenceLayer).insertAndCancelCurrentTemporaryTarget(any(), any(), any(), anyOrNull(), any()) // target-raising TT applied unconditionally
+        verify(commandQueue).bolus(anyOrNull()) // bolus delivered
+    }
+
+    @Test
+    fun prepareBatch_eatingSoonTtSkipped_whenBolusRejectedAtCommit() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null) // prepare passes the gate
+        stubPassthroughConstraints()
+        val executor = create()
+        val actions = listOf(
+            BatchAction.TempTarget(reason = TT.Reason.EATING_SOON.text, lowMgdl = 90.0, highMgdl = 90.0, durationMinutes = 30, startOffsetMinutes = 0),
+            BatchAction.Bolus(insulin = 2.0, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null)
+        )
+        val prepared = executor.prepareBatch(actions) as WizardBolusExecutor.PrepareResult.Preview
+
+        // The loop suspends between prepare and commit → the bolus is mode-rejected at delivery.
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn("loop suspended")
+        var err: String? = null
+        executor.confirm(prepared.bolusId, Sources.NSClient, { err = it })
+
+        assertThat(err).isNotNull()
+        // Decision B: a target-LOWERING eating-soon TT is NOT applied when the bolus fails (else the loop chases the low).
+        verify(persistenceLayer, never()).insertAndCancelCurrentTemporaryTarget(any(), any(), any(), anyOrNull(), any())
+        verify(commandQueue, never()).bolus(anyOrNull())
     }
 
     @Test

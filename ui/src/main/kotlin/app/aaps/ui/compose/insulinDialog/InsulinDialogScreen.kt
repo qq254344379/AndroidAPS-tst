@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.data.model.ICfg
+import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.DateTimeSection
 import app.aaps.core.ui.compose.NumberInputRow
@@ -93,7 +94,8 @@ fun InsulinDialogScreen(
     val cob by cobUiState.collectAsStateWithLifecycle()
 
     // Dialog states
-    var showConfirmation by rememberSaveable { mutableStateOf(false) }
+    // The master's prepared confirmation (bolusId + its merged lines), set via the ShowConfirmation side effect.
+    var confirmation by remember { mutableStateOf<Pair<Long, List<ConfirmationLine>>?>(null) }
     var showNoAction by rememberSaveable { mutableStateOf(false) }
 
     // Observe side effects
@@ -107,6 +109,10 @@ fun InsulinDialogScreen(
                 is InsulinDialogViewModel.SideEffect.ShowNoActionDialog -> {
                     showNoAction = true
                 }
+
+                is InsulinDialogViewModel.SideEffect.ShowConfirmation -> {
+                    confirmation = effect.bolusId to effect.lines
+                }
             }
         }
     }
@@ -114,22 +120,18 @@ fun InsulinDialogScreen(
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
     var showButtonSettings by rememberSaveable { mutableStateOf(false) }
 
-    // Confirmation dialog
-    if (showConfirmation) {
-        if (!viewModel.hasAction()) {
-            showConfirmation = false
-            showNoAction = true
-        } else {
-            ElementConfirmationDialog(
-                elementType = ElementType.INSULIN,
-                lines = viewModel.buildConfirmationSummary(),
-                onConfirm = {
-                    viewModel.confirmAndSave()
-                    onNavigateBack()
-                },
-                onDismiss = { showConfirmation = false }
-            )
-        }
+    // Confirmation dialog — renders the MASTER's prepared lines (set via the ShowConfirmation side effect after prepare()).
+    confirmation?.let { (bolusId, lines) ->
+        ElementConfirmationDialog(
+            elementType = ElementType.INSULIN,
+            lines = lines,
+            onConfirm = {
+                viewModel.commit(bolusId)
+                confirmation = null
+                onNavigateBack()
+            },
+            onDismiss = { confirmation = null }
+        )
     }
 
     // No action dialog
@@ -192,7 +194,7 @@ fun InsulinDialogScreen(
             { showButtonSettings = true }
         },
         onNavigateBack = onNavigateBack,
-        onConfirmClick = { showConfirmation = true },
+        onConfirmClick = { viewModel.prepareAndConfirm() },
         onInsulinTypeSelect = viewModel::selectInsulinType
     )
 }

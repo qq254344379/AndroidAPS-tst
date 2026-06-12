@@ -15,9 +15,12 @@ import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
+import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
+import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -61,7 +64,6 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.toStringFull
-import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
@@ -114,6 +116,7 @@ class MainViewModel @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val quickLaunchResolver: QuickLaunchResolver,
     private val wizardBolusExecutor: WizardBolusExecutor,
+    private val batchExecutor: BatchExecutor,
     private val uiInteraction: UiInteraction,
     private val uel: UserEntryLogger,
     private val loop: Loop,
@@ -442,7 +445,7 @@ class MainViewModel @Inject constructor(
             when (entry.mode()) {
                 QuickWizardMode.WIZARD  -> if (config.AAPSCLIENT) executeRemoteQuickWizard(entry, guid) else executeQuickWizardMode(entry, guid)
                 QuickWizardMode.INSULIN -> executeInsulinMode(entry)
-                QuickWizardMode.CARBS   -> if (config.AAPSCLIENT) executeRemoteCarbs(entry) else executeCarbsMode(entry)
+                QuickWizardMode.CARBS   -> executeCarbsMode(entry)
             }
         }
     }
@@ -513,89 +516,50 @@ class MainViewModel @Inject constructor(
     private fun runDeliveryAlarm(comment: String) =
         uiInteraction.runAlarm(comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
 
-    private suspend fun executeInsulinMode(entry: QuickWizardEntry) {
-        val pump = activePlugin.activePump
-        if (!pump.isInitialized() || pump.isSuspended()) return
-
-        val insulin = entry.insulin()
-        val insulinAfterConstraints = constraintChecker.applyBolusConstraints(
-            ConstraintObject(insulin, aapsLogger)
-        ).value()
-        if (insulinAfterConstraints <= 0.0) return
-        if (runningModeGuard.checkWithSnackbar(PumpCommandGate.CommandKind.BOLUS)) return
-
-        val message = buildString {
-            append(rh.gs(app.aaps.core.ui.R.string.bolus) + ": ")
-            append(rh.gs(app.aaps.core.ui.R.string.format_insulin_units, insulinAfterConstraints))
-            if (abs(insulinAfterConstraints - insulin) > pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)) {
-                append("<br/>")
-                append(rh.gs(app.aaps.core.ui.R.string.bolus_constraint_applied_warn, insulin, insulinAfterConstraints))
-            }
-        }
-
-        rxBus.send(
-            EventShowDialog.OkCancel(
-                title = entry.buttonText(),
-                message = message,
-                onOk = {
-                    // Fixed-amount correction insulin now rides the shared executor (one audited path).
-                    wizardBolusExecutor.deliverInsulin(
-                        insulin = insulinAfterConstraints,
-                        note = entry.buttonText(),
-                        source = Sources.QuickWizard,
-                        onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
-                    )
-                    entry.markAsUsed()
-                }
-            )
-        )
-    }
-
     /**
-     * Client (AAPSCLIENT) QuickWizard CARBS: route the fixed carbs to the master (SSOT) via the same signed
-     * FixedBolusPrepare/commit the Carbs dialog uses — instant carbs (no offset/duration). The master records them
-     * and they sync back; nothing is recorded on the client (no bypass of the master prepare/commit spine).
+     * Prepare→confirm→commit for a FIXED QuickWizard batch (INSULIN or CARBS). Role-transparent via [BatchExecutor]:
+     * client → signed round-trip, master → local. The MASTER caps + builds the confirmation; the user confirms the
+     * master's exact lines (the contract), then commits. INSULIN now has the client route it previously lacked.
      */
-    private suspend fun executeRemoteCarbs(entry: QuickWizardEntry) {
-        val carbs = entry.carbs()
-        if (carbs <= 0) return
-        val label = rh.gs(app.aaps.core.ui.R.string.carbs)
-        val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.FixedBolusPrepare(0.0, carbs, 0, 0, entry.buttonText()), label)
-        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
-        rxBus.send(
-            EventShowDialog.OkCancel(
-                title = entry.buttonText(), message = "", confirmationLines = prepared.lines,
-                onOk = {
-                    appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, false), label) }
-                    entry.markAsUsed()
-                }
-            )
+    private suspend fun executeFixedBatch(entry: QuickWizardEntry, actions: List<BatchAction>, label: String) {
+        when (val prepared = batchExecutor.prepare(actions, Sources.QuickWizard, label)) {
+            is ActionProgress.Prepared ->
+                rxBus.send(
+                    EventShowDialog.OkCancel(
+                        title = entry.buttonText(), message = "", confirmationLines = prepared.lines,
+                        onOk = {
+                            appScope.launch { batchExecutor.commit(prepared.bolusId, Sources.QuickWizard, label) }
+                            entry.markAsUsed()
+                        }
+                    )
+                )
+            // A master-local failure (no modal) or a client offline pre-check surfaces here; a client round-trip failure already showed on the app modal.
+            is ActionProgress.Rejected ->
+                if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                    rxBus.send(EventShowDialog.Ok(title = entry.buttonText(), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+
+            else                       -> Unit // Unconfirmed → app modal
+        }
+    }
+
+    private suspend fun executeInsulinMode(entry: QuickWizardEntry) {
+        val insulin = entry.insulin()
+        if (insulin <= 0.0) return
+        // Raw amount → the master caps + gates; no dose leaves a client.
+        executeFixedBatch(
+            entry,
+            listOf(BatchAction.Bolus(insulin = insulin, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null)),
+            rh.gs(app.aaps.core.ui.R.string.bolus)
         )
     }
 
-    private fun executeCarbsMode(entry: QuickWizardEntry) {
+    private suspend fun executeCarbsMode(entry: QuickWizardEntry) {
         val carbs = entry.carbs()
         if (carbs <= 0) return
-
-        val message = buildString {
-            append(rh.gs(app.aaps.core.ui.R.string.carbs) + ": ${carbs}g")
-        }
-
-        rxBus.send(
-            EventShowDialog.OkCancel(
-                title = entry.buttonText(),
-                message = message,
-                onOk = {
-                    // Instant carbs now ride the shared executor (one audited path).
-                    wizardBolusExecutor.deliverCarbs(
-                        carbs = carbs,
-                        note = entry.buttonText(),
-                        source = Sources.QuickWizard,
-                        onError = { uiInteraction.runAlarm(it, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror) }
-                    )
-                    entry.markAsUsed()
-                }
-            )
+        executeFixedBatch(
+            entry,
+            listOf(BatchAction.Bolus(insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null)),
+            rh.gs(app.aaps.core.ui.R.string.carbs)
         )
     }
 

@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.banner.WarningBanner
@@ -68,7 +70,8 @@ fun TreatmentDialogScreen(
     val cob by cobUiState.collectAsStateWithLifecycle()
 
     // Dialog states
-    var showConfirmation by rememberSaveable { mutableStateOf(false) }
+    // The master's prepared confirmation (bolusId + its merged lines), set via the ShowConfirmation side effect.
+    var confirmation by remember { mutableStateOf<Pair<Long, List<ConfirmationLine>>?>(null) }
     var showNoAction by rememberSaveable { mutableStateOf(false) }
 
     // Observe side effects
@@ -82,26 +85,26 @@ fun TreatmentDialogScreen(
                 is TreatmentDialogViewModel.SideEffect.ShowNoActionDialog -> {
                     showNoAction = true
                 }
+
+                is TreatmentDialogViewModel.SideEffect.ShowConfirmation -> {
+                    confirmation = effect.bolusId to effect.lines
+                }
             }
         }
     }
 
-    // Confirmation dialog
-    if (showConfirmation) {
-        if (!viewModel.hasAction()) {
-            showConfirmation = false
-            showNoAction = true
-        } else {
-            ElementConfirmationDialog(
-                elementType = ElementType.TREATMENT,
-                lines = viewModel.buildConfirmationSummary(),
-                onConfirm = {
-                    viewModel.confirmAndSave()
-                    onNavigateBack()
-                },
-                onDismiss = { showConfirmation = false }
-            )
-        }
+    // Confirmation dialog — renders the MASTER's prepared lines (set via the ShowConfirmation side effect after prepare()).
+    confirmation?.let { (bolusId, lines) ->
+        ElementConfirmationDialog(
+            elementType = ElementType.TREATMENT,
+            lines = lines,
+            onConfirm = {
+                viewModel.commit(bolusId)
+                confirmation = null
+                onNavigateBack()
+            },
+            onDismiss = { confirmation = null }
+        )
     }
 
     // No action dialog
@@ -123,7 +126,7 @@ fun TreatmentDialogScreen(
         onInsulinChange = { viewModel.updateInsulin(it) },
         onCarbsChange = { viewModel.updateCarbs(it.toInt()) },
         onNavigateBack = onNavigateBack,
-        onConfirmClick = { showConfirmation = true }
+        onConfirmClick = { viewModel.prepareAndConfirm() }
     )
 }
 

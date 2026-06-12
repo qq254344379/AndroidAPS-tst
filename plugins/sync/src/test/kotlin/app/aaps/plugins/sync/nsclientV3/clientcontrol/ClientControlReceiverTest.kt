@@ -27,6 +27,7 @@ import app.aaps.core.keys.interfaces.BooleanNonPreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.BatchActionDto
 import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
@@ -611,46 +612,29 @@ internal class ClientControlReceiverTest {
     }
 
     @Test
-    fun fixedBolusPrepareAcksOkWithSignedPreviewPayload() = runTest {
+    fun batchPrepareAcksOkWithSignedPreviewPayload() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        whenever(wizardBolusExecutor.prepareFixedBolus(any(), any(), any(), any(), any())).thenReturn(
+        whenever(wizardBolusExecutor.prepareBatch(any())).thenReturn(
             WizardBolusExecutor.PrepareResult.Preview(
-                insulin = 1.0, carbs = 0, explanation = "", bolusId = 88L,
-                lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "1 U")),
+                insulin = 1.5, carbs = 0, explanation = "", bolusId = 99L,
+                lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "1.5 U")),
                 advisorApplies = false, advisorLines = emptyList()
             )
         )
         val acks = captureAcks(clientId)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}fixed_bolus_prepare_$clientId"
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}batch_prepare_$clientId"
 
         sut.onSettingsDocChanged(
             identifier,
-            wrap(envelope(clientId, secret, message = ClientControlMessage.FixedBolusPrepare(insulin = 1.0, carbs = 0, notes = ""), counter = 5L, wantsAck = true))
+            wrap(envelope(clientId, secret, message = ClientControlMessage.BatchPrepare(listOf(BatchActionDto(type = BatchActionDto.TYPE_BOLUS, insulin = 1.5))), counter = 5L, wantsAck = true))
         )
 
         val done = acks.last()
         assertThat(done.status.name).isEqualTo("Ok")
         val preview = Json.decodeFromString<BolusPreview>(done.payload!!)
-        assertThat(preview.bolusId).isEqualTo(88L)
-        assertThat(preview.lines.single().text).isEqualTo("1 U")
-    }
-
-    @Test
-    fun recordTreatmentRecordsOnMasterAndAcksOk() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val acks = captureAcks(clientId)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}record_treatment_$clientId"
-
-        sut.onSettingsDocChanged(
-            identifier,
-            wrap(envelope(clientId, secret, message = ClientControlMessage.RecordTreatment(insulin = 2.0, notes = "pen", timestamp = now, iCfgJson = iCfgJson("rapid")), counter = 5L, wantsAck = true))
-        )
-
-        assertThat(acks.last().status.name).isEqualTo("Ok")
-        // Master stored it record-only (no pump): deliverInsulin(recordOnly = true).
-        verify(wizardBolusExecutor).deliverInsulin(eq(2.0), any(), any(), any(), any(), any(), eq(true), any(), any())
+        assertThat(preview.bolusId).isEqualTo(99L)
+        assertThat(preview.lines.single().text).isEqualTo("1.5 U")
     }
 
     @Test

@@ -168,33 +168,15 @@ sealed class ClientControlMessage {
     ) : ClientControlMessage()
 
     /**
-     * Client asks the master to PREPARE a FIXED-amount bolus/carbs (Insulin / Treatment / Carbs dialogs): the master
-     * constraint-caps the amounts (no recompute — they are the user's fixed values), derives the event type, parks,
-     * and returns the confirmation in the signed ack. [insulin] or [carbs] may be 0 (carbs-only / insulin-only).
+     * Client asks the master to PREPARE a multi-action batch (≤1 FIXED bolus/carbs + ≤1 temp target): the master caps
+     * the delivery (a record-only is kept as given), builds the MERGED confirmation lines for the whole batch, parks,
+     * and returns the preview in the signed ack. TWO-STEP — a [BolusCommit] follows and applies the bundle (the TT per
+     * the ordering rule). The replacement for the one-step [BatchApply].
      */
     @Serializable
-    @SerialName("fixed_bolus_prepare")
-    data class FixedBolusPrepare(
-        val insulin: Double,
-        val carbs: Int,
-        val carbsTimeOffsetMinutes: Int = 0,
-        val carbsDurationHours: Int = 0,
-        val notes: String
-    ) : ClientControlMessage()
-
-    /**
-     * Client asks the master to STORE (record-only — no pump) a treatment it gave outside AAPS (e.g. a pen bolus).
-     * Fire-and-ack, NOT prepare→confirm: there's nothing for the master to recompute/cap (a record must not be
-     * altered) and the client already confirmed. The master persists it immediately so its loop accounts for the
-     * insulin at once, then it syncs back to the client (master = SSOT). [iCfgJson] = the logged insulin's config.
-     */
-    @Serializable
-    @SerialName("record_treatment")
-    data class RecordTreatment(
-        val insulin: Double,
-        val notes: String,
-        val timestamp: Long,
-        val iCfgJson: String
+    @SerialName("batch_prepare")
+    data class BatchPrepare(
+        val actions: List<BatchActionDto>
     ) : ClientControlMessage()
 }
 
@@ -204,3 +186,34 @@ data class PrefEntry(
     val value: String,
     val lastModified: Long
 )
+
+/**
+ * One action on the wire for [ClientControlMessage.BatchPrepare] — a flat, type-tagged union (avoids polymorphic
+ * serializer setup). [type] selects which fields are meaningful (`bolus` vs `temp_target`).
+ */
+@Serializable
+data class BatchActionDto(
+    val type: String,
+    // bolus
+    val insulin: Double = 0.0,
+    val carbs: Int = 0,
+    val carbsTimeOffsetMinutes: Int = 0,
+    val carbsDurationHours: Int = 0,
+    val recordOnly: Boolean = false,
+    val notes: String = "",
+    val timestamp: Long = 0L,
+    val iCfgJson: String? = null,
+    // temp_target
+    val reason: String? = null,
+    val lowMgdl: Double = 0.0,
+    val highMgdl: Double = 0.0,
+    val durationMinutes: Int = 0,
+    val startOffsetMinutes: Int = 0
+) {
+
+    companion object {
+
+        const val TYPE_BOLUS = "bolus"
+        const val TYPE_TEMP_TARGET = "temp_target"
+    }
+}

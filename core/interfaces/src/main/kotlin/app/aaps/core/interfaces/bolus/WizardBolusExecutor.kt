@@ -44,11 +44,13 @@ interface WizardBolusExecutor {
     suspend fun prepareWizard(inputs: WizardInputs): PrepareResult
 
     /**
-     * Fixed-amount prepare (Insulin / Treatment / Carbs dialogs): constraint-cap [insulin] + [carbs] (no recompute
-     * — they are the user's fixed values), derive the event type, park, and return the [PrepareResult.Preview].
-     * Delivered via [confirm] like the wizard prepares. [insulin] or [carbs] may be 0 (insulin-only / carbs-only).
+     * Multi-action prepare (the unified Insulin / Carbs / Treatment path): cap a FIXED bolus/carbs (or keep a
+     * record-only as given, uncapped), build the MERGED confirmation lines for the WHOLE batch (bolus + carbs + TT)
+     * — the master is the sole author the client renders — park the bundle, and return the [PrepareResult.Preview].
+     * [confirm] then delivers + applies the TT in decision-B order (raising TT first, bolus, lowering TT only if
+     * accepted). At most one [BatchAction.Bolus] and one [BatchAction.TempTarget].
      */
-    suspend fun prepareFixedBolus(insulin: Double, carbs: Int, carbsTimeOffsetMinutes: Int, carbsDurationHours: Int, notes: String): PrepareResult
+    suspend fun prepareBatch(actions: List<BatchAction>): PrepareResult
 
     /**
      * Drain the slot, verify [bolusId] matches the parked bolus, and deliver. Idempotent: a second
@@ -132,6 +134,7 @@ interface WizardBolusExecutor {
         eventType: TE.Type? = null,
         recordOnly: Boolean = false,
         iCfg: ICfg? = null,
+        timestamp: Long? = null,
         onSuccess: () -> Unit = {}
     )
 

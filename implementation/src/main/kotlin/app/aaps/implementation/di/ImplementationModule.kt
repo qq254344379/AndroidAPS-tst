@@ -3,6 +3,7 @@ package app.aaps.implementation.di
 import app.aaps.core.interfaces.alerts.LocalAlertUtils
 import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.AutosensData
+import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.insulin.Insulin
@@ -55,6 +56,7 @@ import app.aaps.implementation.alerts.LocalAlertUtilsImpl
 import app.aaps.implementation.androidNotification.AlarmSoundPlayerImpl
 import app.aaps.implementation.androidNotification.NotificationHolderImpl
 import app.aaps.implementation.aps.DetermineBasalResult
+import app.aaps.implementation.bolus.BatchExecutorImpl
 import app.aaps.implementation.db.ProcessedTbrEbDataImpl
 import app.aaps.implementation.insulin.ConcentrationHelperImpl
 import app.aaps.implementation.insulin.InsulinActionsImpl
@@ -142,6 +144,7 @@ class ImplementationModule {
         @Binds fun bindInsulinManager(insulinImpl: InsulinImpl): InsulinManager
         @Binds fun bindInsulinActions(impl: InsulinActionsImpl): InsulinActions
         @Binds fun bindTempTargetActions(impl: TempTargetActionsImpl): TempTargetActions
+        @Binds fun bindBatchExecutor(impl: BatchExecutorImpl): BatchExecutor
         @Binds fun bindConcentrationHelper(concentrationHelperImpl: ConcentrationHelperImpl): ConcentrationHelper
         @Binds fun bindDetailedBolusInfoStorage(detailedBolusInfoStorageImpl: DetailedBolusInfoStorageImpl): DetailedBolusInfoStorage
         @Binds fun bindTemporaryBasalStorage(temporaryBasalStorageImpl: TemporaryBasalStorageImpl): TemporaryBasalStorage

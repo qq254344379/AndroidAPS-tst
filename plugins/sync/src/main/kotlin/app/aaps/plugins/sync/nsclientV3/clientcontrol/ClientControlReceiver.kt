@@ -227,8 +227,7 @@ class ClientControlReceiver @Inject constructor(
             is ClientControlMessage.BolusPrepare      -> onVerifiedBolusPrepare(entry, envelope, message, now)
             is ClientControlMessage.BolusCommit       -> onVerifiedBolusCommit(entry, envelope, message, now)
             is ClientControlMessage.WizardPrepare     -> onVerifiedWizardPrepare(entry, envelope, message, now)
-            is ClientControlMessage.FixedBolusPrepare -> onVerifiedFixedBolusPrepare(entry, envelope, message, now)
-            is ClientControlMessage.RecordTreatment   -> onVerifiedRecordTreatment(entry, envelope, message, now)
+            is ClientControlMessage.BatchPrepare      -> onVerifiedBatchPrepare(entry, envelope, message, now)
         }
         if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, outcome.payload, now)
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -432,14 +431,16 @@ class ClientControlReceiver @Inject constructor(
     }
 
     /**
-     * Client asked to PREPARE a FIXED-amount bolus/carbs (Insulin / Treatment / Carbs): the master caps the amounts
-     * (no recompute), parks, and returns its confirmation in the signed payload (same commit path). Nothing delivered yet.
+     * Client asked to PREPARE a multi-action batch: cap the delivery (a record-only is kept as given), build the
+     * MERGED confirmation lines, park the bundle, and return the preview in the SIGNED payload (same `BolusPreview` +
+     * commit path as the other prepares). Nothing delivered yet; a `BolusCommit` applies it (TT per the ordering rule).
      */
-    private suspend fun onVerifiedFixedBolusPrepare(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.FixedBolusPrepare, now: Long): AckOutcome {
+    private suspend fun onVerifiedBatchPrepare(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.BatchPrepare, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        return when (val result = wizardBolusExecutor.prepareFixedBolus(message.insulin, message.carbs, message.carbsTimeOffsetMinutes, message.carbsDurationHours, message.notes)) {
+        val actions = message.actions.mapNotNull { it.toDomain() }
+        return when (val result = wizardBolusExecutor.prepareBatch(actions)) {
             is WizardBolusExecutor.PrepareResult.Error   -> {
-                nsClientRepository.addLog("◄ CLIENTCTL", "fixed.prepare from ${entry.name}: ${result.message}")
+                nsClientRepository.addLog("◄ CLIENTCTL", "batch.prepare from ${entry.name}: ${result.message}")
                 AckOutcome(AckStatus.Failed, FailureReason.BolusComputeFailed.name, result.message)
             }
 
@@ -450,47 +451,10 @@ class ClientControlReceiver @Inject constructor(
                     advisorApplies = false,
                     advisorLines = emptyList()
                 )
-                nsClientRepository.addLog("◄ CLIENTCTL", "fixed.prepare from ${entry.name}: ${result.insulin}U ${result.carbs}g")
+                nsClientRepository.addLog("◄ CLIENTCTL", "batch.prepare from ${entry.name}: ${actions.size} action(s)")
                 AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
             }
         }
-    }
-
-    /**
-     * Client asked to STORE a record-only treatment it gave outside AAPS (a pen bolus): persist it on the master
-     * NOW (record-only — no pump command) with the logged insulin's config, so the master's loop accounts for the
-     * insulin at once. The master is the SSOT; the stored bolus syncs back to the client. Invalid iCfg → Failed.
-     */
-    private suspend fun onVerifiedRecordTreatment(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.RecordTreatment, now: Long): AckOutcome {
-        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        val iCfg = runCatching {
-            (Json.parseToJsonElement(message.iCfgJson) as? JsonObject)?.let { ICfg.fromJsonObject(it) }
-        }.getOrNull()
-        if (iCfg == null) {
-            nsClientRepository.addLog("◄ CLIENTCTL", "record.treatment from ${entry.name}: invalid iCfg JSON")
-            return AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
-        }
-        // Clamp the client-supplied treatment time: a future-dated record would add IOB for a bolus that (by its
-        // own timestamp) hasn't happened. Back-dating a pen bolus is the legit use case → allow generous past,
-        // reject the future beyond clock skew (and the absurd past).
-        if (message.timestamp > now + 5 * 60_000L || message.timestamp < now - 24 * 60 * 60_000L) {
-            nsClientRepository.addLog("◄ CLIENTCTL", "record.treatment from ${entry.name}: timestamp out of window")
-            return AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
-        }
-        var error: String? = null
-        wizardBolusExecutor.deliverInsulin(
-            insulin = message.insulin,
-            note = message.notes,
-            source = Sources.NSClient,
-            onError = { error = it },
-            timestamp = message.timestamp,
-            treatmentNote = message.notes,
-            recordOnly = true,
-            iCfg = iCfg
-        )
-        val err = error
-        nsClientRepository.addLog("◄ CLIENTCTL", "record.treatment from ${entry.name}: ${message.insulin}U" + if (err != null) " failed: $err" else " recorded")
-        return if (err != null) AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name, err) else AckOutcome(AckStatus.Ok, null)
     }
 
     /**

@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,6 +52,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.CarbTimeRow
 import app.aaps.core.ui.compose.NumberInputRow
@@ -89,6 +91,14 @@ fun CarbsDialogScreen(
     val iob by iobUiState.collectAsStateWithLifecycle()
     val cob by cobUiState.collectAsStateWithLifecycle()
 
+    // Dialog states (rememberSaveable to survive rotation)
+    var showNoAction by rememberSaveable { mutableStateOf(false) }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showButtonSettings by rememberSaveable { mutableStateOf(false) }
+    // The master's prepared confirmation (bolusId + its merged lines), set via the ShowConfirmation side effect.
+    var confirmation by remember { mutableStateOf<Pair<Long, List<ConfirmationLine>>?>(null) }
+
     // Observe side effects
     LaunchedEffect(Unit) {
         viewModel.sideEffect.collect { effect ->
@@ -98,35 +108,28 @@ fun CarbsDialogScreen(
                 }
 
                 is CarbsDialogViewModel.SideEffect.ShowNoActionDialog -> {
-                    // handled via showNoAction local state
+                    showNoAction = true
+                }
+
+                is CarbsDialogViewModel.SideEffect.ShowConfirmation -> {
+                    confirmation = effect.bolusId to effect.lines
                 }
             }
         }
     }
 
-    // Dialog states (rememberSaveable to survive rotation)
-    var showConfirmation by rememberSaveable { mutableStateOf(false) }
-    var showNoAction by rememberSaveable { mutableStateOf(false) }
-    var showDatePicker by rememberSaveable { mutableStateOf(false) }
-    var showTimePicker by rememberSaveable { mutableStateOf(false) }
-    var showButtonSettings by rememberSaveable { mutableStateOf(false) }
-
-    // Confirmation dialog
-    if (showConfirmation) {
-        if (!viewModel.hasAction()) {
-            showConfirmation = false
-            showNoAction = true
-        } else {
-            ElementConfirmationDialog(
-                elementType = ElementType.CARBS,
-                lines = viewModel.buildConfirmationSummary(),
-                onConfirm = {
-                    viewModel.confirmAndSave()
-                    onNavigateBack()
-                },
-                onDismiss = { showConfirmation = false }
-            )
-        }
+    // Confirmation dialog — renders the MASTER's prepared lines (set via the ShowConfirmation side effect after prepare()).
+    confirmation?.let { (bolusId, lines) ->
+        ElementConfirmationDialog(
+            elementType = ElementType.CARBS,
+            lines = lines,
+            onConfirm = {
+                viewModel.commit(bolusId)
+                confirmation = null
+                onNavigateBack()
+            },
+            onDismiss = { confirmation = null }
+        )
     }
 
     // No action dialog
@@ -191,7 +194,7 @@ fun CarbsDialogScreen(
             { showButtonSettings = true }
         },
         onNavigateBack = onNavigateBack,
-        onConfirmClick = { showConfirmation = true }
+        onConfirmClick = { viewModel.prepareAndConfirm() }
     )
 }
 

@@ -1,5 +1,6 @@
 package app.aaps.core.interfaces.clientcontrol
 
+import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,11 +93,8 @@ interface ClientControlActionDispatcher {
         /** Prepare a MANUAL bolus-wizard bolus on the master from raw [inputs] (master recomputes + returns the preview). */
         data class WizardPrepare(val inputs: WizardBolusExecutor.WizardInputs) : Command
 
-        /** Prepare a FIXED-amount bolus/carbs on the master ([insulin]/[carbs] capped, not recomputed; carbs may be delayed/extended). */
-        data class FixedBolusPrepare(val insulin: Double, val carbs: Int, val carbsTimeOffsetMinutes: Int, val carbsDurationHours: Int, val notes: String) : Command
-
-        /** Store a record-only treatment on the master (a pen bolus etc.) — fire-and-ack, no recompute/cap; master = SSOT. */
-        data class RecordTreatment(val insulin: Double, val notes: String, val timestamp: Long, val iCfgJson: String) : Command
+        /** PREPARE a multi-action batch on the master — TWO-STEP: master caps + returns the MERGED confirmation; commit via [BolusCommit]. */
+        data class BatchPrepare(val actions: List<BatchAction>) : Command
     }
 
     companion object {
