@@ -24,6 +24,8 @@ import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
@@ -73,6 +75,7 @@ class WizardBolusExecutorImpl @Inject constructor(
     private val decimalFormatter: DecimalFormatter,
     private val profileUtil: ProfileUtil,
     private val automation: Automation,
+    private val notificationManager: NotificationManager,
     @ApplicationScope private val appScope: CoroutineScope
 ) : WizardBolusExecutor {
 
@@ -653,9 +656,16 @@ class WizardBolusExecutorImpl @Inject constructor(
         uel.log(action = action, source = source, note = note, listValues = uelValues)
         appScope.launch {
             val result = commandQueue.bolus(detailedBolusInfo)
-            if (!result.success)
-                onError(rh.gs(R.string.treatmentdeliveryerror) + "\n" + result.comment)
-            else
+            if (!result.success) {
+                val errorText = rh.gs(R.string.treatmentdeliveryerror) + "\n" + result.comment
+                // Async delivery failure: the entry dialog is long gone, so surface it as an URGENT notification —
+                // the single, reliable master-side alarm for EVERY bolus path, regardless of which UI started it.
+                // SMB stays silent (the loop self-corrects next cycle). onError still fires so the initiating
+                // transport relays too (the watch's sendError today; a client's late ack in phase 1b).
+                if (detailedBolusInfo.bolusType != BS.Type.SMB)
+                    notificationManager.post(NotificationId.BOLUS_DELIVERY_FAILED, errorText, validMinutes = 0, soundRes = R.raw.boluserror)
+                onError(errorText)
+            } else
                 onSuccess()
         }
         bolusCalculatorResult?.let { persistenceLayer.insertOrUpdateBolusCalculatorResult(it) }

@@ -5,7 +5,12 @@ import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.notifications.NotificationAction
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationLevel
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.interfaces.NSAndroidClient
@@ -29,6 +34,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argThat
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
@@ -50,6 +56,8 @@ internal class ClientControlRoundTripTest {
     @Mock private lateinit var nsClientRepository: NSClientRepository
     @Mock private lateinit var config: Config
     @Mock private lateinit var dateUtil: DateUtil
+    @Mock private lateinit var notificationManager: NotificationManager
+    @Mock private lateinit var rh: ResourceHelper
     @Mock private lateinit var aapsLogger: AAPSLogger
 
     private val now = 1_700_000_000_000L
@@ -73,7 +81,18 @@ internal class ClientControlRoundTripTest {
         whenever(nsClientV3Plugin.masterReachable).thenReturn(reachable)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
         whenever(config.AAPSCLIENT).thenReturn(true)
-        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, aapsLogger)
+        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, aapsLogger)
+    }
+
+    @Test
+    fun onAckDoc_deliveryFailed_raisesUrgentAlarm() {
+        // A late Delivery/Failed ack (an async bolus failure the master relays after its Done ack) → URGENT alarm.
+        sut.onAckDoc(ackDoc(AckPhase.Delivery, AckStatus.Failed, reason = "ExecutionFailed"))
+
+        verify(notificationManager).post(
+            eq(NotificationId.BOLUS_DELIVERY_FAILED), any<String>(), any<NotificationLevel>(), any<Int>(),
+            anyOrNull<Int>(), any<List<NotificationAction>>(), anyOrNull<() -> Boolean>()
+        )
     }
 
     private suspend fun stubPublish(result: ClientControlSendResult, ctr: Long? = counter) {

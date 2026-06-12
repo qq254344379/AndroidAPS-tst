@@ -89,7 +89,7 @@ internal class PairingOfferFetcherTest {
         }
     }
 
-    private fun respond(vararg docs: JSONObject) {
+    private suspend fun respond(vararg docs: JSONObject) {
         whenever(nsAndroidClient.searchSettings(limit = 500)).thenReturn(
             NSAndroidClient.ReadResponse(code = 200, lastServerModified = null, values = docs.toList())
         )
@@ -103,7 +103,7 @@ internal class PairingOfferFetcherTest {
 
     @Test
     fun notAvailableWhenSearchFails() = runTest {
-        whenever(nsAndroidClient.searchSettings(limit = 500)).thenThrow(IOException("offline"))
+        whenever(nsAndroidClient.searchSettings(limit = 500)).thenAnswer { throw IOException("offline") }
         assertThat(sut.findOfferForPin("12345678")).isEqualTo(PairingOfferFetcher.Result.NotAvailable)
     }
 

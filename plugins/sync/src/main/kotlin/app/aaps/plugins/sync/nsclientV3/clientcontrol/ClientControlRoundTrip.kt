@@ -9,7 +9,10 @@ import app.aaps.core.interfaces.clientcontrol.PendingAction
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckEnvelope
@@ -64,6 +67,8 @@ class ClientControlRoundTrip @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val config: Config,
     private val dateUtil: DateUtil,
+    private val notificationManager: NotificationManager,
+    private val rh: ResourceHelper,
     private val aapsLogger: AAPSLogger
 ) : ClientControlActionDispatcher {
 
@@ -110,6 +115,18 @@ class ClientControlRoundTrip @Inject constructor(
         // for the next devicestatus heartbeat.
         nsClientV3Plugin.get().bumpMasterSignal(dateUtil.now())
         nsClientRepository.addLog("◄ CLIENTCTL", "ack ${ack.phase}/${ack.status} counter=${ack.commandCounter}" + (ack.reason?.let { " ($it)" } ?: ""))
+        // A late Delivery/Failed ack relays an async bolus failure the master only learned AFTER its Done ack —
+        // raise an URGENT alarm here. It is NOT a round-trip response (the commit already terminated), so it does
+        // not feed ackEvents; the master itself alarmed locally too (executor, phase 1a).
+        if (ack.phase == AckPhase.Delivery) {
+            if (ack.status == AckStatus.Failed)
+                notificationManager.post(
+                    NotificationId.BOLUS_DELIVERY_FAILED,
+                    rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror) + (ack.payload?.let { "\n$it" } ?: ""),
+                    validMinutes = 0, soundRes = app.aaps.core.ui.R.raw.boluserror
+                )
+            return
+        }
         ackEvents.tryEmit(ack)
     }
 
@@ -232,6 +249,7 @@ class ClientControlRoundTrip @Inject constructor(
                     when (ack.phase) {
                         AckPhase.Executing -> if (ack.status == AckStatus.Pending) send(ActionProgress.MasterExecuting)
                         AckPhase.Done      -> doneOutcome(ack)?.let { terminal.complete(it) }
+                        AckPhase.Delivery  -> Unit // late async-failure relay; handled out-of-band in onAckDoc, never emitted into ackEvents
                     }
                 }
             }

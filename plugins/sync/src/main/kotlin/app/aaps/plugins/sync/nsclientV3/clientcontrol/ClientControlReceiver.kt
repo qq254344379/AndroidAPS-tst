@@ -8,6 +8,7 @@ import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -38,11 +39,15 @@ import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -92,7 +97,8 @@ class ClientControlReceiver @Inject constructor(
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val persistenceLayer: PersistenceLayer,
     private val wizardBolusExecutor: WizardBolusExecutor,
-    private val aapsLogger: AAPSLogger
+    private val aapsLogger: AAPSLogger,
+    @ApplicationScope private val appScope: CoroutineScope
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -386,11 +392,23 @@ class ClientControlReceiver @Inject constructor(
      */
     private suspend fun onVerifiedBolusCommit(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.BolusCommit, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        var deliverError: String? = null
-        val result = wizardBolusExecutor.confirm(message.bolusId, Sources.NSClient, { deliverError = it }, message.asAdvisor)
+        // AtomicReference (not a plain captured var): the onError closure CAN, in the microscopic window between
+        // confirm() returning and syncDone.set(true), be invoked on the appScope thread — give the sync-path write a
+        // memory barrier so the read below can never miss it. (Same reason syncDone is an AtomicBoolean.)
+        val deliverError = AtomicReference<String?>(null)
+        // The onError closure fires BOTH synchronously (a mode-gate reject → feeds THIS command's Done ack) and later,
+        // asynchronously (the pump delivery failed — the outcome the Done ack couldn't wait for). After confirm() returns
+        // the synchronous phase is over, so any further failure is the async one: relay it as a late Delivery ack the
+        // client turns into its own alarm. (The master itself already alarms via the executor — phase 1a.)
+        val syncDone = AtomicBoolean(false)
+        val result = wizardBolusExecutor.confirm(message.bolusId, Sources.NSClient, { comment ->
+            if (syncDone.get()) appScope.launch { writeDeliveryFailureAck(entry, envelope.counter, comment) }
+            else deliverError.set(comment)
+        }, message.asAdvisor)
+        syncDone.set(true)
         val delivered = result is WizardBolusExecutor.ConfirmResult.Delivered
         nsClientRepository.addLog("◄ CLIENTCTL", "bolus.commit id=${message.bolusId}${if (message.asAdvisor) " advisor" else ""} from ${entry.name}: ${if (delivered) "delivered" else "no-pending"}")
-        val err = deliverError
+        val err = deliverError.get()
         return when {
             result is WizardBolusExecutor.ConfirmResult.NoPending -> AckOutcome(AckStatus.Failed, FailureReason.NoPendingBolus.name)
             err != null                                           -> AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name, err)
@@ -590,6 +608,18 @@ class ClientControlReceiver @Inject constructor(
         runCatching { client.updateSettings(identifier, doc) }
             .onSuccess { nsClientRepository.addLog("► CLIENTCTL", "ack $phase/$status counter=$commandCounter" + (reason?.let { " ($it)" } ?: "")) }
             .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl: ack write failed for $identifier: ${it.message}") }
+    }
+
+    /**
+     * Relay an ASYNC bolus delivery failure (the pump failed AFTER the Done ack already said "queued") to the
+     * initiating client as a late [AckPhase.Delivery]/[AckStatus.Failed] ack — the client turns it into an URGENT
+     * alarm. Re-resolves the client + secret since the async failure fires long after [verifyAndAck] returned;
+     * best-effort + exception-safe (writeAck swallows write failures). [comment] is the pump's error detail.
+     */
+    private suspend fun writeDeliveryFailureAck(entry: AuthorizedClient, commandCounter: Long, comment: String) {
+        val client = nsClientV3Plugin.get().nsAndroidClient ?: return
+        val secret = authorizedRepository.secretLookup(entry.clientId)?.secretBytes ?: return
+        writeAck(client, secret, entry.clientId, commandCounter, AckPhase.Delivery, AckStatus.Failed, FailureReason.ExecutionFailed.name, comment, dateUtil.now())
     }
 
     /** Result a command handler reports back so [verifyAndAck] can write the terminal Done ack. */

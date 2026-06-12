@@ -5,6 +5,7 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
@@ -25,6 +26,7 @@ import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
@@ -102,6 +104,7 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
     @Mock private lateinit var persistenceLayer: PersistenceLayer
     @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
+    @Mock private lateinit var notificationManager: NotificationManager
     @Mock private lateinit var rh: ResourceHelper
     private var masterAuthorizedClients = "[]"
     private var masterModified = 0L
@@ -162,13 +165,14 @@ class ClientControlUplinkIntegrationTest {
         // ---------- real components ----------
         clientPairingRepository = ClientPairingRepository(clientPrefs, secureEncrypt, aapsLogger)
         clientControlPublisher = ClientControlPublisher(clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
-        val clientControlRoundTrip = ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, clientConfig, dateUtil, aapsLogger)
+        val clientControlRoundTrip = ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, clientConfig, dateUtil, notificationManager, rh, aapsLogger)
         preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, rh, aapsLogger)
 
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, aapsLogger
+            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, aapsLogger,
+            CoroutineScope(Dispatchers.Unconfined)
         )
 
         // ---------- pairing: same secret on both sides ----------

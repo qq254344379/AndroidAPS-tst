@@ -11,6 +11,9 @@ import kotlinx.serialization.Serializable
  * (overwritten in place):
  * 1. [AckPhase.Executing] / [AckStatus.Pending] — written before dispatch: "received it, applying now".
  * 2. [AckPhase.Done] / [AckStatus.Ok] | [AckStatus.Failed] | [AckStatus.Expired] — the terminal result.
+ * 3. [AckPhase.Delivery] / [AckStatus.Failed] — OPTIONAL late relay: a bolus the Done ack reported as queue-accepted
+ *    ("Ok") that later FAILED on the pump (the async outcome the round-trip can't wait for). Written after Done, out
+ *    of band from the original round-trip; the client turns it into an alarm.
  *
  * [commandCounter] echoes the command envelope's `counter`, the correlation id the client matches
  * against its outstanding request (a stale ack from a previous command carries a different counter
@@ -37,6 +40,6 @@ data class AckEnvelope(
         "$clientId|$commandCounter|$phase|$status|${reason ?: ""}|${payload ?: ""}|$timestamp"
 }
 
-enum class AckPhase { Executing, Done }
+enum class AckPhase { Executing, Done, Delivery }
 
 enum class AckStatus { Pending, Ok, Failed, Expired }

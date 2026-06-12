@@ -16,6 +16,9 @@ import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.constraints.Constraint
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.notifications.NotificationAction
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.objects.runningMode.RunningModeGuard
@@ -58,7 +61,7 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
     private fun create() = WizardBolusExecutorImpl(
         aapsLogger, rh, quickWizard, bolusWizardProvider, profileFunction, iobCobCalculator, constraintsChecker, activePlugin,
-        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation,
+        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation, notificationManager,
         CoroutineScope(Dispatchers.Unconfined)
     )
 
@@ -326,6 +329,24 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
         assertThat(errorMsg).isNotNull()
         verify(automation, never()).scheduleAutomationEventEatReminder()
+    }
+
+    @Test
+    fun bolus_onCommandFailure_postsUrgentBolusFailedAlarm() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(false))
+        val executor = create()
+
+        executor.deliverWizardBolus(
+            insulin = 1.0, carbs = 0, carbTimeMinutes = 0, mgdlGlucose = null,
+            bolusCalculatorResult = null, notes = null, source = Sources.QuickWizard, onError = { }
+        )
+
+        // The async delivery failure raises the single URGENT alarm from the executor (not the now-gone dialog).
+        verify(notificationManager).post(
+            eq(NotificationId.BOLUS_DELIVERY_FAILED), any<String>(), any<NotificationLevel>(), any<Int>(),
+            anyOrNull<Int>(), any<List<NotificationAction>>(), anyOrNull<() -> Boolean>()
+        )
     }
 
     @Test

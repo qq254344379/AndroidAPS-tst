@@ -38,6 +38,8 @@ import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -128,7 +130,8 @@ internal class ClientControlReceiverTest {
             runningConfigurationPublisher,
             persistenceLayer,
             wizardBolusExecutor,
-            aapsLogger
+            aapsLogger,
+            CoroutineScope(Dispatchers.Unconfined)
         )
     }
 

@@ -1,6 +1,7 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import android.util.Base64
+import androidx.annotation.VisibleForTesting
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.utils.DateUtil
@@ -8,6 +9,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.PairingOffer
 import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.nssdk.utils.ClientControlPairingCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
@@ -44,6 +46,10 @@ class PairingOfferFetcher @Inject constructor(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    // The PBKDF2 unwrap loop runs off Main (see [findOfferForPin]). Injectable only so unit tests can
+    // pin it to the test thread; production always uses [Dispatchers.Default].
+    @VisibleForTesting internal var unwrapDispatcher: CoroutineDispatcher = Dispatchers.Default
+
     sealed class Result {
         data class Success(val payload: PairingPayload) : Result()
 
@@ -65,7 +71,7 @@ class PairingOfferFetcher @Inject constructor(
             return Result.NotAvailable
         }
         // Off Main: PBKDF2 is ~200ms per candidate offer; on Main this trips ANR with a few stale offers.
-        return withContext(Dispatchers.Default) {
+        return withContext(unwrapDispatcher) {
             val now = dateUtil.now()
             var scanned = 0
             var candidates = 0

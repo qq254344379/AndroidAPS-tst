@@ -463,7 +463,9 @@ class MainViewModel @Inject constructor(
             is WizardBolusExecutor.PrepareResult.Preview ->
                 confirmWizardBolus(entry, prep.advisorApplies, prep.lines, prep.advisorLines) { asAdvisor ->
                     appScope.launch {
-                        wizardBolusExecutor.confirm(prep.bolusId, Sources.QuickWizard, { runDeliveryAlarm(it) }, asAdvisor)
+                        // The async delivery failure is now alarmed once, centrally, from the executor (URGENT
+                        // notification) — so no local runAlarm here (it would double).
+                        wizardBolusExecutor.confirm(prep.bolusId, Sources.QuickWizard, { }, asAdvisor)
                     }
                 }
         }
@@ -512,9 +514,6 @@ class MainViewModel @Inject constructor(
         else
             showConfirm(normalLines, false)
     }
-
-    private fun runDeliveryAlarm(comment: String) =
-        uiInteraction.runAlarm(comment, rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror), app.aaps.core.ui.R.raw.boluserror)
 
     /**
      * Prepare→confirm→commit for a FIXED QuickWizard batch (INSULIN or CARBS). Role-transparent via [BatchExecutor]:
