@@ -4,10 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,11 +60,14 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val message = extras?.getString(DataLayerListenerServiceWear.KEY_MESSAGE, "") ?: ""
         actionKey = extras?.getString(DataLayerListenerServiceWear.KEY_ACTION_DATA, "") ?: ""
 
-        val insulin = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_INSULIN)) it.getDouble(DataLayerListenerServiceWear.KEY_INSULIN) else null }
-        val carbs = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_CARBS)) it.getInt(DataLayerListenerServiceWear.KEY_CARBS) else null }
-        val carbsTimeShift = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_CARBS_TIME_SHIFT)) it.getInt(DataLayerListenerServiceWear.KEY_CARBS_TIME_SHIFT) else null }
-        val duration = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_DURATION)) it.getInt(DataLayerListenerServiceWear.KEY_DURATION) else null }
-        val constraintApplied = extras?.getBoolean(DataLayerListenerServiceWear.KEY_CONSTRAINT_APPLIED, false) ?: false
+        // Master-authored confirmation rows (role name + text), rendered verbatim. Non-empty for bolus / eCarbs.
+        val lineRoles = extras?.getStringArray(DataLayerListenerServiceWear.KEY_LINE_ROLES)
+        val lineTexts = extras?.getStringArray(DataLayerListenerServiceWear.KEY_LINE_TEXTS)
+        val lines: List<Pair<String, String>> =
+            if (lineRoles != null && lineTexts != null && lineRoles.size == lineTexts.size)
+                lineRoles.indices.map { lineRoles[it] to lineTexts[it] }
+            else emptyList()
+
         val isError = extras?.getBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, false) ?: false
         val tempTargetLow = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_TEMP_TARGET_LOW)) it.getDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_LOW) else null }
         val tempTargetHigh = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_TEMP_TARGET_HIGH)) it.getDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_HIGH) else null }
@@ -88,7 +87,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val hasProfileData = profileName != null
         val hasRunningModeData = runningModeTitle != null
 
-        if (message.isEmpty() && insulin == null && carbs == null && !hasTempTargetData && !hasProfileData && !hasRunningModeData) {
+        if (message.isEmpty() && lines.isEmpty() && !hasTempTargetData && !hasProfileData && !hasRunningModeData) {
             finish()
             return
         }
@@ -96,22 +95,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val vibrator = getSystemService(Vibrator::class.java)
         vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 50, 100, 50), -1))
 
-        val hasStructuredData = insulin != null || carbs != null
-        val hasAnyStructuredSummary = hasStructuredData || hasTempTargetData || hasProfileData || hasRunningModeData
-        val fmt = DecimalFormat("#0.0")
+        val hasLines = lines.isNotEmpty()
+        val hasAnyStructuredSummary = hasLines || hasTempTargetData || hasProfileData || hasRunningModeData
         val ttFmt = if (tempTargetIsMGDL) DecimalFormat("0") else DecimalFormat("#0.0")
         val ttUnit = if (tempTargetIsMGDL) "mg/dL" else "mmol/L"
-
-        // Pre-compute eCarbs time display string
-        val timeDisplayStr: String? = if (carbsTimeShift != null && carbsTimeShift != 0) {
-            val startMs = System.currentTimeMillis() + carbsTimeShift * 60_000L
-            val nowCal = Calendar.getInstance()
-            val startCal = Calendar.getInstance().apply { timeInMillis = startMs }
-            val isSameDay = nowCal.get(Calendar.DAY_OF_YEAR) == startCal.get(Calendar.DAY_OF_YEAR) &&
-                nowCal.get(Calendar.YEAR) == startCal.get(Calendar.YEAR)
-            if (isSameDay) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(startMs))
-            else SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(startMs))
-        } else null
 
         setContent {
             MaterialTheme {
@@ -127,7 +114,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                         when (page) {
                             0    -> {
                                 val curvedTitle = when {
-                                    hasStructuredData  -> stringResource(R.string.menu_treatment)
+                                    hasLines           -> stringResource(R.string.menu_treatment)
                                     hasTempTargetData  -> stringResource(R.string.loop_status_temp_target)
                                     hasProfileData     -> stringResource(R.string.status_profile_switch)
                                     hasRunningModeData -> stringResource(R.string.status_running_mode)
@@ -135,65 +122,42 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                 }
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     if (curvedTitle != null) CurvedTitle(curvedTitle)
-                                    if (hasStructuredData) {
-                                    // Bolus / Carbs / eCarbs structured summary
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.confirm),
-                                            color = Color.White,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        if (insulin != null && insulin > 0.0) {
+                                    if (hasLines) {
+                                        // Master-authored confirmation rows — rendered verbatim, scrollable
+                                        // (confirm lives on pager page 1, so scrolling here never blocks it).
+                                        val linesScroll = rememberScrollState()
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .verticalScroll(linesScroll)
+                                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                        ) {
                                             Text(
-                                                text = "${fmt.format(insulin)} ${stringResource(R.string.insulin_unit_short)}",
-                                                color = InsulinBlue,
-                                                fontSize = 20.sp,
+                                                text = stringResource(R.string.confirm),
+                                                color = Color.White,
+                                                fontSize = 18.sp,
                                                 fontWeight = FontWeight.Bold,
                                             )
+                                            Spacer(Modifier.height(8.dp))
+                                            lines.forEach { (role, text) ->
+                                                Text(
+                                                    text = text,
+                                                    color = when (role) {
+                                                        "BOLUS"        -> InsulinBlue
+                                                        "CARBS", "COB" -> CarbsOrange
+                                                        "WARNING"      -> Color(0xFFFFB300)
+                                                        "INFO"         -> WearSecondaryText
+                                                        else           -> Color.White
+                                                    },
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    textAlign = TextAlign.Center,
+                                                )
+                                            }
                                         }
-                                        if (carbs != null && carbs != 0) {
-                                            Text(
-                                                text = stringResource(R.string.wizard_carbs_format, carbs),
-                                                color = CarbsOrange,
-                                                fontSize = 20.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                        if (carbsTimeShift != null && carbsTimeShift != 0 && timeDisplayStr != null) {
-                                            Text(
-                                                text = stringResource(R.string.ecarbs_confirm_time, timeDisplayStr),
-                                                color = WearSecondaryText,
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                        if (duration != null && duration != 0) {
-                                            Text(
-                                                text = stringResource(R.string.ecarbs_confirm_duration, duration),
-                                                color = WearSecondaryText,
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                        if (constraintApplied) {
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = stringResource(R.string.constraint_applied),
-                                                color = Color(0xFFFFB300),
-                                                fontSize = 14.sp,
-                                                textAlign = TextAlign.Center,
-                                            )
-                                        }
-                                    }
-                                } else if (hasTempTargetData) {
+                                    } else if (hasTempTargetData) {
                                     // TempTarget structured summary
                                     Column(
                                         modifier = Modifier

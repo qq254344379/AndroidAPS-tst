@@ -420,6 +420,10 @@ class WizardBolusExecutorImpl @Inject constructor(
             out += ConfirmationLine(ConfirmationRole.CARBS, rh.gs(R.string.confirmation_line, rh.gs(R.string.carbs), rh.gs(R.string.format_carbs, carbs)))
             if (!recordOnly && carbs != bolus.carbs)
                 out += ConfirmationLine(ConfirmationRole.WARNING, rh.gs(R.string.constraint_applied))
+            // Delayed/extended carbs (e.g. wear eCarbs): show the scheduled start time on the general line so every
+            // surface (phone, client, watch) renders it identically — the one piece of info added to the shared path.
+            if (bolus.carbsTimeOffsetMinutes != 0)
+                out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.time), dateUtil.timeString(dateUtil.now() + T.mins(bolus.carbsTimeOffsetMinutes.toLong()).msecs())))
             if (bolus.carbsDurationHours > 0)
                 out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.value_with_unit, bolus.carbsDurationHours.toString(), rh.gs(app.aaps.core.interfaces.R.string.shorthour))))
         }

@@ -100,11 +100,11 @@ class EventDataTest {
             assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }
-        EventData.ActionBolusConfirmed(1.0, 2).let {
+        EventData.ActionBolusConfirmed(1L).let {
             assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }
-        EventData.ActionECarbsConfirmed(1, 2, 3).let {
+        EventData.ActionECarbsConfirmed(2L).let {
             assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }
@@ -186,6 +186,13 @@ class EventDataTest {
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }
         EventData.ConfirmAction("1", "2", null).let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
+        EventData.ConfirmAction(
+            "1", "2", null,
+            lines = listOf(EventData.ConfirmActionLine("BOLUS", "Bolus: 1.5 U"), EventData.ConfirmActionLine("CARBS", "Carbs: 30 g"))
+        ).let {
             assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }

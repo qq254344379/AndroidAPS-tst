@@ -108,11 +108,10 @@ class DataHandlerWear @Inject constructor(
                             bundle.putString(DataLayerListenerServiceWear.KEY_TITLE, it.title)
                             bundle.putString(DataLayerListenerServiceWear.KEY_MESSAGE, it.message)
                             bundle.putString(DataLayerListenerServiceWear.KEY_ACTION_DATA, it.returnCommand?.serialize())
-                            it.insulin?.let { v -> bundle.putDouble(DataLayerListenerServiceWear.KEY_INSULIN, v) }
-                            it.carbs?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_CARBS, v) }
-                            it.carbsTimeShift?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_CARBS_TIME_SHIFT, v) }
-                            it.duration?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_DURATION, v) }
-                            bundle.putBoolean(DataLayerListenerServiceWear.KEY_CONSTRAINT_APPLIED, it.constraintApplied)
+                            if (it.lines.isNotEmpty()) {
+                                bundle.putStringArray(DataLayerListenerServiceWear.KEY_LINE_ROLES, it.lines.map { l -> l.role }.toTypedArray())
+                                bundle.putStringArray(DataLayerListenerServiceWear.KEY_LINE_TEXTS, it.lines.map { l -> l.text }.toTypedArray())
+                            }
                             bundle.putBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, it.returnCommand is EventData.Error)
                             it.tempTargetLow?.let { v -> bundle.putDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_LOW, v) }
                             it.tempTargetHigh?.let { v -> bundle.putDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_HIGH, v) }

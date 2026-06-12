@@ -26,6 +26,7 @@ import app.aaps.core.interfaces.aps.GlucoseStatus
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
+import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -377,7 +378,8 @@ class DataHandlerMobile @Inject constructor(
             .concatMapCompletable {
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionBolusConfirmed received $it from ${it.sourceNodeId}")
-                    wizardBolusExecutor.deliver(it.insulin, it.carbs, null, 0, null, null, Sources.Wear, ::sendError)
+                    // Consume the parked dose by id (capping already applied at prepare; consume-once = no double bolus).
+                    wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -386,17 +388,23 @@ class DataHandlerMobile @Inject constructor(
         disposable += rxBus
             .toObservable(EventData.ActionECarbsPreCheck::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "ActionECarbsPreCheck received $it from ${it.sourceNodeId}")
-                           handleECarbsPreCheck(it)
-                       }, fabricPrivacy::logException)
+            .concatMapCompletable {
+                rxCompletable {
+                    aapsLogger.debug(LTag.WEAR, "ActionECarbsPreCheck received $it from ${it.sourceNodeId}")
+                    handleECarbsPreCheck(it)
+                }
+                    .doOnError(fabricPrivacy::logException)
+                    .onErrorComplete()
+            }
+            .subscribe()
         disposable += rxBus
             .toObservable(EventData.ActionECarbsConfirmed::class.java)
             .observeOn(aapsSchedulers.io)
             .concatMapCompletable {
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionECarbsConfirmed received $it from ${it.sourceNodeId}")
-                    wizardBolusExecutor.deliverECarbs(it.carbs, it.carbsTime, it.duration, 0, null, Sources.Wear, ::sendError)
+                    // Consume the parked eCarbs by id (the FIXED carbs-only branch delivers via deliverECarbs).
+                    wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -1047,79 +1055,49 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleBolusPreCheck(command: EventData.ActionBolusPreCheck) {
-        val insulinAfterConstraints = constraintChecker.applyBolusConstraints(ConstraintObject(command.insulin, aapsLogger)).value()
-        val cob = iobCobCalculator.ads.getLastAutosensData("carbsDialog", aapsLogger, dateUtil)?.cob ?: 0.0
-        var carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(command.carbs, aapsLogger)).value()
-        if (insulinAfterConstraints > 0) {
-            if (rejectIfAapsClient()) return
-            runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
-                sendError(it)
-                return
-            }
-            val pump = activePlugin.activePump
-            if (!pump.isInitialized()) {
-                sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
-                return
-            }
-        }
-        if (insulinAfterConstraints == 0.0 && command.carbs == 0) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.bolus_equal_zero_no_action))
-            return
-        }
-        // Handle negative carbs constraint
-        if (carbsAfterConstraints < 0) {
-            if (carbsAfterConstraints < -cob) carbsAfterConstraints = ceil(-cob).toInt()
-        }
-        var message = ""
-        message += rh.gs(app.aaps.core.ui.R.string.bolus) + ": " + insulinAfterConstraints + rh.gs(R.string.units_short) + "\n"
-        message += rh.gs(app.aaps.core.ui.R.string.carbs) + ": " + carbsAfterConstraints + rh.gs(R.string.grams_short)
-        if (insulinAfterConstraints - command.insulin != 0.0 || carbsAfterConstraints - command.carbs != 0)
-            message += "\n" + rh.gs(app.aaps.core.ui.R.string.constraint_applied)
+        // A client must not deliver insulin directly; carbs-only is allowed (it syncs).
+        if (command.insulin > 0 && rejectIfAapsClient()) return
+        // The executor is the single capping authority (constraints, negative-carb clamp), parks the dose, and
+        // authors the confirmation lines. The watch renders those lines and echoes back only the bolusId on
+        // confirm (consume-once) — no locally-capped amount travels back.
         wizardBolusExecutor.clearPending()
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                    returnCommand = EventData.ActionBolusConfirmed(insulinAfterConstraints, carbsAfterConstraints),
-                    insulin = insulinAfterConstraints,
-                    carbs = carbsAfterConstraints,
-                    constraintApplied = insulinAfterConstraints - command.insulin != 0.0 || carbsAfterConstraints - command.carbs != 0,
-                )
+        sendBatchPreCheck(
+            BatchAction.Bolus(
+                insulin = command.insulin, carbs = command.carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                recordOnly = false, notes = "", timestamp = 0L, iCfg = null
             )
-        )
+        ) { EventData.ActionBolusConfirmed(it) }
     }
 
-    private fun handleECarbsPreCheck(command: EventData.ActionECarbsPreCheck) {
-        val startTimeStamp = System.currentTimeMillis() + T.mins(command.carbsTimeShift.toLong()).msecs()
-        val cob = iobCobCalculator.ads.getLastAutosensData("carbsDialog", aapsLogger, dateUtil)?.cob ?: 0.0
-        var carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(command.carbs, aapsLogger)).value()
-        // Handle negative carbs constraint
-        if (carbsAfterConstraints < 0) {
-            if (carbsAfterConstraints < -cob) carbsAfterConstraints = ceil(-cob).toInt()
-        }
-        var message = rh.gs(app.aaps.core.ui.R.string.carbs) + ": " + carbsAfterConstraints + rh.gs(R.string.grams_short) +
-            "\n" + rh.gs(app.aaps.core.ui.R.string.time) + ": " + dateUtil.timeString(startTimeStamp) +
-            "\n" + rh.gs(app.aaps.core.ui.R.string.duration) + ": " + command.duration + rh.gs(R.string.hour_short)
-        if (carbsAfterConstraints != command.carbs) {
-            message += "\n" + rh.gs(app.aaps.core.ui.R.string.constraint_applied)
-        }
-        if (carbsAfterConstraints == 0) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.carb_equal_zero_no_action))
-            return
-        }
+    private suspend fun handleECarbsPreCheck(command: EventData.ActionECarbsPreCheck) {
         wizardBolusExecutor.clearPending()
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                    returnCommand = EventData.ActionECarbsConfirmed(carbsAfterConstraints, startTimeStamp, command.duration),
-                    carbs = carbsAfterConstraints,
-                    carbsTimeShift = command.carbsTimeShift,
-                    duration = command.duration,
-                    constraintApplied = carbsAfterConstraints != command.carbs,
-                )
+        sendBatchPreCheck(
+            BatchAction.Bolus(
+                insulin = 0.0, carbs = command.carbs, carbsTimeOffsetMinutes = command.carbsTimeShift, carbsDurationHours = command.duration,
+                recordOnly = false, notes = "", timestamp = 0L, iCfg = null
             )
-        )
+        ) { EventData.ActionECarbsConfirmed(it) }
+    }
+
+    /**
+     * Shared wear fixed-bolus/eCarbs precheck: cap + park on the master via [WizardBolusExecutor.prepareBatch], then
+     * push the master-authored confirmation [lines][EventData.ConfirmAction.lines] to the watch with the type-specific
+     * confirm command carrying only the parked [bolusId][WizardBolusExecutor.PrepareResult.Preview.bolusId].
+     */
+    private suspend fun sendBatchPreCheck(bolus: BatchAction.Bolus, returnCommand: (bolusId: Long) -> EventData) {
+        when (val result = wizardBolusExecutor.prepareBatch(listOf(bolus))) {
+            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
+            is WizardBolusExecutor.PrepareResult.Preview ->
+                rxBus.send(
+                    EventMobileToWear(
+                        EventData.ConfirmAction(
+                            rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message = "",
+                            returnCommand = returnCommand(result.bolusId),
+                            lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
+                        )
+                    )
+                )
+        }
     }
 
     private suspend fun handleFillPresetPreCheck(command: EventData.ActionFillPresetPreCheck) {

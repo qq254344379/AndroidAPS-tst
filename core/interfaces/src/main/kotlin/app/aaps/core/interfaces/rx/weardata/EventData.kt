@@ -213,10 +213,10 @@ sealed class EventData : Event() {
     data class ActionTempTargetConfirmed(val isMgdl: Boolean = true, val duration: Int = 0, val low: Double = 0.0, val high: Double = 0.0) : EventData()
 
     @Serializable
-    data class ActionBolusConfirmed(val insulin: Double, val carbs: Int) : EventData()
+    data class ActionBolusConfirmed(val bolusId: Long) : EventData()
 
     @Serializable
-    data class ActionECarbsConfirmed(val carbs: Int, val carbsTime: Long, val duration: Int) : EventData()
+    data class ActionECarbsConfirmed(val bolusId: Long) : EventData()
 
     @Serializable
     data class ActionFillConfirmed(val insulin: Double) : EventData()
@@ -465,16 +465,18 @@ sealed class EventData : Event() {
     @Serializable
     data class OpenLoopRequest(val title: String, val message: String, val returnCommand: EventData?) : EventData()
 
+    /** One master-authored confirmation row the watch renders verbatim. [role] is a [ConfirmationRole] name (color hint). */
+    @Serializable
+    data class ConfirmActionLine(val role: String, val text: String)
+
     @Serializable // returnCommand is sent back to Mobile after confirmation
     data class ConfirmAction(
         val title: String,
         val message: String,
         val returnCommand: EventData?,
-        val insulin: Double? = null,
-        val carbs: Int? = null,
-        val carbsTimeShift: Int? = null,
-        val duration: Int? = null,
-        val constraintApplied: Boolean = false,
+        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs): the watch renders these verbatim,
+        // the same lines the phone dialog + every client show. Empty for the typed-field cases (TempTarget, etc.).
+        val lines: List<ConfirmActionLine> = emptyList(),
         // TempTarget fields
         val tempTargetLow: Double? = null,
         val tempTargetHigh: Double? = null,
