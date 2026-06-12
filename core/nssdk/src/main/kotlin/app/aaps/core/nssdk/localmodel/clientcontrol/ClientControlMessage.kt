@@ -178,6 +178,15 @@ sealed class ClientControlMessage {
     data class BatchPrepare(
         val actions: List<BatchActionDto>
     ) : ClientControlMessage()
+
+    /**
+     * Client acknowledged (dismissed/muted) the relayed bolus-delivery-failure alarm on its side → ask the master to
+     * clear ITS copy too. One-directional by design: the master silencing its own alarm must NOT clear the client's
+     * (the remote initiator has to see its failed bolus). Fire-and-forget (no ack) — see ClientControlReceiver.
+     */
+    @Serializable
+    @SerialName("dismiss_alarm")
+    data object DismissAlarm : ClientControlMessage()
 }
 
 /** One synced preference on the wire: its value (serialized as a string) and edit timestamp. */

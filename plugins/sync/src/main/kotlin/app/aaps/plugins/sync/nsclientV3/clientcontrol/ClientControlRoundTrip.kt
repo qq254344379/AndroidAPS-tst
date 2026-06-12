@@ -7,6 +7,7 @@ import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.clientcontrol.PendingAction
 import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationId
@@ -26,6 +27,7 @@ import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.PROPAGATION_MARGIN_MS
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.ROUND_TRIP_TTL_MS
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.coroutineScope
@@ -69,7 +71,8 @@ class ClientControlRoundTrip @Inject constructor(
     private val dateUtil: DateUtil,
     private val notificationManager: NotificationManager,
     private val rh: ResourceHelper,
-    private val aapsLogger: AAPSLogger
+    private val aapsLogger: AAPSLogger,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ClientControlActionDispatcher {
 
     companion object {
@@ -91,6 +94,24 @@ class ClientControlRoundTrip @Inject constructor(
     private val inFlight = AtomicBoolean(false)
 
     private val ackEvents = MutableSharedFlow<AckEnvelope>(replay = 16, extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    init {
+        // Client→master alarm-clear (one-directional, by design): when the user dismisses/mutes the relayed
+        // bolus-delivery-failure alarm HERE, tell the master to clear its own copy. The reverse is deliberately NOT
+        // done — the master silencing its alarm must not rob the remote initiator of its failed-bolus notice. Best-effort
+        // fire-and-forget; app-lifetime scope (singleton, no cancel). Gated to clients so a master never signals itself.
+        if (config.AAPSCLIENT) appScope.launch {
+            var present = false
+            notificationManager.notifications.collect { list ->
+                val showing = list.any { it.id == NotificationId.BOLUS_DELIVERY_FAILED }
+                if (present && !showing) {
+                    val result = publisher.publish(ClientControlMessage.DismissAlarm)
+                    nsClientRepository.addLog("► CLIENTCTL", "dismiss_alarm relay: ${result::class.simpleName}")
+                }
+                present = showing
+            }
+        }
+    }
 
     /**
      * WS-push entry for a master ACK doc (`aaps_clientcontrol_ack_<clientId>`). Parses, checks it is
@@ -122,7 +143,8 @@ class ClientControlRoundTrip @Inject constructor(
             if (ack.status == AckStatus.Failed)
                 notificationManager.post(
                     NotificationId.BOLUS_DELIVERY_FAILED,
-                    rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror) + (ack.payload?.let { "\n$it" } ?: ""),
+                    // payload is the master-authored full text ("title\n<pump detail>"); show it as-is, don't re-prefix the title.
+                    ack.payload ?: rh.gs(app.aaps.core.ui.R.string.treatmentdeliveryerror),
                     validMinutes = 0, soundRes = app.aaps.core.ui.R.raw.boluserror
                 )
             return

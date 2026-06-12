@@ -12,6 +12,8 @@ import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
@@ -97,6 +99,7 @@ class ClientControlReceiver @Inject constructor(
     private val runningConfigurationPublisher: RunningConfigurationPublisher,
     private val persistenceLayer: PersistenceLayer,
     private val wizardBolusExecutor: WizardBolusExecutor,
+    private val notificationManager: NotificationManager,
     private val aapsLogger: AAPSLogger,
     @ApplicationScope private val appScope: CoroutineScope
 ) {
@@ -234,6 +237,7 @@ class ClientControlReceiver @Inject constructor(
             is ClientControlMessage.BolusCommit       -> onVerifiedBolusCommit(entry, envelope, message, now)
             is ClientControlMessage.WizardPrepare     -> onVerifiedWizardPrepare(entry, envelope, message, now)
             is ClientControlMessage.BatchPrepare      -> onVerifiedBatchPrepare(entry, envelope, message, now)
+            ClientControlMessage.DismissAlarm         -> onVerifiedDismissAlarm(entry, envelope, now)
         }
         if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, outcome.payload, now)
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -263,6 +267,19 @@ class ClientControlReceiver @Inject constructor(
     private fun onVerifiedPing(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         nsClientRepository.addLog("◄ CLIENTCTL", "ping from ${entry.name}")
+        return AckOutcome(AckStatus.Ok, null)
+    }
+
+    /**
+     * Client dismissed/muted the relayed bolus-delivery-failure alarm on its side → clear the master's own copy.
+     * Fire-and-forget (the client sends wantsAck=false) so the returned outcome is never written as an ack. ONE-WAY by
+     * design: the master clearing its alarm does NOT push back to the client (the remote initiator must acknowledge its
+     * own failed bolus). dismiss() is a no-op when nothing of that id is showing.
+     */
+    private fun onVerifiedDismissAlarm(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        notificationManager.dismiss(NotificationId.BOLUS_DELIVERY_FAILED)
+        nsClientRepository.addLog("◄ CLIENTCTL", "dismiss_alarm from ${entry.name}")
         return AckOutcome(AckStatus.Ok, null)
     }
 

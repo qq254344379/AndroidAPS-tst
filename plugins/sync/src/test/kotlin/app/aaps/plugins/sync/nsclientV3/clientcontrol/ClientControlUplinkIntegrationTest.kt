@@ -5,6 +5,7 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.notifications.AapsNotification
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
@@ -165,13 +166,15 @@ class ClientControlUplinkIntegrationTest {
         // ---------- real components ----------
         clientPairingRepository = ClientPairingRepository(clientPrefs, secureEncrypt, aapsLogger)
         clientControlPublisher = ClientControlPublisher(clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
-        val clientControlRoundTrip = ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, clientConfig, dateUtil, notificationManager, rh, aapsLogger)
+        whenever(notificationManager.notifications).thenReturn(MutableStateFlow(emptyList<AapsNotification>()))
+        val clientControlRoundTrip =
+            ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, clientConfig, dateUtil, notificationManager, rh, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
         preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, rh, aapsLogger)
 
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, aapsLogger,
+            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, notificationManager, aapsLogger,
             CoroutineScope(Dispatchers.Unconfined)
         )
 

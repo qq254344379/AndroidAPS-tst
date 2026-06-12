@@ -129,6 +129,7 @@ class ClientControlPublisher @Inject constructor(
             ClientControlMessage.Ping,
             is ClientControlMessage.TempTargetSet,
             ClientControlMessage.TempTargetCancel,
+            ClientControlMessage.DismissAlarm,
             is ClientControlMessage.PreferencesUpdate,
             is ClientControlMessage.BolusPrepare,
             is ClientControlMessage.BolusCommit,

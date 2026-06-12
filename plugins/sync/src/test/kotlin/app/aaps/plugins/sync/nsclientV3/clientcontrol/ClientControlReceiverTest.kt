@@ -12,6 +12,8 @@ import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
@@ -73,6 +75,7 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
     @Mock private lateinit var persistenceLayer: PersistenceLayer
     @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
+    @Mock private lateinit var notificationManager: NotificationManager
 
     // Same deterministic fake as the repository tests — encrypt/decrypt round-trip via reverse,
     // so the persisted form does not contain the original plaintext.
@@ -130,6 +133,7 @@ internal class ClientControlReceiverTest {
             runningConfigurationPublisher,
             persistenceLayer,
             wizardBolusExecutor,
+            notificationManager,
             aapsLogger,
             CoroutineScope(Dispatchers.Unconfined)
         )
@@ -493,6 +497,20 @@ internal class ClientControlReceiverTest {
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.TempTargetCancel, counter = 5L)))
 
         verify(persistenceLayer).cancelCurrentTemporaryTargetIfAny(any(), eq(Action.CANCEL_TT), eq(Sources.NSClient), anyOrNull(), any())
+    }
+
+    @Test
+    fun dismissAlarmClearsMasterNotificationAndWritesNoAck() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}dismiss_alarm_$clientId"
+
+        // Fire-and-forget (wantsAck = false): the client cleared the relayed alarm → master clears its own copy, no ack.
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.DismissAlarm, counter = 5L)))
+
+        verify(notificationManager).dismiss(NotificationId.BOLUS_DELIVERY_FAILED)
+        assertThat(acks).isEmpty()
     }
 
     @Test

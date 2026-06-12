@@ -5,6 +5,7 @@ import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.notifications.AapsNotification
 import app.aaps.core.interfaces.notifications.NotificationAction
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
@@ -22,6 +23,8 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.MasterPairing
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -67,6 +70,7 @@ internal class ClientControlRoundTripTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     private lateinit var reachable: MutableStateFlow<Boolean>
+    private val notifications = MutableStateFlow<List<AapsNotification>>(emptyList())
     private lateinit var sut: ClientControlRoundTrip
 
     private val cmd = ClientControlActionDispatcher.Command.InsulinActivate("""{"insulinLabel":"x"}""")
@@ -81,13 +85,15 @@ internal class ClientControlRoundTripTest {
         whenever(nsClientV3Plugin.masterReachable).thenReturn(reachable)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
         whenever(config.AAPSCLIENT).thenReturn(true)
-        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, aapsLogger)
+        whenever(notificationManager.notifications).thenReturn(notifications)
+        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
     }
 
     @Test
     fun onAckDoc_deliveryFailed_raisesUrgentAlarm() {
         // A late Delivery/Failed ack (an async bolus failure the master relays after its Done ack) → URGENT alarm.
-        sut.onAckDoc(ackDoc(AckPhase.Delivery, AckStatus.Failed, reason = "ExecutionFailed"))
+        // The master-authored payload (title + pump detail) is shown as-is — not re-prefixed with the title.
+        sut.onAckDoc(ackDoc(AckPhase.Delivery, AckStatus.Failed, reason = "ExecutionFailed", payload = "Treatment delivery error\npump fault"))
 
         verify(notificationManager).post(
             eq(NotificationId.BOLUS_DELIVERY_FAILED), any<String>(), any<NotificationLevel>(), any<Int>(),
@@ -95,13 +101,32 @@ internal class ClientControlRoundTripTest {
         )
     }
 
+    @Test
+    fun clientDismissingBolusFailedAlarm_relaysDismissToMaster() = runTest {
+        whenever(publisher.publish(ClientControlMessage.DismissAlarm)).thenReturn(ClientControlSendResult.NotPaired)
+        // The relayed alarm shows on the client, then the user clears it → one fire-and-forget DismissAlarm to the master.
+        notifications.value = listOf(AapsNotification(NotificationId.BOLUS_DELIVERY_FAILED, instanceKey = 0, text = "x", level = NotificationLevel.URGENT))
+        notifications.value = emptyList()
+
+        verify(publisher).publish(ClientControlMessage.DismissAlarm)
+    }
+
+    @Test
+    fun clientDismissingUnrelatedAlarm_doesNotRelay() = runTest {
+        // Only the bolus-delivery-failure alarm relays; clearing any other notification must NOT signal the master.
+        notifications.value = listOf(AapsNotification(NotificationId.PUMP_ERROR, instanceKey = 0, text = "x", level = NotificationLevel.URGENT))
+        notifications.value = emptyList()
+
+        verify(publisher, never()).publish(ClientControlMessage.DismissAlarm)
+    }
+
     private suspend fun stubPublish(result: ClientControlSendResult, ctr: Long? = counter) {
         whenever(publisher.publishTracked(any(), any(), any())).thenReturn(ClientControlPublisher.TrackedPublish(result, ctr))
     }
 
     /** A signed ACK doc as the WS layer would hand it to onAckDoc. [signSecret] lets a test forge one. */
-    private fun ackDoc(phase: AckPhase, status: AckStatus, reason: String? = null, ctr: Long = counter, signSecret: ByteArray = secret): JSONObject {
-        val ack = ClientControlCrypto.signAck(signSecret, AckEnvelope(clientId, ctr, phase, status, reason, timestamp = now, signature = ""))
+    private fun ackDoc(phase: AckPhase, status: AckStatus, reason: String? = null, payload: String? = null, ctr: Long = counter, signSecret: ByteArray = secret): JSONObject {
+        val ack = ClientControlCrypto.signAck(signSecret, AckEnvelope(clientId, ctr, phase, status, reason, payload, timestamp = now, signature = ""))
         return JSONObject().apply { put("ack", JSONObject(json.encodeToString(AckEnvelope.serializer(), ack))) }
     }
 
