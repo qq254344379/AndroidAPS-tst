@@ -47,8 +47,11 @@ class AuthorizedClientsViewModel @Inject constructor(
         .map { list -> list.sortedByDescending { it.createdAt } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
-    /** Whether the master-side client-control feature is turned on. Gates the screen's active UI. */
+    /** Whether client-control communication is on — the master-wide stop/allow switch, now hosted on this screen. */
     val clientControlEnabled: StateFlow<Boolean> = preferences.observe(BooleanKey.NsClientAllowClientControl)
+
+    /** Flip the stop/allow-communication switch. OFF keeps paired clients listed but stops the master accepting anything. */
+    fun setClientControlEnabled(enabled: Boolean) = preferences.put(BooleanKey.NsClientAllowClientControl, enabled)
 
     private val _dialogState = MutableStateFlow<DialogState?>(null)
     val dialogState: StateFlow<DialogState?> = _dialogState.asStateFlow()

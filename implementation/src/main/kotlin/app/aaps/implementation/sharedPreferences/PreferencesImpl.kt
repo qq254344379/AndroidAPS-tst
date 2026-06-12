@@ -477,6 +477,7 @@ class PreferencesImpl @Inject constructor(
                 BooleanKey.NsClientLogAppStart                     -> config.APS
                 BooleanKey.NsClientCreateAnnouncementsFromErrors   -> config.APS
                 BooleanKey.NsClientCreateAnnouncementsFromCarbsReq -> config.APS
+                BooleanKey.NsClientAllowClientControl              -> simpleMode // client control on by default in simple mode, opt-in otherwise
                 else                                               -> error("Unsupported default value calculation")
             }
         else key.defaultValue

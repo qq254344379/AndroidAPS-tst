@@ -1,6 +1,7 @@
 package app.aaps.core.ui.compose.navigation
 
 import app.aaps.core.interfaces.protection.ProtectionCheck
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.interfaces.PreferenceVisibility
 
 /**
@@ -84,8 +85,10 @@ enum class ElementType(
     SCENE_MANAGEMENT(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES),
 
     // NSCv3 client control — paired devices that can issue signed commands
-    AUTHORIZED_CLIENTS(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES, visibility = PreferenceVisibility.MASTER_ONLY),
-    PAIR_WITH_MASTER(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES, visibility = PreferenceVisibility.CLIENT_ONLY),
+    // Master only AND NSCv3-WS enabled — keeps search in lock-step with the Manage-sheet button (ManageViewModel).
+    AUTHORIZED_CLIENTS(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES, visibility = PreferenceVisibility { !it.isClient && it.preferences.get(BooleanKey.NsClient3UseWs) }),
+    // Client only AND NSCv3-WS enabled (the transport client control rides) — in lock-step with its Manage-sheet button.
+    PAIR_WITH_MASTER(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.PREFERENCES, visibility = PreferenceVisibility { it.isClient && it.preferences.get(BooleanKey.NsClient3UseWs) }),
 
     // Running mode / loop (used by UserEntry)
     RUNNING_MODE(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.BOLUS),

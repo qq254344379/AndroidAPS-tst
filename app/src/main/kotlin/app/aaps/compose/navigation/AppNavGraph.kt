@@ -556,8 +556,7 @@ fun NavGraphBuilder.appNavGraph(
 
     composable(AppRoute.AuthorizedClients.route) {
         AuthorizedClientsScreen(
-            onNavigateBack = { navController.popBackStack() },
-            onOpenSettings = { navController.navigate(AppRoute.PreferenceScreen.createRoute("ns_client_v3_settings")) }
+            onNavigateBack = { navController.popBackStack() }
         )
     }
 

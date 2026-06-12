@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,7 +59,6 @@ import kotlinx.coroutines.delay
 @Composable
 fun AuthorizedClientsScreen(
     onNavigateBack: () -> Unit,
-    onOpenSettings: () -> Unit,
     viewModel: AuthorizedClientsViewModel = hiltViewModel()
 ) {
     val clients by viewModel.clients.collectAsStateWithLifecycle()
@@ -118,33 +118,29 @@ fun AuthorizedClientsScreen(
             }
         }
     ) { paddingValues ->
-        if (!featureEnabled) {
-            FeatureDisabledState(
-                onOpenSettings = onOpenSettings,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-            )
-        } else if (clients.isEmpty()) {
-            EmptyState(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentPadding = PaddingValues(AapsSpacing.medium),
-                verticalArrangement = Arrangement.spacedBy(AapsSpacing.medium)
-            ) {
-                items(clients, key = { it.clientId }) { client ->
-                    AuthorizedClientCard(
-                        client = client,
-                        viewModel = viewModel,
-                        onDelete = { viewModel.requestDelete(client) }
-                    )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            // The stop/allow-communication switch lives here (moved off the NSCv3 prefs screen). Off keeps the
+            // paired clients listed but stops the master accepting anything (and blocks new pairing).
+            ClientControlSwitchRow(enabled = featureEnabled, onToggle = viewModel::setClientControlEnabled)
+            if (clients.isEmpty()) {
+                EmptyState(modifier = Modifier.fillMaxSize())
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(AapsSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(AapsSpacing.medium)
+                ) {
+                    items(clients, key = { it.clientId }) { client ->
+                        AuthorizedClientCard(
+                            client = client,
+                            viewModel = viewModel,
+                            onDelete = { viewModel.requestDelete(client) }
+                        )
+                    }
                 }
             }
         }
@@ -214,31 +210,30 @@ private fun StateBadgeAndTimeRow(
 }
 
 @Composable
-private fun FeatureDisabledState(
-    onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier
+private fun ClientControlSwitchRow(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
 ) {
-    Column(
-        modifier = modifier.padding(AapsSpacing.xxLarge),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AapsSpacing.large, vertical = AapsSpacing.medium),
+        horizontalArrangement = Arrangement.spacedBy(AapsSpacing.medium),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = stringResource(R.string.authorized_clients_disabled_title),
-            style = MaterialTheme.typography.headlineSmall
-        )
-        Text(
-            text = stringResource(R.string.authorized_clients_disabled_subtitle),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = AapsSpacing.medium)
-        )
-        Button(
-            onClick = onOpenSettings,
-            modifier = Modifier.padding(top = AapsSpacing.large)
-        ) {
-            Text(stringResource(R.string.authorized_clients_open_settings))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.authorized_clients_comm_switch_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = stringResource(R.string.authorized_clients_comm_switch_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
+        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 

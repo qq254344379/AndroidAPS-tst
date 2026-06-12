@@ -17,6 +17,8 @@
     <!-- Authorized clients (paired devices that can issue signed commands) -->
     <string name="authorized_clients_title">Authorized clients</string>
     <string name="authorized_clients_add">Add client</string>
+    <string name="authorized_clients_comm_switch_title">Allow client control</string>
+    <string name="authorized_clients_comm_switch_summary">Let paired clients send signed commands over Nightscout. Turn off to stop communication without removing them.</string>
     <string name="authorized_clients_state_active">Active</string>
     <string name="authorized_clients_state_pending">Pending</string>
     <string name="authorized_clients_last_seen">Last seen %1$s</string>
