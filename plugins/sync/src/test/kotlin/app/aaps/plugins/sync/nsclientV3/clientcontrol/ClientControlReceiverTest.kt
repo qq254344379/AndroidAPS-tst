@@ -8,6 +8,7 @@ import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -17,6 +18,10 @@ import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.BolusProgressState
+import app.aaps.core.interfaces.pump.PumpInsulin
+import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
@@ -42,6 +47,7 @@ import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -56,6 +62,7 @@ import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argThat
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import javax.inject.Provider
@@ -76,6 +83,9 @@ internal class ClientControlReceiverTest {
     @Mock private lateinit var persistenceLayer: PersistenceLayer
     @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
     @Mock private lateinit var notificationManager: NotificationManager
+    @Mock private lateinit var config: Config
+    @Mock private lateinit var bolusProgressData: BolusProgressData
+    @Mock private lateinit var commandQueue: CommandQueue
 
     // Same deterministic fake as the repository tests — encrypt/decrypt round-trip via reverse,
     // so the persisted form does not contain the original plaintext.
@@ -96,6 +106,9 @@ internal class ClientControlReceiverTest {
     // would clobber whichever was written last. Keyed by [StringNonKey.key].
     private val storage = mutableMapOf<String, String>()
     private val now = 1_700_000_000_000L
+
+    // Controllable bolus-progress flow the master observer mirrors from.
+    private val bolusState = MutableStateFlow<BolusProgressState?>(null)
 
     @BeforeEach
     fun setUp() {
@@ -120,6 +133,7 @@ internal class ClientControlReceiverTest {
         authorizedRepository = AuthorizedClientsRepository(preferences, secureEncrypt, aapsLogger)
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
         whenever(dateUtil.now()).thenReturn(now)
+        whenever(bolusProgressData.state).thenReturn(bolusState)
         sut = ClientControlReceiver(
             authorizedRepository,
             Provider { nsClientV3Plugin },
@@ -134,6 +148,9 @@ internal class ClientControlReceiverTest {
             persistenceLayer,
             wizardBolusExecutor,
             notificationManager,
+            config,
+            bolusProgressData,
+            commandQueue,
             aapsLogger,
             CoroutineScope(Dispatchers.Unconfined)
         )
@@ -512,6 +529,46 @@ internal class ClientControlReceiverTest {
         verify(notificationManager).dismiss(NotificationId.BOLUS_DELIVERY_FAILED)
         assertThat(acks).isEmpty()
     }
+
+    @Test
+    fun stopBolusCancelsAllBolusesAndWritesNoAck() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val acks = captureAcks(clientId)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}stop_bolus_$clientId"
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.StopBolus, counter = 5L)))
+
+        verify(commandQueue).cancelAllBoluses(anyOrNull())
+        assertThat(acks).isEmpty()
+    }
+
+    @Test
+    fun masterMirrorsProgressToArmedClientThenDisarmsOnTerminal() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        whenever(wizardBolusExecutor.confirm(any(), any(), any(), any())).thenReturn(WizardBolusExecutor.ConfirmResult.Delivered)
+        val progressId = "${ClientControlPublisher.IDENTIFIER_PROGRESS_PREFIX}$clientId"
+        val cmdId = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}bolus_commit_$clientId"
+
+        // Arm: the client commits a (mocked-Delivered) bolus → progress is now targeted at this client.
+        sut.onSettingsDocChanged(cmdId, wrap(envelope(clientId, secret, message = ClientControlMessage.BolusCommit(bolusId = 42L), counter = 5L)))
+
+        // In-flight frame → mirrored to the client's progress doc.
+        bolusState.value = progressState(percent = 50)
+        verify(nsAndroidClient).updateSettings(eq(progressId), any())
+
+        // 100% → final frame, then disarmed: a later (master-initiated) bolus must NOT be mirrored.
+        bolusState.value = progressState(percent = 100)
+        bolusState.value = null
+        bolusState.value = progressState(percent = 10)
+        verify(nsAndroidClient, times(2)).updateSettings(eq(progressId), any())
+    }
+
+    private fun progressState(percent: Int) = BolusProgressState(
+        insulin = 2.0, isSMB = false, isPriming = false, percent = percent, status = "x",
+        wearStatus = "x", delivered = PumpInsulin(1.0), stopPressed = false, stopDeliveryEnabled = true
+    )
 
     @Test
     fun bolusPrepareAcksOkWithSignedPreviewPayload() = runTest {

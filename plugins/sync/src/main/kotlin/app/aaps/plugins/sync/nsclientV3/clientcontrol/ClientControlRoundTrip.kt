@@ -13,6 +13,8 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.PumpInsulin
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
@@ -22,6 +24,8 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
+import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressPhase
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip.Companion.PROPAGATION_MARGIN_MS
@@ -71,6 +75,7 @@ class ClientControlRoundTrip @Inject constructor(
     private val dateUtil: DateUtil,
     private val notificationManager: NotificationManager,
     private val rh: ResourceHelper,
+    private val bolusProgressData: BolusProgressData,
     private val aapsLogger: AAPSLogger,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ClientControlActionDispatcher {
@@ -94,6 +99,9 @@ class ClientControlRoundTrip @Inject constructor(
     private val inFlight = AtomicBoolean(false)
 
     private val ackEvents = MutableSharedFlow<AckEnvelope>(replay = 16, extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    // Drops a late/out-of-order progress frame (NS can re-deliver or reorder).
+    @Volatile private var lastProgressTs = 0L
 
     init {
         // Client→master alarm-clear (one-directional, by design): when the user dismisses/mutes the relayed
@@ -150,6 +158,45 @@ class ClientControlRoundTrip @Inject constructor(
             return
         }
         ackEvents.tryEmit(ack)
+    }
+
+    /**
+     * WS-push entry for a master→client bolus-progress frame. Verifies the signature (a forged "100% delivered"
+     * must not be believable), drops a late/out-of-order frame, then drives the client's OWN [BolusProgressData]
+     * so the existing (un-gated) progress dialog lights up — no client-specific UI.
+     */
+    fun onProgressDoc(doc: JSONObject) {
+        val obj = doc.optJSONObject("progress") ?: return
+        val env = runCatching { json.decodeFromString<ProgressEnvelope>(obj.toString()) }.getOrNull() ?: run {
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: malformed progress doc")
+            return
+        }
+        val clientId = pairingRepository.currentPairing()?.clientId ?: return
+        if (env.clientId != clientId) return // progress for a different client sharing this NS
+        val secret = pairingRepository.secretBytesOrNull() ?: return
+        if (!ClientControlCrypto.verifyProgress(secret, env)) {
+            aapsLogger.error(LTag.NSCLIENT, "ClientControl: progress signature invalid")
+            return
+        }
+        nsClientV3Plugin.get().bumpMasterSignal(dateUtil.now())
+        if (env.timestamp <= lastProgressTs) return // stale / out-of-order
+        lastProgressTs = env.timestamp
+        when (env.phase) {
+            ProgressPhase.Active   -> {
+                if (bolusProgressData.state.value == null) bolusProgressData.start(env.insulin, isSMB = false)
+                bolusProgressData.updateProgress(env.percent, env.status, PumpInsulin(env.delivered))
+                bolusProgressData.enableStopDelivery(env.stopDeliveryEnabled)
+            }
+
+            ProgressPhase.Complete -> bolusProgressData.completeAndAutoClear()
+            ProgressPhase.Cleared  -> bolusProgressData.clear()
+        }
+    }
+
+    /** Fire-and-forget: publish a StopBolus to the master to abort the bolus being mirrored here. Client-only. */
+    override fun stopBolus() {
+        if (!config.AAPSCLIENT) return
+        appScope.launch { publisher.publish(ClientControlMessage.StopBolus) }
     }
 
     /**

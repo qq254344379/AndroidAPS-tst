@@ -54,6 +54,12 @@ interface ClientControlActionDispatcher {
     /** Dismiss the modal (terminal Rejected/Unconfirmed) or stop waiting on an in-flight action. */
     fun dismissActionProgress() {}
 
+    /**
+     * Fire-and-forget (client-only): ask the master to abort the in-progress bolus mirrored to this client.
+     * No-op on a master / for impls without the channel.
+     */
+    fun stopBolus() {}
+
     /** The closed set of actions dispatchable through the round-trip channel. */
     sealed interface Command {
 

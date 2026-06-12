@@ -7,6 +7,7 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -16,6 +17,9 @@ import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.BolusProgressState
+import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.utils.DateUtil
@@ -36,6 +40,8 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.nssdk.localmodel.clientcontrol.ConfirmationLineDto
+import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.core.objects.extensions.fromJsonObject
@@ -100,6 +106,9 @@ class ClientControlReceiver @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val wizardBolusExecutor: WizardBolusExecutor,
     private val notificationManager: NotificationManager,
+    private val config: Config,
+    private val bolusProgressData: BolusProgressData,
+    private val commandQueue: CommandQueue,
     private val aapsLogger: AAPSLogger,
     @ApplicationScope private val appScope: CoroutineScope
 ) {
@@ -111,6 +120,51 @@ class ClientControlReceiver @Inject constructor(
     // (a WS re-notify, or WS+poll overlap) could both pass the gate and both execute → double bolus / double record.
     // One command in flight at a time closes that window (the executor's atomic slot is the second line of defense).
     private val commandMutex = Mutex()
+
+    // Phase 3 — client bolus-progress mirror (master side). The currently-armed client (the one whose bolus is
+    // delivering); set in onVerifiedBolusCommit (the only place the clientId is known), cleared on terminal /
+    // non-delivery. The arm-TTL bounds a stale arm (e.g. a record-only commit that never starts a pump bolus).
+    private val progressClientId = AtomicReference<String?>(null)
+    @Volatile private var progressArmedAt = 0L
+    private val progressSampleMs = 1_000L
+    private val progressArmTtlMs = 60_000L
+
+    init {
+        // Master only: mirror the live progress of a CLIENT-initiated bolus back to that client so its (un-gated)
+        // progress dialog lights up. Throttled to ~1/s; start + terminal frames sent promptly. The command queue
+        // serializes delivery (one bolus at a time), so the armed clientId stays valid for the whole lifecycle.
+        if (!config.AAPSCLIENT) appScope.launch {
+            var prev: BolusProgressState? = null
+            var lastWrite = 0L
+            bolusProgressData.state.collect { st ->
+                val previous = prev // snapshot: prev is a mutated captured var, so it can't smart-cast in the when
+                val clientId = progressClientId.get()
+                val armedFresh = clientId != null && dateUtil.now() - progressArmedAt < progressArmTtlMs
+                if (clientId != null && armedFresh && st?.isSMB != true) {
+                    when {
+                        st == null && previous != null  -> { // ended before 100 (pump failure / cancel)
+                            writeProgress(clientId, ProgressPhase.Cleared, previous)
+                            progressClientId.set(null)
+                        }
+
+                        st != null && st.percent >= 100 -> { // delivered
+                            writeProgress(clientId, ProgressPhase.Complete, st)
+                            progressClientId.set(null)
+                        }
+
+                        st != null                      -> { // in flight: send start immediately, then throttle
+                            val nowMs = dateUtil.now()
+                            if (previous == null || nowMs - lastWrite >= progressSampleMs) {
+                                writeProgress(clientId, ProgressPhase.Active, st)
+                                lastWrite = nowMs
+                            }
+                        }
+                    }
+                }
+                prev = st
+            }
+        }
+    }
 
     /**
      * Polling fallback. Lists NS settings, filters to client-control identifiers, and
@@ -134,6 +188,8 @@ class ClientControlReceiver @Inject constructor(
             if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_OFFER_PREFIX)) continue
             // Skip our own command ACKs (master-written, for clients). Same reason as offers.
             if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX)) continue
+            // Skip our own bolus-progress docs (master-written, for clients).
+            if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_PROGRESS_PREFIX)) continue
             verifyAndAck(identifier, doc, now)
         }
     }
@@ -147,6 +203,8 @@ class ClientControlReceiver @Inject constructor(
         if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_OFFER_PREFIX)) return
         // Command ACKs are master-written, consumed by clients — never an inbound command here.
         if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX)) return
+        // Bolus-progress docs are master-written, consumed by clients — never an inbound command here.
+        if (identifier.startsWith(ClientControlPublisher.IDENTIFIER_PROGRESS_PREFIX)) return
         verifyAndAck(identifier, doc, dateUtil.now())
     }
 
@@ -238,6 +296,7 @@ class ClientControlReceiver @Inject constructor(
             is ClientControlMessage.WizardPrepare     -> onVerifiedWizardPrepare(entry, envelope, message, now)
             is ClientControlMessage.BatchPrepare      -> onVerifiedBatchPrepare(entry, envelope, message, now)
             ClientControlMessage.DismissAlarm         -> onVerifiedDismissAlarm(entry, envelope, now)
+            ClientControlMessage.StopBolus            -> onVerifiedStopBolus(entry, envelope, now)
         }
         if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Done, outcome.status, outcome.reason, outcome.payload, now)
         // Don't deleteSettings here. NS soft-deletes (tombstones) the identifier; the next
@@ -280,6 +339,18 @@ class ClientControlReceiver @Inject constructor(
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         notificationManager.dismiss(NotificationId.BOLUS_DELIVERY_FAILED)
         nsClientRepository.addLog("◄ CLIENTCTL", "dismiss_alarm from ${entry.name}")
+        return AckOutcome(AckStatus.Ok, null)
+    }
+
+    /**
+     * Client asked to abort the in-progress bolus it initiated. Fire-and-forget (wantsAck=false). cancelAllBoluses
+     * stops the running bolus (or no-ops if none is running); the resulting progress terminal mirrors back. ONE-WAY
+     * like DismissAlarm — no ack.
+     */
+    private fun onVerifiedStopBolus(entry: AuthorizedClient, envelope: SignedEnvelope, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        commandQueue.cancelAllBoluses(null)
+        nsClientRepository.addLog("◄ CLIENTCTL", "stop_bolus from ${entry.name}")
         return AckOutcome(AckStatus.Ok, null)
     }
 
@@ -417,6 +488,10 @@ class ClientControlReceiver @Inject constructor(
         // asynchronously (the pump delivery failed — the outcome the Done ack couldn't wait for). After confirm() returns
         // the synchronous phase is over, so any further failure is the async one: relay it as a late Delivery ack the
         // client turns into its own alarm. (The master itself already alarms via the executor — phase 1a.)
+        // Arm the progress mirror to THIS client BEFORE delivery starts (the executor only sees Sources.NSClient,
+        // not the clientId). Disarmed below if nothing was parked, and on the terminal frame by the observer.
+        progressClientId.set(entry.clientId)
+        progressArmedAt = now
         val syncDone = AtomicBoolean(false)
         val result = wizardBolusExecutor.confirm(message.bolusId, Sources.NSClient, { comment ->
             if (syncDone.get()) appScope.launch { writeDeliveryFailureAck(entry, envelope.counter, comment) }
@@ -424,6 +499,7 @@ class ClientControlReceiver @Inject constructor(
         }, message.asAdvisor)
         syncDone.set(true)
         val delivered = result is WizardBolusExecutor.ConfirmResult.Delivered
+        if (!delivered) progressClientId.set(null) // NoPending → nothing starts → don't mirror a future bolus to this client
         nsClientRepository.addLog("◄ CLIENTCTL", "bolus.commit id=${message.bolusId}${if (message.asAdvisor) " advisor" else ""} from ${entry.name}: ${if (delivered) "delivered" else "no-pending"}")
         val err = deliverError.get()
         return when {
@@ -637,6 +713,33 @@ class ClientControlReceiver @Inject constructor(
         val client = nsClientV3Plugin.get().nsAndroidClient ?: return
         val secret = authorizedRepository.secretLookup(entry.clientId)?.secretBytes ?: return
         writeAck(client, secret, entry.clientId, commandCounter, AckPhase.Delivery, AckStatus.Failed, FailureReason.ExecutionFailed.name, comment, dateUtil.now())
+    }
+
+    /**
+     * Write one throttled bolus-progress frame to the armed client's per-client doc (overwritten in place). Signed
+     * with the shared secret so a forged "delivered" is no more believable than a forged ack. Best-effort — a dropped
+     * frame just means a momentarily stale bar on the client; the next frame (or the terminal) corrects it.
+     */
+    private suspend fun writeProgress(clientId: String, phase: ProgressPhase, st: BolusProgressState) {
+        val client = nsClientV3Plugin.get().nsAndroidClient ?: return
+        val secret = authorizedRepository.secretLookup(clientId)?.secretBytes ?: return
+        val env = ClientControlCrypto.signProgress(
+            secret,
+            ProgressEnvelope(
+                clientId = clientId, phase = phase, insulin = st.insulin, percent = st.percent, status = st.status,
+                delivered = st.delivered.cU, stopDeliveryEnabled = st.stopDeliveryEnabled, timestamp = dateUtil.now(), signature = ""
+            )
+        )
+        val identifier = ClientControlPublisher.IDENTIFIER_PROGRESS_PREFIX + clientId
+        val doc = JSONObject().apply {
+            put("date", ClientControlPublisher.DOC_DATE)
+            put("utcOffset", 0)
+            put("app", "AAPS")
+            put("schemaVersion", ClientControlPublisher.SCHEMA_VERSION)
+            put("progress", JSONObject(json.encodeToString(ProgressEnvelope.serializer(), env)))
+        }
+        runCatching { client.updateSettings(identifier, doc) }
+            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl: progress write failed for $identifier: ${it.message}") }
     }
 
     /** Result a command handler reports back so [verifyAndAck] can write the terminal Done ack. */

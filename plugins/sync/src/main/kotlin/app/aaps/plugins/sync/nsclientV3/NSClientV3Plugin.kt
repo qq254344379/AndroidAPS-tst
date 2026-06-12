@@ -407,6 +407,15 @@ class NSClientV3Plugin @Inject constructor(
             .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl ACK dispatch failed: ${it.message}", it) }
     }
 
+    /**
+     * WS-push entry for a master→client bolus-progress frame (client side). NSClientV3Service routes
+     * `aaps_clientcontrol_progress_<clientId>` settings events here; feeds the client's own BolusProgressData.
+     */
+    fun handleClientControlProgressEvent(doc: JSONObject) {
+        runCatching { clientControlRoundTrip.onProgressDoc(doc) }
+            .onFailure { aapsLogger.error(LTag.NSCLIENT, "ClientControl progress dispatch failed: ${it.message}", it) }
+    }
+
     @Volatile private var lastProbeAt = 0L
 
     // See [NsClient.requestMasterProbe]. Client-only, WS-up-only, rate-limited. Fires a ping (its pong

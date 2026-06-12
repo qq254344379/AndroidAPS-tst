@@ -11,6 +11,9 @@ import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.BolusProgressState
+import app.aaps.core.interfaces.pump.PumpInsulin
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.ClientControlSendResult
 import app.aaps.core.interfaces.utils.DateUtil
@@ -20,6 +23,8 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.AckPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.MasterPairing
+import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressEnvelope
+import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressPhase
 import app.aaps.core.nssdk.utils.ClientControlCrypto
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import com.google.common.truth.Truth.assertThat
@@ -61,6 +66,7 @@ internal class ClientControlRoundTripTest {
     @Mock private lateinit var dateUtil: DateUtil
     @Mock private lateinit var notificationManager: NotificationManager
     @Mock private lateinit var rh: ResourceHelper
+    @Mock private lateinit var bolusProgressData: BolusProgressData
     @Mock private lateinit var aapsLogger: AAPSLogger
 
     private val now = 1_700_000_000_000L
@@ -86,7 +92,8 @@ internal class ClientControlRoundTripTest {
         whenever(nsClientV3Plugin.nsAndroidClient).thenReturn(nsAndroidClient)
         whenever(config.AAPSCLIENT).thenReturn(true)
         whenever(notificationManager.notifications).thenReturn(notifications)
-        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
+        whenever(bolusProgressData.state).thenReturn(MutableStateFlow<BolusProgressState?>(null))
+        sut = ClientControlRoundTrip(publisher, pairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, config, dateUtil, notificationManager, rh, bolusProgressData, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
     }
 
     @Test
@@ -118,6 +125,52 @@ internal class ClientControlRoundTripTest {
         notifications.value = emptyList()
 
         verify(publisher, never()).publish(ClientControlMessage.DismissAlarm)
+    }
+
+    @Test
+    fun onProgressDoc_activePhase_startsAndUpdatesClientBolusProgress() = runTest {
+        // A signed Active frame drives the client's OWN BolusProgressData → the existing dialog lights up.
+        sut.onProgressDoc(progressDoc(ProgressPhase.Active, percent = 40, status = "Delivering 0.8U", insulin = 2.0, delivered = 0.8))
+
+        verify(bolusProgressData).start(eq(2.0), eq(false), eq(false))
+        verify(bolusProgressData).updateProgress(eq(40), eq("Delivering 0.8U"), any<PumpInsulin>())
+    }
+
+    @Test
+    fun onProgressDoc_completePhase_completesClientBolusProgress() = runTest {
+        sut.onProgressDoc(progressDoc(ProgressPhase.Complete, percent = 100))
+        verify(bolusProgressData).completeAndAutoClear()
+    }
+
+    @Test
+    fun onProgressDoc_clearedPhase_clearsClientBolusProgress() = runTest {
+        sut.onProgressDoc(progressDoc(ProgressPhase.Cleared))
+        verify(bolusProgressData).clear()
+    }
+
+    @Test
+    fun onProgressDoc_forgedSignature_isIgnored() = runTest {
+        sut.onProgressDoc(progressDoc(ProgressPhase.Active, percent = 50, signSecret = ByteArray(32) { 0x42 }))
+        verify(bolusProgressData, never()).start(any<Double>(), any<Boolean>(), any<Boolean>())
+    }
+
+    @Test
+    fun stopBolus_publishesStopBolusToMaster() = runTest {
+        whenever(publisher.publish(ClientControlMessage.StopBolus)).thenReturn(ClientControlSendResult.NotPaired)
+        sut.stopBolus()
+        verify(publisher).publish(ClientControlMessage.StopBolus)
+    }
+
+    /** A signed master→client progress frame as the WS layer would hand it to onProgressDoc. */
+    private fun progressDoc(
+        phase: ProgressPhase, percent: Int = 0, status: String = "", insulin: Double = 2.0,
+        delivered: Double = 0.0, ts: Long = now, signSecret: ByteArray = secret
+    ): JSONObject {
+        val env = ClientControlCrypto.signProgress(
+            signSecret,
+            ProgressEnvelope(clientId, phase, insulin, percent, status, delivered, stopDeliveryEnabled = true, timestamp = ts, signature = "")
+        )
+        return JSONObject().apply { put("progress", JSONObject(json.encodeToString(ProgressEnvelope.serializer(), env))) }
     }
 
     private suspend fun stubPublish(result: ClientControlSendResult, ctr: Long? = counter) {

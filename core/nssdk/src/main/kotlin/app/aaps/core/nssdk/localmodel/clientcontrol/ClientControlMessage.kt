@@ -187,6 +187,15 @@ sealed class ClientControlMessage {
     @Serializable
     @SerialName("dismiss_alarm")
     data object DismissAlarm : ClientControlMessage()
+
+    /**
+     * Client asks the master to abort the in-progress bolus it initiated (the one being mirrored to this client).
+     * Fire-and-forget: the master calls commandQueue.cancelAllBoluses() and the resulting progress terminal mirrors
+     * back. Safe (only ever delivers less) and idempotent.
+     */
+    @Serializable
+    @SerialName("stop_bolus")
+    data object StopBolus : ClientControlMessage()
 }
 
 /** One synced preference on the wire: its value (serialized as a string) and edit timestamp. */

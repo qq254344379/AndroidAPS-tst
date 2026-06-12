@@ -57,6 +57,11 @@ class ClientControlPublisher @Inject constructor(
         // the client reads here. Shares IDENTIFIER_PREFIX, so the master receiver MUST skip it (it is
         // not an inbound command envelope) — see ClientControlReceiver.
         const val IDENTIFIER_ACK_PREFIX = "${IDENTIFIER_PREFIX}ack_"
+
+        // Master→client live bolus-progress mirror (one per client, overwritten in place, throttled ~1/s).
+        // The master writes here; the client reads here. Shares IDENTIFIER_PREFIX, so the master receiver MUST
+        // skip it (it is not an inbound command envelope) — see ClientControlReceiver.
+        const val IDENTIFIER_PROGRESS_PREFIX = "${IDENTIFIER_PREFIX}progress_"
         const val SCHEMA_VERSION = 1
 
         // Fire-and-forget commands keep the historical ±5 min skew window as their validity, so adding
@@ -130,6 +135,7 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.TempTargetSet,
             ClientControlMessage.TempTargetCancel,
             ClientControlMessage.DismissAlarm,
+            ClientControlMessage.StopBolus,
             is ClientControlMessage.PreferencesUpdate,
             is ClientControlMessage.BolusPrepare,
             is ClientControlMessage.BolusCommit,

@@ -750,7 +750,12 @@ class ComposeMainActivity : AppCompatActivity() {
                     queueStatusText = pumpQueueStatus,
                     isPumpCommunicating = pumpStatusBanner != null,
                     onStopBolus = {
-                        commandQueue.cancelAllBoluses(null)
+                        if (config.AAPSCLIENT) {
+                            clientControlActionDispatcher.stopBolus()
+                            bolusProgressData.stopPressed()
+                        } else {
+                            commandQueue.cancelAllBoluses(null)
+                        }
                     }
                 )
             }
@@ -815,7 +820,12 @@ class ComposeMainActivity : AppCompatActivity() {
                     queueStatus = queueStatus,
                     isModal = true,
                     onStop = {
-                        commandQueue.cancelAllBoluses(null)
+                        if (config.AAPSCLIENT) {
+                            clientControlActionDispatcher.stopBolus()
+                            bolusProgressData.stopPressed()
+                        } else {
+                            commandQueue.cancelAllBoluses(null)
+                        }
                     },
                     onDismiss = { }
                 )

@@ -10,6 +10,9 @@ import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.BolusProgressState
+import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
@@ -107,6 +110,9 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
     @Mock private lateinit var notificationManager: NotificationManager
     @Mock private lateinit var rh: ResourceHelper
+    @Mock private lateinit var masterConfig: Config
+    @Mock private lateinit var bolusProgressData: BolusProgressData
+    @Mock private lateinit var commandQueue: CommandQueue
     private var masterAuthorizedClients = "[]"
     private var masterModified = 0L
     private var masterAppliedValue: String? = null
@@ -167,14 +173,27 @@ class ClientControlUplinkIntegrationTest {
         clientPairingRepository = ClientPairingRepository(clientPrefs, secureEncrypt, aapsLogger)
         clientControlPublisher = ClientControlPublisher(clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, dateUtil, aapsLogger)
         whenever(notificationManager.notifications).thenReturn(MutableStateFlow(emptyList<AapsNotification>()))
+        whenever(bolusProgressData.state).thenReturn(MutableStateFlow<BolusProgressState?>(null))
         val clientControlRoundTrip =
-            ClientControlRoundTrip(clientControlPublisher, clientPairingRepository, Provider { nsClientV3Plugin }, nsClientRepository, clientConfig, dateUtil, notificationManager, rh, aapsLogger, CoroutineScope(Dispatchers.Unconfined))
+            ClientControlRoundTrip(
+                clientControlPublisher,
+                clientPairingRepository,
+                Provider { nsClientV3Plugin },
+                nsClientRepository,
+                clientConfig,
+                dateUtil,
+                notificationManager,
+                rh,
+                bolusProgressData,
+                aapsLogger,
+                CoroutineScope(Dispatchers.Unconfined)
+            )
         preferencesClientPublisher = PreferencesClientPublisher(clientPrefs, clientControlRoundTrip, clientConfig, rh, aapsLogger)
 
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, notificationManager, aapsLogger,
+            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, notificationManager, masterConfig, bolusProgressData, commandQueue, aapsLogger,
             CoroutineScope(Dispatchers.Unconfined)
         )
 
