@@ -197,6 +197,8 @@
     <string name="reset">Reset</string>
     <string name="profileswitch_ismissing">ProfileSwitch missing. Please do a profile switch or press \"Activate Profile\" in the LocalProfile.</string>
     <string name="profile">Profile</string>
+    <string name="percentage_label">Percentage</string>
+    <string name="timeshift_label">Timeshift</string>
     <string name="confirm_remove_multiple_items">Are you sure you want to remove %1$d items</string>
     <string name="overview_treatment_label">Treatment</string>
     <string name="copytolocalprofile">Create new profile from this profile?</string>

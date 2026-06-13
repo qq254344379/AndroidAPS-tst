@@ -1,6 +1,7 @@
 package app.aaps.ui.compose.main
 
 import androidx.compose.runtime.Stable
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.iob.InMemoryGlucoseValue
@@ -11,7 +12,6 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
@@ -68,6 +68,16 @@ import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.objects.wizard.QuickWizardMode
+import app.aaps.core.ui.compose.icons.IcAction
+import app.aaps.core.ui.compose.icons.IcAutomation
+import app.aaps.core.ui.compose.icons.IcBolus
+import app.aaps.core.ui.compose.icons.IcCarbs
+import app.aaps.core.ui.compose.icons.IcProfile
+import app.aaps.core.ui.compose.icons.IcQuickwizard
+import app.aaps.core.ui.compose.icons.IcTtActivity
+import app.aaps.core.ui.compose.icons.IcTtEatingSoon
+import app.aaps.core.ui.compose.icons.IcTtHypo
+import app.aaps.core.ui.compose.icons.IcTtManual
 import app.aaps.ui.compose.aboutDialog.AboutDialogData
 import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
@@ -501,7 +511,7 @@ class MainViewModel @Inject constructor(
         onCommit: (asAdvisor: Boolean) -> Unit
     ) {
         fun showConfirm(lines: List<ConfirmationLine>, asAdvisor: Boolean) =
-            rxBus.send(EventShowDialog.OkCancel(title = entry.buttonText(), message = "", confirmationLines = lines, onOk = { onCommit(asAdvisor) }))
+            rxBus.send(EventShowDialog.OkCancel(title = entry.buttonText(), message = "", confirmationLines = lines, icon = IcQuickwizard, onOk = { onCommit(asAdvisor) }))
         if (advisorApplies)
             rxBus.send(
                 EventShowDialog.YesNoCancel(
@@ -520,12 +530,12 @@ class MainViewModel @Inject constructor(
      * client → signed round-trip, master → local. The MASTER caps + builds the confirmation; the user confirms the
      * master's exact lines (the contract), then commits. INSULIN now has the client route it previously lacked.
      */
-    private suspend fun executeFixedBatch(entry: QuickWizardEntry, actions: List<BatchAction>, label: String) {
+    private suspend fun executeFixedBatch(entry: QuickWizardEntry, actions: List<BatchAction>, label: String, icon: ImageVector) {
         when (val prepared = batchExecutor.prepare(actions, Sources.QuickWizard, label)) {
             is ActionProgress.Prepared ->
                 rxBus.send(
                     EventShowDialog.OkCancel(
-                        title = entry.buttonText(), message = "", confirmationLines = prepared.lines,
+                        title = entry.buttonText(), message = "", confirmationLines = prepared.lines, icon = icon,
                         onOk = {
                             appScope.launch { batchExecutor.commit(prepared.bolusId, Sources.QuickWizard, label) }
                             entry.markAsUsed()
@@ -548,7 +558,8 @@ class MainViewModel @Inject constructor(
         executeFixedBatch(
             entry,
             listOf(BatchAction.Bolus(insulin = insulin, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null)),
-            rh.gs(app.aaps.core.ui.R.string.bolus)
+            rh.gs(app.aaps.core.ui.R.string.bolus),
+            IcBolus
         )
     }
 
@@ -558,7 +569,8 @@ class MainViewModel @Inject constructor(
         executeFixedBatch(
             entry,
             listOf(BatchAction.Bolus(insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null)),
-            rh.gs(app.aaps.core.ui.R.string.carbs)
+            rh.gs(app.aaps.core.ui.R.string.carbs),
+            IcCarbs
         )
     }
 
@@ -658,6 +670,7 @@ class MainViewModel @Inject constructor(
             ActionConfirmation(
                 title = event.title,
                 message = message,
+                icon = IcAutomation,
                 onConfirmAction = ConfirmableAction.ExecuteAutomation(automationId)
             )
         }
@@ -673,6 +686,12 @@ class MainViewModel @Inject constructor(
             ActionConfirmation(
                 title = rh.gs(app.aaps.core.ui.R.string.temp_target_management),
                 message = message,
+                icon = when (preset.reason) {
+                    TT.Reason.ACTIVITY     -> IcTtActivity
+                    TT.Reason.EATING_SOON  -> IcTtEatingSoon
+                    TT.Reason.HYPOGLYCEMIA -> IcTtHypo
+                    else                   -> IcTtManual
+                },
                 onConfirmAction = ConfirmableAction.ActivateTempTargetPreset(presetId)
             )
         }
@@ -689,6 +708,7 @@ class MainViewModel @Inject constructor(
             ActionConfirmation(
                 title = rh.gs(app.aaps.ui.R.string.activate_profile),
                 message = details,
+                icon = IcProfile,
                 onConfirmAction = ConfirmableAction.ActivateProfile(profileName, percentage, durationMinutes)
             )
         }
@@ -778,6 +798,7 @@ class MainViewModel @Inject constructor(
             ActionConfirmation(
                 title = rh.gs(app.aaps.core.ui.R.string.scene),
                 message = message,
+                icon = IcAction,
                 onConfirmAction = ConfirmableAction.ActivateScene(sceneId, scene.defaultDurationMinutes)
             )
         }
@@ -798,6 +819,7 @@ class MainViewModel @Inject constructor(
             if (target != null) ActionConfirmation(
                 title = rh.gs(app.aaps.core.ui.R.string.scene_deactivate),
                 message = message,
+                icon = IcAction,
                 onConfirmAction = ConfirmableAction.DeactivateAndChainScene(target.id),
                 confirmLabel = rh.gs(app.aaps.core.ui.R.string.scene_skip_to_format, target.name),
                 secondaryAction = ConfirmableAction.DeactivateScene,
@@ -806,6 +828,7 @@ class MainViewModel @Inject constructor(
             else ActionConfirmation(
                 title = rh.gs(app.aaps.core.ui.R.string.scene_deactivate),
                 message = message,
+                icon = IcAction,
                 onConfirmAction = ConfirmableAction.DeactivateScene
             )
         }
@@ -838,24 +861,18 @@ class MainViewModel @Inject constructor(
             }
 
             is ConfirmableAction.ActivateProfile          -> {
-                val store = profileRepository.profile.value ?: return@launch
-                profileFunction.createProfileSwitch(
-                    profileStore = store,
-                    profileName = action.profileName,
-                    durationInMinutes = action.durationMinutes,
-                    percentage = action.percentage,
-                    timeShiftInHours = 0,
-                    timestamp = dateUtil.now(),
-                    action = Action.PROFILE_SWITCH,
-                    source = Sources.ProfileSwitchDialog,
-                    note = null,
-                    listValues = listOf(
-                        ValueWithUnit.SimpleString(action.profileName),
-                        ValueWithUnit.Percent(action.percentage),
-                        ValueWithUnit.Minute(action.durationMinutes)
-                    ),
-                    iCfg = insulin.iCfg
-                )
+                // The user already confirmed via the ActionConfirmation modal, so prepare+commit straight through the
+                // role-transparent BatchExecutor (master applies locally; a client relays the named switch to the master).
+                val label = rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)
+                val actions = listOf(BatchAction.ProfileSwitch(action.percentage, 0, action.durationMinutes, profileName = action.profileName))
+                when (val prepared = batchExecutor.prepare(actions, Sources.ProfileSwitchDialog, label)) {
+                    is ActionProgress.Prepared -> batchExecutor.commit(prepared.bolusId, Sources.ProfileSwitchDialog, label)
+                    is ActionProgress.Rejected ->
+                        if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                            rxBus.send(EventShowDialog.Ok(title = label, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+
+                    else                       -> Unit // Unconfirmed → app modal
+                }
             }
 
             is ConfirmableAction.ActivateScene            ->

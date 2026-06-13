@@ -246,7 +246,10 @@ class DataHandlerMobile @Inject constructor(
         onEvent<EventData.ActionTddStatus> { handleTddStatus() }
         onEvent<EventData.ActionProfileSwitchSendInitialData> { handleProfileSwitchSendInitialData() }
         onEvent<EventData.ActionProfileSwitchPreCheck> { handleProfileSwitchPreCheck(it) }
-        onEvent<EventData.ActionProfileSwitchConfirmed> { doProfileSwitch(it) }
+        onEvent<EventData.ActionProfileSwitchConfirmed> {
+            // Consume the parked profile switch by id; confirm() applies it via the shared applyProfileSwitch.
+            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+        }
         onEvent<EventData.ActionTempTargetPreCheck> { handleTempTargetPreCheck(it) }
         onEvent<EventData.ActionTempTargetConfirmed> {
             // Consume the parked TT by id; confirm() applies it via the shared applyTempTarget (set or cancel).
@@ -873,32 +876,22 @@ class DataHandlerMobile @Inject constructor(
 
     }
 
-    private suspend fun handleProfileSwitchPreCheck(command: EventData.ActionProfileSwitchPreCheck) {
-        val activeProfileSwitch = persistenceLayer.getEffectiveProfileSwitchActiveAt(dateUtil.now())
-        if (activeProfileSwitch == null) {
-            sendError(rh.gs(R.string.no_active_profile))
+    // internal + suspend so DataHandlerMobileWearBolusTest can drive it; routes through the shared prepare/confirm.
+    internal suspend fun handleProfileSwitchPreCheck(command: EventData.ActionProfileSwitchPreCheck) {
+        // Validate (active profile + CPP ranges) + park on the master via the shared batch path; ship its
+        // master-authored lines + bolusId. The wear ✓ then calls confirm(bolusId) → the shared applyProfileSwitch.
+        when (val result = wizardBolusExecutor.prepareBatch(listOf(BatchAction.ProfileSwitch(command.percentage, command.timeShift, command.duration)))) {
+            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
+            is WizardBolusExecutor.PrepareResult.Preview ->
+                sendToWear(
+                    EventData.ConfirmAction(
+                        // title is the watch's curved header for the lines screen.
+                        rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch), message = "",
+                        returnCommand = EventData.ActionProfileSwitchConfirmed(result.bolusId),
+                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
+                    )
+                )
         }
-        if (command.percentage < Constants.CPP_MIN_PERCENTAGE || command.percentage > Constants.CPP_MAX_PERCENTAGE) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.valueoutofrange, "Profile-Percentage"))
-        }
-        if (command.timeShift < Constants.CPP_MIN_TIMESHIFT || command.timeShift > Constants.CPP_MAX_TIMESHIFT) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.valueoutofrange, "Profile-Timeshift"))
-        }
-        if (command.duration < 0 || command.duration > Constants.MAX_PROFILE_SWITCH_DURATION) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.valueoutofrange, "Profile-Duration"))
-        }
-        val profileName = profileFunction.getOriginalProfileName()
-        val message = rh.gs(R.string.profile_message, profileName, command.timeShift, command.percentage, command.duration)
-        sendToWear(
-            EventData.ConfirmAction(
-                rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                returnCommand = EventData.ActionProfileSwitchConfirmed(command.timeShift, command.percentage, command.duration),
-                profileName = profileName,
-                profilePercentage = command.percentage,
-                profileTimeshift = command.timeShift,
-                profileDurationMinutes = command.duration,
-            )
-        )
     }
 
     private fun formatGlucose(value: Double, isMgdl: Boolean): String {
@@ -1628,30 +1621,6 @@ class DataHandlerMobile @Inject constructor(
         profile ?: return rh.gs(app.aaps.core.ui.R.string.noprofile)
         if (!loop.runningMode().isLoopRunning()) status += rh.gs(R.string.disabled_loop) + "\n"
         return status
-    }
-
-    private suspend fun doProfileSwitch(command: EventData.ActionProfileSwitchConfirmed) {
-        //check for validity
-        if (command.percentage < Constants.CPP_MIN_PERCENTAGE || command.percentage > Constants.CPP_MAX_PERCENTAGE)
-            return
-        if (command.timeShift < Constants.CPP_MIN_TIMESHIFT || command.timeShift > Constants.CPP_MAX_TIMESHIFT)
-            return
-        if (command.duration < 0 || command.duration > Constants.MAX_PROFILE_SWITCH_DURATION)
-            return
-        profileFunction.getProfile() ?: return
-        //send profile to pump
-        profileFunction.createProfileSwitch(
-            durationInMinutes = command.duration,
-            percentage = command.percentage,
-            timeShiftInHours = command.timeShift,
-            action = Action.PROFILE_SWITCH,
-            source = Sources.Wear,
-            listValues = listOfNotNull(
-                ValueWithUnit.Percent(command.percentage),
-                ValueWithUnit.Hour(command.timeShift).takeIf { command.timeShift != 0 },
-                ValueWithUnit.Minute(command.duration)
-            )
-        )
     }
 
     private fun sendError(errorMessage: String) {

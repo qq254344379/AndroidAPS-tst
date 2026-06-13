@@ -222,7 +222,7 @@ sealed class EventData : Event() {
     data class ActionFillConfirmed(val insulin: Double) : EventData()
 
     @Serializable
-    data class ActionProfileSwitchConfirmed(val timeShift: Int, val percentage: Int, val duration: Int) : EventData()
+    data class ActionProfileSwitchConfirmed(val bolusId: Long) : EventData()
 
     @Serializable
     data class OpenLoopRequestConfirmed(val timeStamp: Long) : EventData()
@@ -474,15 +474,10 @@ sealed class EventData : Event() {
         val title: String,
         val message: String,
         val returnCommand: EventData?,
-        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target): the watch renders
-        // these verbatim, the same lines the phone dialog + every client show. Empty for the remaining typed-field
-        // cases (ProfileSwitch, RunningMode).
+        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target / profile switch): the
+        // watch renders these verbatim, the same lines the phone dialog + every client show. Empty for the remaining
+        // typed-field case (RunningMode).
         val lines: List<ConfirmActionLine> = emptyList(),
-        // ProfileSwitch fields
-        val profileName: String? = null,
-        val profilePercentage: Int? = null,
-        val profileTimeshift: Int? = null,
-        val profileDurationMinutes: Int? = null,
         // RunningMode fields
         val runningModeTitle: String? = null,
         val runningModeDurationMinutes: Int? = null,

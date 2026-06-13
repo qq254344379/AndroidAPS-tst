@@ -480,6 +480,7 @@ fun MainScreen(
             ThreeButtonDialog(
                 title = confirmation.title,
                 message = confirmation.message,
+                icon = confirmation.icon,
                 primaryLabel = confirmation.confirmLabel ?: stringResource(R.string.ok),
                 onPrimary = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
                 secondaryLabel = secondaryLabel,
@@ -490,6 +491,7 @@ fun MainScreen(
             OkCancelDialog(
                 title = confirmation.title,
                 message = confirmation.message,
+                icon = confirmation.icon,
                 onConfirm = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
                 onDismiss = { mainViewModel.dismissActionConfirmation() }
             )

@@ -69,7 +69,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-    class DataHandlerWear @Inject constructor(
+class DataHandlerWear @Inject constructor(
     private val context: Context,
     private val rxBus: RxBus,
     private val aapsSchedulers: AapsSchedulers,
@@ -126,10 +126,6 @@ import javax.inject.Singleton
                             bundle.putStringArray(DataLayerListenerServiceWear.KEY_LINE_TEXTS, it.lines.map { l -> l.text }.toTypedArray())
                         }
                         bundle.putBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, it.returnCommand is EventData.Error)
-                        it.profileName?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_PROFILE_NAME, v) }
-                        it.profilePercentage?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_PROFILE_PERCENTAGE, v) }
-                        it.profileTimeshift?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_PROFILE_TIMESHIFT, v) }
-                        it.profileDurationMinutes?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_PROFILE_DURATION, v) }
                         it.runningModeTitle?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TITLE, v) }
                         it.runningModeDurationMinutes?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES, v) }
                         it.runningModeType?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TYPE, v) }

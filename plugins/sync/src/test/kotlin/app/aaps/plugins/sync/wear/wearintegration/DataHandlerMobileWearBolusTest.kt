@@ -237,6 +237,30 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
         assertThat(sent.returnCommand).isInstanceOf(EventData.Error::class.java)
     }
 
+    // --- Profile switch (unified onto the shared prepareBatch/confirm + applyProfileSwitch path) -----------
+
+    @Test fun `profile switch precheck parks a ProfileSwitch batch and ships its bolusId + master lines`() = runTest {
+        stubPreview(0.0, 0, bolusId = 321L, lines = listOf(ConfirmationLine(ConfirmationRole.PRIMARY, "Profile: Test")))
+
+        val confirm = capturedConfirm {
+            runBlocking { sut.handleProfileSwitchPreCheck(EventData.ActionProfileSwitchPreCheck(timeShift = 2, percentage = 120, duration = 60)) }
+        }
+
+        // The wear command maps to a single ProfileSwitch batch action; the executor validates/parks and the ✓ confirms by bolusId.
+        verifyBlocking(wizardBolusExecutor) { prepareBatch(listOf(BatchAction.ProfileSwitch(120, 2, 60))) }
+        assertThat(confirm.returnCommand).isEqualTo(EventData.ActionProfileSwitchConfirmed(321L))
+        assertThat(confirm.lines).containsExactly(EventData.ConfirmActionLine("PRIMARY", "Profile: Test"))
+    }
+
+    @Test fun `profile switch precheck error from the executor becomes a sendError to the watch`() = runTest {
+        runBlocking { whenever(wizardBolusExecutor.prepareBatch(any())).thenReturn(WizardBolusExecutor.PrepareResult.Error("no profile")) }
+
+        val sent = capturedConfirm { runBlocking { sut.handleProfileSwitchPreCheck(EventData.ActionProfileSwitchPreCheck(timeShift = 0, percentage = 100, duration = 30)) } }
+
+        assertThat(sent.returnCommand).isInstanceOf(EventData.Error::class.java)
+        assertThat(sent.message).isEqualTo("no profile")
+    }
+
     // --- Subscription wiring (the onEvent / onEventSync helpers actually register each type) --------------
     //
     // The tests above drive the handler methods directly. These two instead post the event onto the real
@@ -256,6 +280,14 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
         stubPreview(1.0, 10, bolusId = 11L, lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "Bolus: 1.00 U")))
 
         rxBus.send(EventData.ActionBolusPreCheck(insulin = 1.0, carbs = 10))
+
+        verifyBlocking(wizardBolusExecutor, timeout(2000)) { prepareBatch(any()) }
+    }
+
+    @Test fun `onEvent dispatches a posted ActionProfileSwitchPreCheck to the handler`() {
+        stubPreview(0.0, 0, bolusId = 5L, lines = emptyList())
+
+        rxBus.send(EventData.ActionProfileSwitchPreCheck(timeShift = 0, percentage = 110, duration = 30))
 
         verifyBlocking(wizardBolusExecutor, timeout(2000)) { prepareBatch(any()) }
     }

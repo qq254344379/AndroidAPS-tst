@@ -70,18 +70,13 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val isError = extras?.getBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, false) ?: false
         // Curved header for the lines screen (e.g. "Treatment" / "Temporary target"), authored by the master.
         val title = extras?.getString(DataLayerListenerServiceWear.KEY_TITLE, "") ?: ""
-        val profileName = extras?.getString(DataLayerListenerServiceWear.KEY_PROFILE_NAME)
-        val profilePercentage = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_PROFILE_PERCENTAGE)) it.getInt(DataLayerListenerServiceWear.KEY_PROFILE_PERCENTAGE) else null }
-        val profileTimeshift = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_PROFILE_TIMESHIFT)) it.getInt(DataLayerListenerServiceWear.KEY_PROFILE_TIMESHIFT) else null }
-        val profileDuration = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_PROFILE_DURATION)) it.getInt(DataLayerListenerServiceWear.KEY_PROFILE_DURATION) else null }
         val runningModeTitle = extras?.getString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TITLE)
         val runningModeDuration = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES)) it.getInt(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES) else null }
         val runningModeType = extras?.getString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TYPE)
 
-        val hasProfileData = profileName != null
         val hasRunningModeData = runningModeTitle != null
 
-        if (message.isEmpty() && lines.isEmpty() && !hasProfileData && !hasRunningModeData) {
+        if (message.isEmpty() && lines.isEmpty() && !hasRunningModeData) {
             finish()
             return
         }
@@ -90,7 +85,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
         vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 50, 100, 50), -1))
 
         val hasLines = lines.isNotEmpty()
-        val hasAnyStructuredSummary = hasLines || hasProfileData || hasRunningModeData
+        val hasAnyStructuredSummary = hasLines || hasRunningModeData
 
         setContent {
             MaterialTheme {
@@ -107,7 +102,6 @@ class AcceptActivity : DaggerAppCompatActivity() {
                             0    -> {
                                 val curvedTitle = when {
                                     hasLines           -> title.ifEmpty { null }
-                                    hasProfileData     -> stringResource(R.string.status_profile_switch)
                                     hasRunningModeData -> stringResource(R.string.status_running_mode)
                                     else               -> null
                                 }
@@ -145,57 +139,6 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                                     fontSize = 16.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     textAlign = TextAlign.Center,
-                                                )
-                                            }
-                                        }
-                                    } else if (hasProfileData) {
-                                        // ProfileSwitch structured summary
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 24.dp, vertical = 16.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center,
-                                        ) {
-                                            Text(
-                                                text = stringResource(R.string.confirm),
-                                                color = Color.White,
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = profileName,
-                                                color = Color.White,
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                textAlign = TextAlign.Center,
-                                                maxLines = 2,
-                                            )
-                                            if (profilePercentage != null) {
-                                                Text(
-                                                    text = "$profilePercentage%",
-                                                    color = Color.White,
-                                                    fontSize = 20.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                )
-                                            }
-                                            if (profileTimeshift != null) {
-                                                val tsText = "${if (profileTimeshift > 0) "+" else ""}${stringResource(R.string.action_duration_hours_format, profileTimeshift)}"
-                                                Text(
-                                                    text = stringResource(R.string.action_confirm_timeshift, tsText),
-                                                    color = WearSecondaryText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                )
-                                            }
-                                            if (profileDuration != null) {
-                                                val durText = if (profileDuration == 0) "\u221E" else formatDurationMinutes(profileDuration)
-                                                Text(
-                                                    text = stringResource(R.string.action_confirm_duration, durText),
-                                                    color = WearSecondaryText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
                                                 )
                                             }
                                         }

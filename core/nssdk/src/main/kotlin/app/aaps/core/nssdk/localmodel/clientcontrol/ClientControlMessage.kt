@@ -207,7 +207,8 @@ data class PrefEntry(
 
 /**
  * One action on the wire for [ClientControlMessage.BatchPrepare] — a flat, type-tagged union (avoids polymorphic
- * serializer setup). [type] selects which fields are meaningful (`bolus` vs `temp_target`).
+ * serializer setup). [type] selects which fields are meaningful (`bolus` vs `temp_target` vs `profile_switch`).
+ * [durationMinutes] is shared by `temp_target` and `profile_switch`.
  */
 @Serializable
 data class BatchActionDto(
@@ -226,12 +227,17 @@ data class BatchActionDto(
     val lowMgdl: Double = 0.0,
     val highMgdl: Double = 0.0,
     val durationMinutes: Int = 0,
-    val startOffsetMinutes: Int = 0
+    val startOffsetMinutes: Int = 0,
+    // profile_switch (also reuses [notes]; [profileName] null → active-profile switch)
+    val percentage: Int = 0,
+    val timeShiftHours: Int = 0,
+    val profileName: String? = null
 ) {
 
     companion object {
 
         const val TYPE_BOLUS = "bolus"
         const val TYPE_TEMP_TARGET = "temp_target"
+        const val TYPE_PROFILE_SWITCH = "profile_switch"
     }
 }

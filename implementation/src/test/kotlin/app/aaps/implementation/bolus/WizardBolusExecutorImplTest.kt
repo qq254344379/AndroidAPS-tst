@@ -19,6 +19,8 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.notifications.NotificationAction
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
+import app.aaps.core.interfaces.profile.EffectiveProfile
+import app.aaps.core.interfaces.profile.ProfileStore
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.objects.runningMode.RunningModeGuard
@@ -28,6 +30,7 @@ import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -60,7 +63,7 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     @Mock lateinit var automation: Automation
 
     private fun create() = WizardBolusExecutorImpl(
-        aapsLogger, rh, quickWizard, bolusWizardProvider, profileFunction, iobCobCalculator, constraintsChecker, activePlugin,
+        aapsLogger, rh, quickWizard, bolusWizardProvider, profileFunction, profileRepository, insulin, iobCobCalculator, constraintsChecker, activePlugin,
         runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation, notificationManager,
         CoroutineScope(Dispatchers.Unconfined)
     )
@@ -290,6 +293,64 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         // Decision B: a target-LOWERING eating-soon TT is NOT applied when the bolus fails (else the loop chases the low).
         verify(persistenceLayer, never()).insertAndCancelCurrentTemporaryTarget(any(), any(), any(), anyOrNull(), any())
         verify(commandQueue, never()).bolus(anyOrNull())
+    }
+
+    @Test
+    fun prepareBatch_profileSwitch_parksAndConfirmAppliesViaCreateProfileSwitch() = runTest {
+        stubPassthroughConstraints()
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        whenever(profileFunction.getOriginalProfileName()).thenReturn("Test")
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(percentage = 120, timeShiftHours = 2, durationMinutes = 60))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        // PS-only batch: no pump bolus, no TT — only the dialog-free profile switch applied with the parked values.
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(profileFunction).createProfileSwitch(eq(60), eq(120), eq(2), eq(Action.PROFILE_SWITCH), eq(Sources.NSClient), anyOrNull(), any())
+    }
+
+    @Test
+    fun prepareBatch_profileSwitch_outOfRange_returnsErrorAndAppliesNothing() = runTest {
+        stubPassthroughConstraints()
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(percentage = 9999, timeShiftHours = 0, durationMinutes = 30)))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(profileFunction, never()).createProfileSwitch(any(), any(), any(), any(), any(), anyOrNull(), any())
+    }
+
+    @Test
+    fun prepareBatch_namedProfileSwitch_appliesViaNamedCreateProfileSwitchFromMasterStore() = runTest {
+        stubPassthroughConstraints()
+        val store = mock<ProfileStore>()
+        whenever(store.getSpecificProfile("Lunch")).thenReturn(mock())
+        whenever(profileRepository.profile).thenReturn(MutableStateFlow(store))
+        whenever(insulin.iCfg).thenReturn(mock())
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(110, 0, 60, profileName = "Lunch"))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        // The named overload resolves the target from the MASTER's store (a client may relay a name the master owns).
+        verify(profileFunction).createProfileSwitch(eq(store), eq("Lunch"), eq(60), eq(110), eq(0), any(), eq(Action.PROFILE_SWITCH), eq(Sources.NSClient), anyOrNull(), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_namedProfileSwitch_notInMasterStore_returnsError() = runTest {
+        stubPassthroughConstraints()
+        val store = mock<ProfileStore>()
+        whenever(store.getSpecificProfile(any())).thenReturn(null)
+        whenever(profileRepository.profile).thenReturn(MutableStateFlow(store))
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(100, 0, 0, profileName = "Ghost")))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
     }
 
     @Test

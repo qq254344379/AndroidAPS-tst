@@ -36,6 +36,7 @@ import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.BolusWizard
+import app.aaps.core.ui.compose.icons.IcCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
@@ -538,7 +539,7 @@ class WizardDialogViewModel @Inject constructor(
             fun showConfirm(lines: List<ConfirmationLine>, asAdvisor: Boolean) =
                 rxBus.send(
                     EventShowDialog.OkCancel(
-                        title = title, message = "", confirmationLines = lines,
+                        title = title, message = "", confirmationLines = lines, icon = IcCalculator,
                         onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, asAdvisor), label) } }
                     )
                 )

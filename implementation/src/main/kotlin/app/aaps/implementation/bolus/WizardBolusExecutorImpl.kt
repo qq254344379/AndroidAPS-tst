@@ -1,5 +1,6 @@
 package app.aaps.implementation.bolus
 
+import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.GlucoseUnit
@@ -20,6 +21,7 @@ import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
+import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -28,6 +30,7 @@ import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
@@ -63,6 +66,8 @@ class WizardBolusExecutorImpl @Inject constructor(
     private val quickWizard: QuickWizard,
     private val bolusWizardProvider: Provider<BolusWizard>,
     private val profileFunction: ProfileFunction,
+    private val profileRepository: ProfileRepository,
+    private val insulin: Insulin,
     private val iobCobCalculator: IobCobCalculator,
     private val constraintChecker: ConstraintsChecker,
     private val activePlugin: ActivePlugin,
@@ -105,6 +110,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         // Batch extension: a FIXED prepare may carry a temp target + a record-only flag/insulin/back-date,
         // delivered together in [confirm] (decision-B order). Null/false for a plain fixed or wizard prepare.
         val tempTarget: BatchAction.TempTarget? = null,
+        val profileSwitch: BatchAction.ProfileSwitch? = null,
         val recordOnly: Boolean = false,
         val iCfg: ICfg? = null,
         val bolusTimestamp: Long? = null
@@ -220,6 +226,7 @@ class WizardBolusExecutorImpl @Inject constructor(
     override suspend fun prepareBatch(actions: List<BatchAction>): WizardBolusExecutor.PrepareResult {
         val bolus = actions.filterIsInstance<BatchAction.Bolus>().firstOrNull()
         val tt = actions.filterIsInstance<BatchAction.TempTarget>().firstOrNull() // ≤1 by construction
+        val ps = actions.filterIsInstance<BatchAction.ProfileSwitch>().firstOrNull() // ≤1 by construction
         val recordOnly = bolus?.recordOnly == true
         // Gate + pump-init only for an actual INSULIN delivery — carbs-only, a record-only log, and a TT-only batch
         // are always allowed (mirrors executeBolus, which gates only when insulin > 0).
@@ -234,7 +241,25 @@ class WizardBolusExecutorImpl @Inject constructor(
             recordOnly    -> Triple(bolus.insulin, bolus.carbs, TE.Type.CORRECTION_BOLUS)
             else          -> capFixed(bolus.insulin, bolus.carbs).let { (i, c, t) -> Triple(i, clampNegativeCarbs(c, bolus.carbsTimeOffsetMinutes), t) }
         }
-        if (insulin <= 0.0 && carbs <= 0 && tt == null)
+        // Validate a profile switch up-front (the master is the authority): no active profile, or a value out of the
+        // CPP hard limits, fails the whole batch before parking — mirrors the old wear-local checks.
+        if (ps != null) {
+            val psName = ps.profileName
+            if (psName != null) {
+                // Named switch: the target must exist in the MASTER's store (a client may relay a name the master resolves).
+                if (profileRepository.profile.value?.getSpecificProfile(psName) == null)
+                    return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.scene_profile_not_found, psName))
+            } else if (profileFunction.getProfile() == null) {
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_profile_set))
+            }
+            if (ps.percentage < Constants.CPP_MIN_PERCENTAGE || ps.percentage > Constants.CPP_MAX_PERCENTAGE)
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.valueoutofrange, "Profile-Percentage"))
+            if (ps.timeShiftHours < Constants.CPP_MIN_TIMESHIFT || ps.timeShiftHours > Constants.CPP_MAX_TIMESHIFT)
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.valueoutofrange, "Profile-Timeshift"))
+            if (ps.durationMinutes < 0 || ps.durationMinutes > Constants.MAX_PROFILE_SWITCH_DURATION)
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.valueoutofrange, "Profile-Duration"))
+        }
+        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_action_selected))
         val bolusId = dateUtil.now()
         evictStalePending()
@@ -242,11 +267,13 @@ class WizardBolusExecutorImpl @Inject constructor(
             insulin = insulin, carbs = carbs, bcr = null, bolusId = bolusId, entry = null,
             carbTimeMinutes = bolus?.carbsTimeOffsetMinutes ?: 0, notes = bolus?.notes, mode = BolusMode.FIXED,
             eventType = eventType, carbsDurationHours = bolus?.carbsDurationHours ?: 0,
-            tempTarget = tt, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L }
+            tempTarget = tt, profileSwitch = ps, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L }
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
-        val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) + (tt?.let { buildTtLine(it) } ?: emptyList())
+        val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) +
+            (tt?.let { buildTtLine(it) } ?: emptyList()) +
+            (ps?.let { buildPsLine(it) } ?: emptyList())
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, "", bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
@@ -302,6 +329,8 @@ class WizardBolusExecutorImpl @Inject constructor(
                 }
             }
             if (tt != null && !raising && accepted) applyTempTarget(tt, source)
+            // A profile switch isn't gated on a dose (a PS-only batch funnels through here with a no-op deliver(0,0)).
+            p.profileSwitch?.let { applyProfileSwitch(it, source) }
             return WizardBolusExecutor.ConfirmResult.Delivered
         }
 
@@ -471,6 +500,60 @@ class WizardBolusExecutorImpl @Inject constructor(
     /** The TT line(s) for any batch (wear / client / phone) — range + duration + a localized reason, or a cancel line. */
     private fun buildTtLine(tt: BatchAction.TempTarget): List<ConfirmationLine> =
         buildTempTargetLines(localizeTtReason(tt.reason), tt.lowMgdl, tt.highMgdl, tt.durationMinutes)
+
+    /**
+     * Apply a batch ProfileSwitch via the dialog-free domain path. [profileName] non-null → switch to that named
+     * profile from the master's store (a relayed/dialog switch); null → modify the currently active profile (wear / CPP).
+     */
+    private suspend fun applyProfileSwitch(ps: BatchAction.ProfileSwitch, source: Sources) {
+        val psName = ps.profileName
+        if (psName != null) {
+            val store = profileRepository.profile.value ?: return
+            profileFunction.createProfileSwitch(
+                profileStore = store,
+                profileName = psName,
+                durationInMinutes = ps.durationMinutes,
+                percentage = ps.percentage,
+                timeShiftInHours = ps.timeShiftHours,
+                timestamp = dateUtil.now(),
+                action = Action.PROFILE_SWITCH,
+                source = source,
+                note = ps.notes,
+                listValues = listOfNotNull(
+                    ValueWithUnit.SimpleString(psName),
+                    ValueWithUnit.Percent(ps.percentage),
+                    ValueWithUnit.Hour(ps.timeShiftHours).takeIf { ps.timeShiftHours != 0 },
+                    ValueWithUnit.Minute(ps.durationMinutes).takeIf { ps.durationMinutes != 0 }
+                ),
+                iCfg = profileFunction.getProfile()?.iCfg ?: insulin.iCfg
+            )
+        } else {
+            profileFunction.createProfileSwitch(
+                durationInMinutes = ps.durationMinutes,
+                percentage = ps.percentage,
+                timeShiftInHours = ps.timeShiftHours,
+                action = Action.PROFILE_SWITCH,
+                source = source,
+                note = null,
+                listValues = listOfNotNull(
+                    ValueWithUnit.Percent(ps.percentage),
+                    ValueWithUnit.Hour(ps.timeShiftHours).takeIf { ps.timeShiftHours != 0 },
+                    ValueWithUnit.Minute(ps.durationMinutes)
+                )
+            )
+        }
+    }
+
+    /** The PS line(s) for any batch (wear / client / phone) — target profile name + percentage + optional time-shift + duration. */
+    private suspend fun buildPsLine(ps: BatchAction.ProfileSwitch): List<ConfirmationLine> {
+        val out = mutableListOf<ConfirmationLine>()
+        out += ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.profile), ps.profileName ?: profileFunction.getOriginalProfileName()))
+        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.percentage_label), rh.gs(R.string.format_percent, ps.percentage)))
+        if (ps.timeShiftHours != 0)
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.timeshift_label), rh.gs(R.string.value_with_unit, ps.timeShiftHours.toString(), rh.gs(app.aaps.core.interfaces.R.string.shorthour))))
+        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, ps.durationMinutes)))
+        return out
+    }
 
     /** Localized reason for a preset TT (Activity / Hypo / Eating-soon); "" for manual/wear/custom (no reason line). */
     private fun localizeTtReason(reasonText: String): String = when (TT.Reason.fromString(reasonText)) {
