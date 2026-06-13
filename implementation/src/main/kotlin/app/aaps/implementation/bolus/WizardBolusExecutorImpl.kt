@@ -246,7 +246,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
-        val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) + listOfNotNull(tt?.let { buildTtLine(it) })
+        val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) + (tt?.let { buildTtLine(it) } ?: emptyList())
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, "", bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
@@ -387,6 +387,17 @@ class WizardBolusExecutorImpl @Inject constructor(
     /** Apply a batch TempTarget via the dialog-free domain path (mirrors onVerifiedTempTargetSet). */
     private suspend fun applyTempTarget(tt: BatchAction.TempTarget, source: Sources) {
         val reason = TT.Reason.fromString(tt.reason)
+        // duration 0 = cancel the running TT (a CANCEL_TT entry), not a 0-minute target record.
+        if (tt.durationMinutes == 0) {
+            persistenceLayer.cancelCurrentTemporaryTargetIfAny(
+                timestamp = dateUtil.now(),
+                action = Action.CANCEL_TT,
+                source = source,
+                note = null,
+                listValues = listOf(ValueWithUnit.TETTReason(reason))
+            )
+            return
+        }
         persistenceLayer.insertAndCancelCurrentTemporaryTarget(
             temporaryTarget = TT(
                 timestamp = dateUtil.now() + T.mins(tt.startOffsetMinutes.toLong()).msecs(),
@@ -432,15 +443,41 @@ class WizardBolusExecutorImpl @Inject constructor(
         return out
     }
 
-    /** The TT confirmation line for a batch — target in the user's units (+ duration), the same shape the dialogs show. */
-    private fun buildTtLine(tt: BatchAction.TempTarget): ConfirmationLine {
-        val units = profileFunction.getUnits()
-        val unitLabel = if (units == GlucoseUnit.MMOL) rh.gs(R.string.mmol) else rh.gs(R.string.mgdl)
-        val target = decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(tt.lowMgdl, units))
-        return ConfirmationLine(
-            ConfirmationRole.NORMAL,
-            rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.value_with_unit, target, unitLabel) + " (" + rh.gs(R.string.format_mins, tt.durationMinutes) + ")")
-        )
+    /**
+     * Shared TT confirmation line(s) — the single generator behind the batch dialog, every client, and the wear
+     * TT confirm. Renders the target (a `low – high` range when they differ, else a single value) + an optional
+     * reason line, or a "cancel" line when [durationMinutes] is 0. [lowMgdl]/[highMgdl] in mg/dL; [reasonDisplay]
+     * already localized (or "").
+     */
+    private fun buildTempTargetLines(reasonDisplay: String, lowMgdl: Double, highMgdl: Double, durationMinutes: Int): List<ConfirmationLine> {
+        val out = mutableListOf<ConfirmationLine>()
+        if (durationMinutes == 0) {
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.cancel)))
+        } else {
+            val units = profileFunction.getUnits()
+            val unitLabel = if (units == GlucoseUnit.MMOL) rh.gs(R.string.mmol) else rh.gs(R.string.mgdl)
+            val low = decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(lowMgdl, units))
+            val target = if (lowMgdl == highMgdl) low else low + " – " + decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(highMgdl, units))
+            out += ConfirmationLine(
+                ConfirmationRole.NORMAL,
+                rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.value_with_unit, target, unitLabel) + " (" + rh.gs(R.string.format_mins, durationMinutes) + ")")
+            )
+            if (reasonDisplay.isNotEmpty())
+                out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.reason), reasonDisplay))
+        }
+        return out
+    }
+
+    /** The TT line(s) for any batch (wear / client / phone) — range + duration + a localized reason, or a cancel line. */
+    private fun buildTtLine(tt: BatchAction.TempTarget): List<ConfirmationLine> =
+        buildTempTargetLines(localizeTtReason(tt.reason), tt.lowMgdl, tt.highMgdl, tt.durationMinutes)
+
+    /** Localized reason for a preset TT (Activity / Hypo / Eating-soon); "" for manual/wear/custom (no reason line). */
+    private fun localizeTtReason(reasonText: String): String = when (TT.Reason.fromString(reasonText)) {
+        TT.Reason.HYPOGLYCEMIA -> rh.gs(R.string.hypo)
+        TT.Reason.ACTIVITY     -> rh.gs(R.string.activity)
+        TT.Reason.EATING_SOON  -> rh.gs(R.string.eatingsoon)
+        else                   -> ""
     }
 
     override suspend fun deliverWizardBolus(

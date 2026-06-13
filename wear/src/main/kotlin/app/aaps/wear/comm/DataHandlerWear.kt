@@ -113,12 +113,6 @@ class DataHandlerWear @Inject constructor(
                                 bundle.putStringArray(DataLayerListenerServiceWear.KEY_LINE_TEXTS, it.lines.map { l -> l.text }.toTypedArray())
                             }
                             bundle.putBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, it.returnCommand is EventData.Error)
-                            it.tempTargetLow?.let { v -> bundle.putDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_LOW, v) }
-                            it.tempTargetHigh?.let { v -> bundle.putDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_HIGH, v) }
-                            it.tempTargetDurationMinutes?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_TEMP_TARGET_DURATION, v) }
-                            bundle.putBoolean(DataLayerListenerServiceWear.KEY_TEMP_TARGET_IS_MGDL, it.tempTargetIsMGDL)
-                            bundle.putBoolean(DataLayerListenerServiceWear.KEY_CANCEL_TEMP_TARGET, it.isCancelTempTarget)
-                            it.tempTargetReason?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_TEMP_TARGET_REASON, v) }
                             it.profileName?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_PROFILE_NAME, v) }
                             it.profilePercentage?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_PROFILE_PERCENTAGE, v) }
                             it.profileTimeshift?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_PROFILE_TIMESHIFT, v) }

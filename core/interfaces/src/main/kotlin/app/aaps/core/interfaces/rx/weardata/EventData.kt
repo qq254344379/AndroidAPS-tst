@@ -210,7 +210,7 @@ sealed class EventData : Event() {
     data class ActionWizardConfirmed(val timeStamp: Long) : EventData()
 
     @Serializable
-    data class ActionTempTargetConfirmed(val isMgdl: Boolean = true, val duration: Int = 0, val low: Double = 0.0, val high: Double = 0.0) : EventData()
+    data class ActionTempTargetConfirmed(val bolusId: Long) : EventData()
 
     @Serializable
     data class ActionBolusConfirmed(val bolusId: Long) : EventData()
@@ -474,16 +474,10 @@ sealed class EventData : Event() {
         val title: String,
         val message: String,
         val returnCommand: EventData?,
-        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs): the watch renders these verbatim,
-        // the same lines the phone dialog + every client show. Empty for the typed-field cases (TempTarget, etc.).
+        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target): the watch renders
+        // these verbatim, the same lines the phone dialog + every client show. Empty for the remaining typed-field
+        // cases (ProfileSwitch, RunningMode).
         val lines: List<ConfirmActionLine> = emptyList(),
-        // TempTarget fields
-        val tempTargetLow: Double? = null,
-        val tempTargetHigh: Double? = null,
-        val tempTargetDurationMinutes: Int? = null,
-        val tempTargetIsMGDL: Boolean = true,
-        val isCancelTempTarget: Boolean = false,
-        val tempTargetReason: String? = null,
         // ProfileSwitch fields
         val profileName: String? = null,
         val profilePercentage: Int? = null,

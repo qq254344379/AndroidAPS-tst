@@ -22,6 +22,8 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.aps.GlucoseStatus
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
@@ -109,7 +111,6 @@ import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.min
 
 // Quiet-period that closes a Wear-event batch. Long enough to absorb a Data Layer reconnect-flush,
@@ -230,8 +231,9 @@ class DataHandlerMobile @Inject constructor(
                     rxBus.send(
                         EventMobileToWear(
                             EventData.ConfirmAction(
-                                rh.gs(R.string.loop_status).uppercase(),
-                                "${targetsStatus()}\n\n${loopStatus()}\n\n${oAPSResultStatus()}",
+                                // title is the watch's curved header for the (read-only) lines screen.
+                                rh.gs(R.string.loop_status), message = "",
+                                lines = (targetsStatus() + loopStatus() + oAPSResultStatus()).map { l -> EventData.ConfirmActionLine(l.role.name, l.text) },
                                 returnCommand = null
                             )
                         )
@@ -344,17 +346,23 @@ class DataHandlerMobile @Inject constructor(
         disposable += rxBus
             .toObservable(EventData.ActionTempTargetPreCheck::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "ActionTempTargetPreCheck received $it from ${it.sourceNodeId}")
-                           handleTempTargetPreCheck(it)
-                       }, fabricPrivacy::logException)
+            .concatMapCompletable {
+                rxCompletable {
+                    aapsLogger.debug(LTag.WEAR, "ActionTempTargetPreCheck received $it from ${it.sourceNodeId}")
+                    handleTempTargetPreCheck(it)
+                }
+                    .doOnError(fabricPrivacy::logException)
+                    .onErrorComplete()
+            }
+            .subscribe()
         disposable += rxBus
             .toObservable(EventData.ActionTempTargetConfirmed::class.java)
             .observeOn(aapsSchedulers.io)
             .concatMapCompletable {
                 rxCompletable {
                     aapsLogger.debug(LTag.WEAR, "ActionTempTargetConfirmed received $it from ${it.sourceNodeId}")
-                    doTempTarget(it)
+                    // Consume the parked TT by id; confirm() applies it via the shared applyTempTarget (set or cancel).
+                    wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
@@ -1054,7 +1062,8 @@ class DataHandlerMobile @Inject constructor(
         }
     }
 
-    private suspend fun handleBolusPreCheck(command: EventData.ActionBolusPreCheck) {
+    // internal (not private) so DataHandlerMobileWearBolusTest can drive it without RxBus scaffolding.
+    internal suspend fun handleBolusPreCheck(command: EventData.ActionBolusPreCheck) {
         // A client must not deliver insulin directly; carbs-only is allowed (it syncs).
         if (command.insulin > 0 && rejectIfAapsClient()) return
         // The executor is the single capping authority (constraints, negative-carb clamp), parks the dose, and
@@ -1069,7 +1078,7 @@ class DataHandlerMobile @Inject constructor(
         ) { EventData.ActionBolusConfirmed(it) }
     }
 
-    private suspend fun handleECarbsPreCheck(command: EventData.ActionECarbsPreCheck) {
+    internal suspend fun handleECarbsPreCheck(command: EventData.ActionECarbsPreCheck) {
         wizardBolusExecutor.clearPending()
         sendBatchPreCheck(
             BatchAction.Bolus(
@@ -1091,7 +1100,8 @@ class DataHandlerMobile @Inject constructor(
                 rxBus.send(
                     EventMobileToWear(
                         EventData.ConfirmAction(
-                            rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message = "",
+                            // title carries the watch's curved header for the lines screen.
+                            rh.gs(app.aaps.core.ui.R.string.overview_treatment_label), message = "",
                             returnCommand = returnCommand(result.bolusId),
                             lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
                         )
@@ -1194,80 +1204,39 @@ class DataHandlerMobile @Inject constructor(
             String.format(Locale.getDefault(), "%.1f mmol/L", value)
     }
 
-    private fun handleTempTargetPreCheck(action: EventData.ActionTempTargetPreCheck) {
-        val title = rh.gs(app.aaps.core.ui.R.string.confirm).uppercase()
-        var message = ""
+    // internal + suspend so DataHandlerMobileWearBolusTest can drive it; routes through the shared prepare/confirm.
+    internal suspend fun handleTempTargetPreCheck(action: EventData.ActionTempTargetPreCheck) {
         val presetIsMGDL = profileFunction.getUnits() == GlucoseUnit.MGDL
+
+        // Park the TT on the master via the shared batch path; ship its master-authored lines + bolusId. The wear
+        // ✓ then calls confirm(bolusId) → the shared applyTempTarget (set, or cancel for duration 0).
+        suspend fun sendTt(tt: BatchAction.TempTarget) {
+            when (val result = wizardBolusExecutor.prepareBatch(listOf(tt))) {
+                is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
+                is WizardBolusExecutor.PrepareResult.Preview ->
+                    rxBus.send(
+                        EventMobileToWear(
+                            EventData.ConfirmAction(
+                                // title is the watch's curved header for the lines screen.
+                                rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "",
+                                returnCommand = EventData.ActionTempTargetConfirmed(result.bolusId),
+                                lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
+                            )
+                        )
+                    )
+            }
+        }
+
+        suspend fun sendPreset(reason: TT.Reason) {
+            val mgdl = preferences.ttTargetMgdl(reason)
+            sendTt(BatchAction.TempTarget(reason.text, mgdl, mgdl, preferences.ttDurationMinutes(reason), 0))
+        }
+
         when (action.command) {
-            EventData.ActionTempTargetPreCheck.TempTargetCommand.PRESET_ACTIVITY -> {
-                val activityTTDuration = preferences.ttDurationMinutes(TT.Reason.ACTIVITY)
-                val activityTT = profileUtil.fromMgdlToUnits(preferences.ttTargetMgdl(TT.Reason.ACTIVITY), profileFunction.getUnits())
-                val formattedGlucoseValue = formatGlucose(activityTT, presetIsMGDL)
-                val reason = rh.gs(app.aaps.core.ui.R.string.activity)
-                message += rh.gs(R.string.wear_action_tempt_preset_message, reason, formattedGlucoseValue, activityTTDuration)
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            title, message,
-                            returnCommand = EventData.ActionTempTargetConfirmed(presetIsMGDL, activityTTDuration, activityTT, activityTT),
-                            tempTargetLow = activityTT, tempTargetHigh = activityTT,
-                            tempTargetDurationMinutes = activityTTDuration, tempTargetIsMGDL = presetIsMGDL,
-                            tempTargetReason = reason,
-                        )
-                    )
-                )
-            }
-
-            EventData.ActionTempTargetPreCheck.TempTargetCommand.PRESET_HYPO     -> {
-                val hypoTTDuration = preferences.ttDurationMinutes(TT.Reason.HYPOGLYCEMIA)
-                val hypoTT = profileUtil.fromMgdlToUnits(preferences.ttTargetMgdl(TT.Reason.HYPOGLYCEMIA), profileFunction.getUnits())
-                val formattedGlucoseValue = formatGlucose(hypoTT, presetIsMGDL)
-                val reason = rh.gs(app.aaps.core.ui.R.string.hypo)
-                message += rh.gs(R.string.wear_action_tempt_preset_message, reason, formattedGlucoseValue, hypoTTDuration)
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            title, message,
-                            returnCommand = EventData.ActionTempTargetConfirmed(presetIsMGDL, hypoTTDuration, hypoTT, hypoTT),
-                            tempTargetLow = hypoTT, tempTargetHigh = hypoTT,
-                            tempTargetDurationMinutes = hypoTTDuration, tempTargetIsMGDL = presetIsMGDL,
-                            tempTargetReason = reason,
-                        )
-                    )
-                )
-            }
-
-            EventData.ActionTempTargetPreCheck.TempTargetCommand.PRESET_EATING   -> {
-                val eatingSoonTTDuration = preferences.ttDurationMinutes(TT.Reason.EATING_SOON)
-                val eatingSoonTT = profileUtil.fromMgdlToUnits(preferences.ttTargetMgdl(TT.Reason.EATING_SOON), profileFunction.getUnits())
-                val formattedGlucoseValue = formatGlucose(eatingSoonTT, presetIsMGDL)
-                val reason = rh.gs(app.aaps.core.ui.R.string.eatingsoon)
-                message += rh.gs(R.string.wear_action_tempt_preset_message, reason, formattedGlucoseValue, eatingSoonTTDuration)
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            title, message,
-                            returnCommand = EventData.ActionTempTargetConfirmed(presetIsMGDL, eatingSoonTTDuration, eatingSoonTT, eatingSoonTT),
-                            tempTargetLow = eatingSoonTT, tempTargetHigh = eatingSoonTT,
-                            tempTargetDurationMinutes = eatingSoonTTDuration, tempTargetIsMGDL = presetIsMGDL,
-                            tempTargetReason = reason,
-                        )
-                    )
-                )
-            }
-
-            EventData.ActionTempTargetPreCheck.TempTargetCommand.CANCEL          -> {
-                message += rh.gs(R.string.wear_action_tempt_cancel_message)
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            title, message,
-                            returnCommand = EventData.ActionTempTargetConfirmed(true, 0, 0.0, 0.0),
-                            isCancelTempTarget = true,
-                        )
-                    )
-                )
-            }
+            EventData.ActionTempTargetPreCheck.TempTargetCommand.PRESET_ACTIVITY -> sendPreset(TT.Reason.ACTIVITY)
+            EventData.ActionTempTargetPreCheck.TempTargetCommand.PRESET_HYPO     -> sendPreset(TT.Reason.HYPOGLYCEMIA)
+            EventData.ActionTempTargetPreCheck.TempTargetCommand.PRESET_EATING   -> sendPreset(TT.Reason.EATING_SOON)
+            EventData.ActionTempTargetPreCheck.TempTargetCommand.CANCEL          -> sendTt(BatchAction.TempTarget(TT.Reason.WEAR.text, 0.0, 0.0, 0, 0))
 
             EventData.ActionTempTargetPreCheck.TempTargetCommand.MANUAL          -> {
                 if (profileFunction.getUnits() == GlucoseUnit.MGDL != action.isMgdl) {
@@ -1275,50 +1244,24 @@ class DataHandlerMobile @Inject constructor(
                     return
                 }
                 if (action.duration == 0) {
-                    message += rh.gs(R.string.wear_action_tempt_zero_message)
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.ConfirmAction(
-                                title, message,
-                                returnCommand = EventData.ActionTempTargetConfirmed(true, 0, 0.0, 0.0),
-                                isCancelTempTarget = true,
-                            )
-                        )
-                    )
-                } else {
-                    var low = action.low
-                    var high = action.high
-                    val lowFormattedGlucoseValue = formatGlucose(low, presetIsMGDL)
-                    val highFormattedGlucoseValue = formatGlucose(high, presetIsMGDL)
-                    if (!action.isMgdl) {
-                        low *= Constants.MMOLL_TO_MGDL
-                        high *= Constants.MMOLL_TO_MGDL
-                    }
-                    if (low < HardLimits.LIMIT_TEMP_MIN_BG[0] || low > HardLimits.LIMIT_TEMP_MIN_BG[1]) {
-                        sendError(rh.gs(R.string.wear_action_tempt_min_bg_error))
-                        return
-                    }
-                    if (high < HardLimits.LIMIT_TEMP_MAX_BG[0] || high > HardLimits.LIMIT_TEMP_MAX_BG[1]) {
-                        sendError(rh.gs(R.string.wear_action_tempt_max_bg_error))
-                        return
-                    }
-                    if (low > high) {
-                        sendError(rh.gs(R.string.wear_action_tempt_range_error, lowFormattedGlucoseValue, highFormattedGlucoseValue))
-                        return
-                    }
-                    message += if (low == high) rh.gs(R.string.wear_action_tempt_manual_message, lowFormattedGlucoseValue, action.duration)
-                    else rh.gs(R.string.wear_action_tempt_manual_range_message, lowFormattedGlucoseValue, highFormattedGlucoseValue, action.duration)
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.ConfirmAction(
-                                title, message,
-                                returnCommand = EventData.ActionTempTargetConfirmed(presetIsMGDL, action.duration, action.low, action.high),
-                                tempTargetLow = action.low, tempTargetHigh = action.high,
-                                tempTargetDurationMinutes = action.duration, tempTargetIsMGDL = action.isMgdl,
-                            )
-                        )
-                    )
+                    sendTt(BatchAction.TempTarget(TT.Reason.WEAR.text, 0.0, 0.0, 0, 0))
+                    return
                 }
+                val lowMgdl = if (action.isMgdl) action.low else action.low * Constants.MMOLL_TO_MGDL
+                val highMgdl = if (action.isMgdl) action.high else action.high * Constants.MMOLL_TO_MGDL
+                if (lowMgdl < HardLimits.LIMIT_TEMP_MIN_BG[0] || lowMgdl > HardLimits.LIMIT_TEMP_MIN_BG[1]) {
+                    sendError(rh.gs(R.string.wear_action_tempt_min_bg_error))
+                    return
+                }
+                if (highMgdl < HardLimits.LIMIT_TEMP_MAX_BG[0] || highMgdl > HardLimits.LIMIT_TEMP_MAX_BG[1]) {
+                    sendError(rh.gs(R.string.wear_action_tempt_max_bg_error))
+                    return
+                }
+                if (lowMgdl > highMgdl) {
+                    sendError(rh.gs(R.string.wear_action_tempt_range_error, formatGlucose(action.low, presetIsMGDL), formatGlucose(action.high, presetIsMGDL)))
+                    return
+                }
+                sendTt(BatchAction.TempTarget(TT.Reason.WEAR.text, lowMgdl, highMgdl, action.duration, 0))
             }
         }
     }
@@ -1891,67 +1834,58 @@ class DataHandlerMobile @Inject constructor(
         )
 
     //Check for Temp-Target:
-    private suspend fun targetsStatus(): String {
-        var ret = rh.gs(app.aaps.core.ui.R.string.loopstatus_targets) + "\n"
-        if (!config.APS) {
-            return rh.gs(R.string.target_only_aps_mode)
+    // Read-only "Targets" section of the wear Loop-Status screen, as confirmation lines (template-built, translatable).
+    private suspend fun targetsStatus(): List<ConfirmationLine> {
+        if (!config.APS) return listOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.target_only_aps_mode)))
+        val profile = profileFunction.getProfile() ?: return listOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.no_profile)))
+        val out = mutableListOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.loopstatus_targets)))
+        persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())?.let { tt ->
+            // Show the full low–high range (was passing lowTarget twice — a range TT only showed its low bound).
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.temp_target), profileUtil.toTargetRangeString(tt.lowTarget, tt.highTarget, GlucoseUnit.MGDL)))
+            out += ConfirmationLine(ConfirmationRole.INFO, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.until), dateUtil.timeString(tt.end)))
         }
-        val profile = profileFunction.getProfile() ?: return rh.gs(R.string.no_profile)
-        //Check for Temp-Target:
-        val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
-        if (tempTarget != null) {
-            val target = profileUtil.toTargetRangeString(tempTarget.lowTarget, tempTarget.lowTarget, GlucoseUnit.MGDL)
-            ret += rh.gs(R.string.temp_target) + ": " + target
-            ret += "\n" + rh.gs(R.string.until) + ": " + dateUtil.timeString(tempTarget.end)
-            ret += "\n\n"
-        }
-        ret += rh.gs(R.string.default_range) + ": "
-        ret += profileUtil.toTargetRangeString(profile.getTargetLowMgdl(), profile.getTargetHighMgdl(), GlucoseUnit.MGDL)
-        ret += " " + rh.gs(R.string.target) + ": " + profileUtil.fromMgdlToStringInUnits(profile.getTargetMgdl())
-        return ret
+        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.default_range), profileUtil.toTargetRangeString(profile.getTargetLowMgdl(), profile.getTargetHighMgdl(), GlucoseUnit.MGDL)))
+        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.target), profileUtil.fromMgdlToStringInUnits(profile.getTargetMgdl())))
+        return out
     }
 
-    private suspend fun oAPSResultStatus(): String {
-        var ret = rh.gs(app.aaps.core.ui.R.string.loopstatus_OAPS_result) + "\n"
-        if (!config.APS)
-            return rh.gs(R.string.aps_only)
-        val usedAPS = activePlugin.activeAPS ?: return rh.gs(R.string.last_aps_result_na)
-        val result = usedAPS.lastAPSResult ?: return rh.gs(R.string.last_aps_result_na)
-        ret += if (!result.isChangeRequested()) {
-            rh.gs(app.aaps.core.ui.R.string.nochangerequested) + "\n"
-        } else if (result.rate == 0.0 && result.duration == 0) {
-            rh.gs(app.aaps.core.ui.R.string.cancel_temp) + "\n"
-        } else {
-            rh.gs(R.string.rate_duration, result.rate, result.rate / ch.fromPump(activePlugin.activePump.baseBasalRate) * 100, result.duration) + "\n"
+    // Read-only "OAPS result" section of the wear Loop-Status screen, as confirmation lines.
+    private suspend fun oAPSResultStatus(): List<ConfirmationLine> {
+        if (!config.APS) return listOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.aps_only)))
+        val usedAPS = activePlugin.activeAPS ?: return listOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.last_aps_result_na)))
+        val result = usedAPS.lastAPSResult ?: return listOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.last_aps_result_na)))
+        val out = mutableListOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.loopstatus_OAPS_result)))
+        out += when {
+            !result.isChangeRequested()                -> ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.nochangerequested))
+            result.rate == 0.0 && result.duration == 0 -> ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.cancel_temp))
+            else                                       -> ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.rate_duration, result.rate, result.rate / ch.fromPump(activePlugin.activePump.baseBasalRate) * 100, result.duration))
         }
-        ret += "\n" + rh.gs(app.aaps.core.ui.R.string.reason) + ": " + result.reason
-        return ret
+        out += ConfirmationLine(ConfirmationRole.INFO, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.reason), result.reason))
+        return out
     }
 
-    // decide if enabled/disabled closed/open; what Plugin as APS?
-    private suspend fun loopStatus(): String {
-        var ret = ""
+    // Read-only "Loop" section of the wear Loop-Status screen, as confirmation lines. Decides enabled/disabled
+    // closed/open + which plugin is APS.
+    private suspend fun loopStatus(): List<ConfirmationLine> {
+        val out = mutableListOf<ConfirmationLine>()
         val rm = loop.runningMode()
-        // decide if enabled/disabled closed/open; what Plugin as APS?
         when (rm) {
-            RM.Mode.CLOSED_LOOP     -> ret += rh.gs(R.string.loop_status_closed) + "\n"
-            RM.Mode.OPEN_LOOP       -> ret += rh.gs(R.string.loop_status_open) + "\n"
-            RM.Mode.CLOSED_LOOP_LGS -> ret += rh.gs(R.string.loop_status_lgs) + "\n"
-            RM.Mode.DISABLED_LOOP   -> ret += rh.gs(R.string.loop_status_disabled) + "\n"
+            RM.Mode.CLOSED_LOOP     -> out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.loop_status_closed))
+            RM.Mode.OPEN_LOOP       -> out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.loop_status_open))
+            RM.Mode.CLOSED_LOOP_LGS -> out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.loop_status_lgs))
+            RM.Mode.DISABLED_LOOP   -> out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.loop_status_disabled))
 
-            else                    -> { /* do nothing */
+            else                    -> { /* no line */
             }
         }
         if (rm.isLoopRunning()) {
-            val aps = activePlugin.activeAPS
-            ret += rh.gs(R.string.aps) + ": " + ((aps as? PluginBase)?.name ?: "")
-            val lastRun = loop.lastRun
-            if (lastRun != null) {
-                ret += "\n" + rh.gs(R.string.last_run) + ": " + dateUtil.timeString(lastRun.lastAPSRun)
-                if (lastRun.lastTBREnact != 0L) ret += "\n" + rh.gs(R.string.last_enact) + ": " + dateUtil.timeString(lastRun.lastTBREnact)
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.aps), (activePlugin.activeAPS as? PluginBase)?.name ?: ""))
+            loop.lastRun?.let { lastRun ->
+                out += ConfirmationLine(ConfirmationRole.INFO, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.last_run), dateUtil.timeString(lastRun.lastAPSRun)))
+                if (lastRun.lastTBREnact != 0L) out += ConfirmationLine(ConfirmationRole.INFO, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.last_enact), dateUtil.timeString(lastRun.lastTBREnact)))
             }
         }
-        return ret
+        return out
     }
 
     private fun isOldData(historyList: List<TDD>): Boolean {
@@ -2036,36 +1970,6 @@ class DataHandlerMobile @Inject constructor(
         profile ?: return rh.gs(app.aaps.core.ui.R.string.noprofile)
         if (!loop.runningMode().isLoopRunning()) status += rh.gs(R.string.disabled_loop) + "\n"
         return status
-    }
-
-    private suspend fun doTempTarget(command: EventData.ActionTempTargetConfirmed) {
-        if (command.duration != 0)
-            persistenceLayer.insertAndCancelCurrentTemporaryTarget(
-                temporaryTarget = TT(
-                    timestamp = System.currentTimeMillis(),
-                    duration = TimeUnit.MINUTES.toMillis(command.duration.toLong()),
-                    reason = TT.Reason.WEAR,
-                    lowTarget = profileUtil.convertToMgdl(command.low, profileFunction.getUnits()),
-                    highTarget = profileUtil.convertToMgdl(command.high, profileFunction.getUnits())
-                ),
-                action = Action.TT,
-                source = Sources.Wear,
-                note = null,
-                listValues = listOfNotNull(
-                    ValueWithUnit.TETTReason(TT.Reason.WEAR),
-                    ValueWithUnit.fromGlucoseUnit(command.low, profileFunction.getUnits()),
-                    ValueWithUnit.fromGlucoseUnit(command.high, profileFunction.getUnits()).takeIf { command.low != command.high },
-                    ValueWithUnit.Minute(command.duration)
-                )
-            )
-        else
-            persistenceLayer.cancelCurrentTemporaryTargetIfAny(
-                timestamp = dateUtil.now(),
-                action = Action.CANCEL_TT,
-                source = Sources.Wear,
-                note = null,
-                listValues = listOf(ValueWithUnit.TETTReason(TT.Reason.WEAR))
-            )
     }
 
     private suspend fun doProfileSwitch(command: EventData.ActionProfileSwitchConfirmed) {

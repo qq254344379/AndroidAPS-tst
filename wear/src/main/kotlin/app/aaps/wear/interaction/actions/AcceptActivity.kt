@@ -47,7 +47,6 @@ import app.aaps.wear.comm.IntentCancelNotification
 import app.aaps.wear.comm.IntentWearToMobile
 import dagger.android.support.DaggerAppCompatActivity
 import kotlinx.coroutines.delay
-import java.text.DecimalFormat
 
 class AcceptActivity : DaggerAppCompatActivity() {
 
@@ -69,12 +68,8 @@ class AcceptActivity : DaggerAppCompatActivity() {
             else emptyList()
 
         val isError = extras?.getBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, false) ?: false
-        val tempTargetLow = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_TEMP_TARGET_LOW)) it.getDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_LOW) else null }
-        val tempTargetHigh = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_TEMP_TARGET_HIGH)) it.getDouble(DataLayerListenerServiceWear.KEY_TEMP_TARGET_HIGH) else null }
-        val tempTargetDuration = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_TEMP_TARGET_DURATION)) it.getInt(DataLayerListenerServiceWear.KEY_TEMP_TARGET_DURATION) else null }
-        val tempTargetIsMGDL = extras?.getBoolean(DataLayerListenerServiceWear.KEY_TEMP_TARGET_IS_MGDL, true) ?: true
-        val isCancelTempTarget = extras?.getBoolean(DataLayerListenerServiceWear.KEY_CANCEL_TEMP_TARGET, false) ?: false
-        val tempTargetReason = extras?.getString(DataLayerListenerServiceWear.KEY_TEMP_TARGET_REASON)
+        // Curved header for the lines screen (e.g. "Treatment" / "Temporary target"), authored by the master.
+        val title = extras?.getString(DataLayerListenerServiceWear.KEY_TITLE, "") ?: ""
         val profileName = extras?.getString(DataLayerListenerServiceWear.KEY_PROFILE_NAME)
         val profilePercentage = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_PROFILE_PERCENTAGE)) it.getInt(DataLayerListenerServiceWear.KEY_PROFILE_PERCENTAGE) else null }
         val profileTimeshift = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_PROFILE_TIMESHIFT)) it.getInt(DataLayerListenerServiceWear.KEY_PROFILE_TIMESHIFT) else null }
@@ -83,11 +78,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val runningModeDuration = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES)) it.getInt(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES) else null }
         val runningModeType = extras?.getString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TYPE)
 
-        val hasTempTargetData = isCancelTempTarget || tempTargetDuration != null
         val hasProfileData = profileName != null
         val hasRunningModeData = runningModeTitle != null
 
-        if (message.isEmpty() && lines.isEmpty() && !hasTempTargetData && !hasProfileData && !hasRunningModeData) {
+        if (message.isEmpty() && lines.isEmpty() && !hasProfileData && !hasRunningModeData) {
             finish()
             return
         }
@@ -96,9 +90,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
         vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 50, 100, 50), -1))
 
         val hasLines = lines.isNotEmpty()
-        val hasAnyStructuredSummary = hasLines || hasTempTargetData || hasProfileData || hasRunningModeData
-        val ttFmt = if (tempTargetIsMGDL) DecimalFormat("0") else DecimalFormat("#0.0")
-        val ttUnit = if (tempTargetIsMGDL) "mg/dL" else "mmol/L"
+        val hasAnyStructuredSummary = hasLines || hasProfileData || hasRunningModeData
 
         setContent {
             MaterialTheme {
@@ -114,8 +106,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                         when (page) {
                             0    -> {
                                 val curvedTitle = when {
-                                    hasLines           -> stringResource(R.string.menu_treatment)
-                                    hasTempTargetData  -> stringResource(R.string.loop_status_temp_target)
+                                    hasLines           -> title.ifEmpty { null }
                                     hasProfileData     -> stringResource(R.string.status_profile_switch)
                                     hasRunningModeData -> stringResource(R.string.status_running_mode)
                                     else               -> null
@@ -157,181 +148,130 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                                 )
                                             }
                                         }
-                                    } else if (hasTempTargetData) {
-                                    // TempTarget structured summary
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.confirm),
-                                            color = Color.White,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        if (isCancelTempTarget) {
+                                    } else if (hasProfileData) {
+                                        // ProfileSwitch structured summary
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                        ) {
                                             Text(
-                                                text = message,
-                                                color = WearSecondaryText,
+                                                text = stringResource(R.string.confirm),
+                                                color = Color.White,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = profileName,
+                                                color = Color.White,
                                                 fontSize = 16.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 textAlign = TextAlign.Center,
+                                                maxLines = 2,
                                             )
-                                        } else if (tempTargetLow != null && tempTargetHigh != null && tempTargetDuration != null) {
-                                            val isRange = tempTargetLow != tempTargetHigh
-                                            val targetText = if (!isRange)
-                                                "${ttFmt.format(tempTargetLow)} $ttUnit"
-                                            else
-                                                "${ttFmt.format(tempTargetLow)} \u2013 ${ttFmt.format(tempTargetHigh)} $ttUnit"
-                                            Text(
-                                                text = targetText,
-                                                color = TempTargetYellow,
-                                                fontSize = if (isRange) 17.sp else 20.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                            Text(
-                                                text = stringResource(R.string.action_confirm_duration, formatDurationMinutes(tempTargetDuration)),
-                                                color = WearSecondaryText,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                            if (tempTargetReason != null) {
+                                            if (profilePercentage != null) {
                                                 Text(
-                                                    text = stringResource(R.string.action_confirm_reason, tempTargetReason),
+                                                    text = "$profilePercentage%",
+                                                    color = Color.White,
+                                                    fontSize = 20.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                            }
+                                            if (profileTimeshift != null) {
+                                                val tsText = "${if (profileTimeshift > 0) "+" else ""}${stringResource(R.string.action_duration_hours_format, profileTimeshift)}"
+                                                Text(
+                                                    text = stringResource(R.string.action_confirm_timeshift, tsText),
+                                                    color = WearSecondaryText,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                            }
+                                            if (profileDuration != null) {
+                                                val durText = if (profileDuration == 0) "\u221E" else formatDurationMinutes(profileDuration)
+                                                Text(
+                                                    text = stringResource(R.string.action_confirm_duration, durText),
                                                     color = WearSecondaryText,
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.Bold,
                                                 )
                                             }
                                         }
-                                    }
-                                } else if (hasProfileData) {
-                                    // ProfileSwitch structured summary
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.confirm),
-                                            color = Color.White,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(
-                                            text = profileName,
-                                            color = Color.White,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 2,
-                                        )
-                                        if (profilePercentage != null) {
+                                    } else if (hasRunningModeData) {
+                                        // RunningMode structured summary
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                        ) {
                                             Text(
-                                                text = "$profilePercentage%",
+                                                text = stringResource(R.string.confirm),
                                                 color = Color.White,
-                                                fontSize = 20.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                        if (profileTimeshift != null) {
-                                            val tsText = "${if (profileTimeshift > 0) "+" else ""}${stringResource(R.string.action_duration_hours_format, profileTimeshift)}"
-                                            Text(
-                                                text = stringResource(R.string.action_confirm_timeshift, tsText),
-                                                color = WearSecondaryText,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                        if (profileDuration != null) {
-                                            val durText = if (profileDuration == 0) "\u221E" else formatDurationMinutes(profileDuration)
-                                            Text(
-                                                text = stringResource(R.string.action_confirm_duration, durText),
-                                                color = WearSecondaryText,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                    }
-                                } else if (hasRunningModeData) {
-                                    // RunningMode structured summary
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.confirm),
-                                            color = Color.White,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        val stateColor = when (runningModeType) {
-                                            "LOOP_CLOSED"       -> LoopClosedColor
-                                            "LOOP_OPEN"         -> LoopOpenColor
-                                            "LOOP_LGS"          -> LoopLgsColor
-                                            "LOOP_USER_SUSPEND" -> LoopSuspendedColor
-                                            "LOOP_DISABLE"      -> LoopDisabledColor
-                                            "PUMP_DISCONNECT"   -> LoopDisconnectedColor
-                                            "SUPERBOLUS"        -> LoopSuperbolusColor
-                                            "LOOP_RESUME",
-                                            "PUMP_RECONNECT"    -> LoopClosedColor
-                                            else                -> ConfirmGreen
-                                        }
-                                        Text(
-                                            text = runningModeTitle,
-                                            color = stateColor,
-                                            fontSize = 20.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            textAlign = TextAlign.Center,
-                                        )
-                                        if (runningModeDuration != null) {
-                                            Text(
-                                                text = stringResource(R.string.action_confirm_duration, formatDurationMinutes(runningModeDuration)),
-                                                color = WearSecondaryText,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    // Fallback: plain text message (errors and non-migrated activities)
-                                    val scrollState = rememberScrollState()
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .verticalScroll(scrollState)
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                    ) {
-                                        if (isError) {
-                                            Text(
-                                                text = stringResource(R.string.error),
-                                                color = WearInsulinNegative,
                                                 fontSize = 18.sp,
                                                 fontWeight = FontWeight.Bold,
                                             )
                                             Spacer(Modifier.height(8.dp))
+                                            val stateColor = when (runningModeType) {
+                                                "LOOP_CLOSED"       -> LoopClosedColor
+                                                "LOOP_OPEN"         -> LoopOpenColor
+                                                "LOOP_LGS"          -> LoopLgsColor
+                                                "LOOP_USER_SUSPEND" -> LoopSuspendedColor
+                                                "LOOP_DISABLE"      -> LoopDisabledColor
+                                                "PUMP_DISCONNECT"   -> LoopDisconnectedColor
+                                                "SUPERBOLUS"        -> LoopSuperbolusColor
+                                                "LOOP_RESUME",
+                                                "PUMP_RECONNECT"    -> LoopClosedColor
+
+                                                else                -> ConfirmGreen
+                                            }
+                                            Text(
+                                                text = runningModeTitle,
+                                                color = stateColor,
+                                                fontSize = 20.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                textAlign = TextAlign.Center,
+                                            )
+                                            if (runningModeDuration != null) {
+                                                Text(
+                                                    text = stringResource(R.string.action_confirm_duration, formatDurationMinutes(runningModeDuration)),
+                                                    color = WearSecondaryText,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                            }
                                         }
-                                        Text(
-                                            text = message,
-                                            color = Color.White,
-                                            fontSize = 16.sp,
-                                            textAlign = if (isError) TextAlign.Center else TextAlign.Start,
-                                        )
+                                    } else {
+                                        // Fallback: plain text message (errors and non-migrated activities)
+                                        val scrollState = rememberScrollState()
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .verticalScroll(scrollState)
+                                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                        ) {
+                                            if (isError) {
+                                                Text(
+                                                    text = stringResource(R.string.error),
+                                                    color = WearInsulinNegative,
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                            }
+                                            Text(
+                                                text = message,
+                                                color = Color.White,
+                                                fontSize = 16.sp,
+                                                textAlign = if (isError) TextAlign.Center else TextAlign.Start,
+                                            )
+                                        }
                                     }
-                                }
                                 }
                             }
 
@@ -377,7 +317,9 @@ class AcceptActivity : DaggerAppCompatActivity() {
                     }
                     if (!isError) HorizontalPageIndicator(
                         pagerState = pagerState,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 4.dp),
                     )
                 }
             }

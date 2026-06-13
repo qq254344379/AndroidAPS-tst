@@ -283,6 +283,7 @@ class DataLayerListenerServiceWear : WearableListenerService() {
 
         //data keys
         const val KEY_ACTION_DATA = "actionData"
+
         // Master-authored confirmation rows (parallel arrays: role name + text) rendered verbatim by AcceptActivity.
         const val KEY_LINE_ROLES = "lineRoles"
         const val KEY_LINE_TEXTS = "lineTexts"
@@ -290,12 +291,6 @@ class DataLayerListenerServiceWear : WearableListenerService() {
         const val KEY_MESSAGE = "message"
         const val KEY_TITLE = "title"
         const val KEY_IS_ERROR = "isError"
-        const val KEY_TEMP_TARGET_LOW = "tempTargetLow"
-        const val KEY_TEMP_TARGET_HIGH = "tempTargetHigh"
-        const val KEY_TEMP_TARGET_DURATION = "tempTargetDuration"
-        const val KEY_TEMP_TARGET_IS_MGDL = "tempTargetIsMGDL"
-        const val KEY_CANCEL_TEMP_TARGET = "cancelTempTarget"
-        const val KEY_TEMP_TARGET_REASON = "tempTargetReason"
         const val KEY_PROFILE_NAME = "profileName"
         const val KEY_PROFILE_PERCENTAGE = "profilePercentage"
         const val KEY_PROFILE_TIMESHIFT = "profileTimeshift"
