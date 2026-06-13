@@ -11,7 +11,6 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
-import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
@@ -19,7 +18,6 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.insulin.InsulinManager
-import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
@@ -50,10 +48,10 @@ import kotlin.math.max
 @HiltViewModel
 @Stable
 class InsulinDialogViewModel @Inject constructor(
-    private val constraintChecker: ConstraintsChecker,
+    constraintChecker: ConstraintsChecker,
     private val profileFunction: ProfileFunction,
     private val profileUtil: ProfileUtil,
-    private val activePlugin: ActivePlugin,
+    activePlugin: ActivePlugin,
     val activeInsulin: Insulin,
     val insulinManager: InsulinManager,
     val config: Config,
@@ -63,9 +61,7 @@ class InsulinDialogViewModel @Inject constructor(
     val preferences: Preferences,
     val rh: ResourceHelper,
     val dateUtil: DateUtil,
-    private val aapsLogger: AAPSLogger,
     hardLimits: HardLimits,
-    private val wizardBolusExecutor: WizardBolusExecutor,
     private val batchExecutor: BatchExecutor,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {

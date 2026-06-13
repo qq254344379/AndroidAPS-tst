@@ -8,19 +8,15 @@ import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
-import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
-import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.Insulin
-import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.objects.runningMode.PumpCommandGate
@@ -40,20 +36,16 @@ import javax.inject.Inject
 @HiltViewModel
 @Stable
 class TreatmentDialogViewModel @Inject constructor(
-    private val constraintChecker: ConstraintsChecker,
-    private val activePlugin: ActivePlugin,
+    constraintChecker: ConstraintsChecker,
+    activePlugin: ActivePlugin,
     private val activeInsulin: Insulin,
-    private val config: Config,
+    config: Config,
     val decimalFormatter: DecimalFormatter,
     private val rh: ResourceHelper,
-    private val aapsLogger: AAPSLogger,
     private val profileFunction: ProfileFunction,
     hardLimits: HardLimits,
     private val loop: Loop,
-    private val wizardBolusExecutor: WizardBolusExecutor,
     private val batchExecutor: BatchExecutor,
-    private val clientControlDispatcher: ClientControlActionDispatcher,
-    private val rxBus: RxBus,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 

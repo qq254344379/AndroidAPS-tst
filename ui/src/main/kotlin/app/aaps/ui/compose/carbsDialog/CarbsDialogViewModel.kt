@@ -11,7 +11,6 @@ import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
-import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
@@ -20,13 +19,11 @@ import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
-import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
 import app.aaps.core.interfaces.tempTargets.ttTargetMgdl
 import app.aaps.core.interfaces.utils.DateUtil
-import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.IntKey
@@ -53,15 +50,12 @@ class CarbsDialogViewModel @Inject constructor(
     private val iobCobCalculator: IobCobCalculator,
     private val glucoseStatusProvider: GlucoseStatusProvider,
     private val automation: Automation,
-    private val wizardBolusExecutor: WizardBolusExecutor,
     private val batchExecutor: BatchExecutor,
     private val persistenceLayer: PersistenceLayer,
     val preferences: Preferences,
     val config: Config,
-    private val decimalFormatter: DecimalFormatter,
     val rh: ResourceHelper,
     val dateUtil: DateUtil,
-    private val aapsLogger: AAPSLogger,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
