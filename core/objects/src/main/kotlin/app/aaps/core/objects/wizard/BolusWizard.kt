@@ -447,29 +447,6 @@ class BolusWizard @Inject constructor(
             }
         }
 
-    fun explainShort(): String {
-        var message = rh.gs(app.aaps.core.ui.R.string.wizard_explain_calc, ic, sens)
-        message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_carbs, insulinFromCarbs)
-        if (useTT && tempTarget != null) {
-            val tt = if (tempTarget?.lowTarget == tempTarget?.highTarget) tempTarget?.lowValueToUnitsToString(profile.units, decimalFormatter)
-            else rh.gs(
-                app.aaps.core.ui.R.string.wizard_explain_tt_to,
-                tempTarget?.lowValueToUnitsToString(profile.units, decimalFormatter),
-                tempTarget?.highValueToUnitsToString(profile.units, decimalFormatter)
-            )
-            message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_tt, tt)
-        }
-        if (useCob) message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_cob, cob, insulinFromCOB)
-        if (useBg) message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_bg, insulinFromBG)
-        if (includeBolusIOB) message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_iob, -insulinFromBolusIOB - insulinFromBasalIOB)
-        if (useTrend) message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_trend, insulinFromTrend)
-        if (useSuperBolus) message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_superbolus, insulinFromSuperBolus)
-        if (percentageCorrection != 100) {
-            message += "\n" + rh.gs(app.aaps.core.ui.R.string.wizard_explain_percent, totalBeforePercentageAdjustment, percentageCorrection, calculatedTotalInsulin)
-        }
-        return message
-    }
-
     private fun calcPercentageWithConstraints() {
         calculatedPercentage = 100
         if (totalBeforePercentageAdjustment != insulinFromCorrection)

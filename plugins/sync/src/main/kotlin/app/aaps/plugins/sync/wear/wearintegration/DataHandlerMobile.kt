@@ -730,45 +730,19 @@ class DataHandlerMobile @Inject constructor(
 
     private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
         if (rejectIfAapsClient()) return
-        // Gate + compute + constraint-cap + park-in-slot live in the shared executor; this adapter only
-        // formats the wear preview and ships the ConfirmAction.
+        // Gate + compute + constraint-cap + park-in-slot + author the confirmation all live in the shared executor;
+        // this adapter only relays the master-authored lines to the watch (the SAME lines the phone + client render).
         when (val result = wizardBolusExecutor.prepareQuickWizard(command.guid)) {
             is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
-
-            is WizardBolusExecutor.PrepareResult.Preview -> {
-                // Display config (button text, eCarbs, carb-delay) is a wear-only concern, so the neutral
-                // executor doesn't carry it — re-read the entry here for the ConfirmAction message.
-                val quickWizardEntry = quickWizard.get(command.guid) ?: return
-
-                var eCarbsMessagePart = ""
-                if (quickWizardEntry.useEcarbs() == QuickWizardEntry.YES) {
-                    val carbs2 = quickWizardEntry.carbs2()
-                    val offset = quickWizardEntry.time()
-                    val duration = quickWizardEntry.duration()
-
-                    eCarbsMessagePart += "\n+" + carbs2.toString() + rh.gs(R.string.grams_short) + "/" + duration.toString() + rh.gs(R.string.hour_short) + "(+" + offset.toString() +
-                        rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
-                }
-
-                var carbDelayMessagePart = ""
-                if (quickWizardEntry.carbTime() > 0) {
-                    carbDelayMessagePart = "(+" + quickWizardEntry.carbTime().toString() + rh.gs(app.aaps.core.interfaces.R.string.shortminute) + ")"
-                    if (quickWizardEntry.useAlarm() == QuickWizardEntry.YES) {
-                        carbDelayMessagePart += "!"
-                    }
-                }
-
-                val message = rh.gs(R.string.quick_wizard_message, quickWizardEntry.buttonText(), result.insulin, quickWizardEntry.carbs()) +
-                    carbDelayMessagePart +
-                    eCarbsMessagePart + "\n_____________\n" + result.explanation
-
+            is WizardBolusExecutor.PrepareResult.Preview ->
                 sendToWear(
                     EventData.ConfirmAction(
-                        rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                        returnCommand = EventData.ActionWizardConfirmed(result.bolusId)
+                        // title is the watch's curved header for the lines screen.
+                        rh.gs(app.aaps.core.ui.R.string.boluswizard), message = "",
+                        returnCommand = EventData.ActionWizardConfirmed(result.bolusId),
+                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
                     )
                 )
-            }
         }
     }
 

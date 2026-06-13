@@ -576,7 +576,7 @@ internal class ClientControlReceiverTest {
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         whenever(wizardBolusExecutor.prepareQuickWizard(any())).thenReturn(
             WizardBolusExecutor.PrepareResult.Preview(
-                insulin = 2.0, carbs = 30, explanation = "calc", bolusId = 42L,
+                insulin = 2.0, carbs = 30, bolusId = 42L,
                 lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "2 U")),
                 advisorApplies = true,
                 advisorLines = listOf(ConfirmationLine(ConfirmationRole.WARNING, "correct now"))
@@ -660,7 +660,7 @@ internal class ClientControlReceiverTest {
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         whenever(wizardBolusExecutor.prepareWizard(any())).thenReturn(
             WizardBolusExecutor.PrepareResult.Preview(
-                insulin = 2.0, carbs = 30, explanation = "calc", bolusId = 77L,
+                insulin = 2.0, carbs = 30, bolusId = 77L,
                 lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "2 U")),
                 advisorApplies = false, advisorLines = emptyList()
             )
@@ -695,7 +695,7 @@ internal class ClientControlReceiverTest {
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
         whenever(wizardBolusExecutor.prepareBatch(any())).thenReturn(
             WizardBolusExecutor.PrepareResult.Preview(
-                insulin = 1.5, carbs = 0, explanation = "", bolusId = 99L,
+                insulin = 1.5, carbs = 0, bolusId = 99L,
                 lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "1.5 U")),
                 advisorApplies = false, advisorLines = emptyList()
             )

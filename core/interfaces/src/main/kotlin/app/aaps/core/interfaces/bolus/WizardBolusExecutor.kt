@@ -155,14 +155,13 @@ interface WizardBolusExecutor {
     sealed interface PrepareResult {
 
         /**
-         * Computed, constraint-capped, parked. [bolusId] is the confirm id; [insulin]/[carbs]/[explanation] are
-         * for the master's own log/render; [lines] are the master-built color-coded confirmation rows the client
+         * Computed, constraint-capped, parked. [bolusId] is the confirm id; [insulin]/[carbs] are for the master's
+         * own log; [lines] are the master-built color-coded confirmation rows every surface (phone, client, watch)
          * renders verbatim; [advisorApplies] (with [advisorLines]) offers the high-BG "correct now, eat later" choice.
          */
         data class Preview(
             val insulin: Double,
             val carbs: Int,
-            val explanation: String,
             val bolusId: Long,
             val lines: List<ConfirmationLine> = emptyList(),
             val advisorApplies: Boolean = false,

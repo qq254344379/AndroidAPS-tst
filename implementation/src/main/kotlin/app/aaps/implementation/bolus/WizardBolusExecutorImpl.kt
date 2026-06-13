@@ -170,7 +170,6 @@ class WizardBolusExecutorImpl @Inject constructor(
         return WizardBolusExecutor.PrepareResult.Preview(
             insulin = wizard.calculatedTotalInsulin,
             carbs = wizard.carbs,
-            explanation = wizard.explainShort(),
             bolusId = wizard.timeStamp,
             lines = wizard.buildConfirmationLines(advisor = false, quickWizardEntry = entry),
             advisorApplies = advisorApplies,
@@ -216,7 +215,6 @@ class WizardBolusExecutorImpl @Inject constructor(
         return WizardBolusExecutor.PrepareResult.Preview(
             insulin = wizard.calculatedTotalInsulin,
             carbs = wizard.carbs,
-            explanation = wizard.explainShort(),
             bolusId = wizard.timeStamp,
             lines = wizard.buildConfirmationLines(advisor = false),
             advisorApplies = advisorApplies,
@@ -285,7 +283,7 @@ class WizardBolusExecutorImpl @Inject constructor(
             (tt?.let { buildTtLine(it) } ?: emptyList()) +
             (ps?.let { buildPsLine(it) } ?: emptyList()) +
             (rm?.let { buildRmLine(it) } ?: emptyList())
-        return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, "", bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
+        return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
     override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean): WizardBolusExecutor.ConfirmResult {

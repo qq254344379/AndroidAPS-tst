@@ -109,7 +109,7 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
     private fun stubPreview(insulin: Double, carbs: Int, bolusId: Long, lines: List<ConfirmationLine>) =
         runBlocking {
             whenever(wizardBolusExecutor.prepareBatch(any()))
-                .thenReturn(WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, "", bolusId, lines))
+                .thenReturn(WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines))
         }
 
     @Test fun `bolus precheck parks a fixed insulin plus carbs and ships bolusId plus master lines`() = runTest {
