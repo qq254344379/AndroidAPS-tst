@@ -119,7 +119,7 @@ private const val HEALTH_EVENT_QUIET_PERIOD_MS = 500L
 
 @Singleton
 class DataHandlerMobile @Inject constructor(
-    aapsSchedulers: AapsSchedulers,
+    private val aapsSchedulers: AapsSchedulers,
     private val context: Context,
     private val rxBus: RxBus,
     private val aapsLogger: AAPSLogger,
@@ -159,424 +159,150 @@ class DataHandlerMobile @Inject constructor(
     @Inject lateinit var scenes: SceneAutomationApi
     private val disposable = CompositeDisposable()
 
-    init {
-        // From Wear
+    /**
+     * Registers a serialized suspend [handler] for one [EventData] subtype arriving from Wear.
+     *
+     * One subscription per type preserves the prior concurrency model: same-type events are
+     * serialized via concatMapCompletable, different types run on independent pipelines. Errors
+     * are logged and swallowed so a single failing event can't tear the subscription down.
+     */
+    private inline fun <reified T : EventData> onEvent(crossinline handler: suspend (T) -> Unit) {
         disposable += rxBus
-            .toObservable(EventData.ActionPong::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "Pong received from ${it.sourceNodeId}")
-                           fabricPrivacy.logCustom("WearOS_${it.apiLevel}")
-                       }, fabricPrivacy::logException)
-        disposable += rxBus
-            .toObservable(EventData.CancelBolus::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "CancelBolus received from ${it.sourceNodeId}")
-                           if (!config.appInitialized) return@subscribe
-                           activePlugin.activePump.stopBolusDelivering()
-                       }, fabricPrivacy::logException)
-        disposable += rxBus
-            .toObservable(EventData.OpenLoopRequestConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "OpenLoopRequestConfirmed received from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    loop.acceptChangeRequest()
-                    (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(Constants.notificationID)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionResendData::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ResendData received from ${it.sourceNodeId}")
-                    resendData(it.from)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionPumpStatus::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionPumpStatus received from ${it.sourceNodeId}")
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.ConfirmAction(
-                                rh.gs(R.string.pump_status).uppercase(),
-                                pumpStatusProvider.shortStatus(false),
-                                returnCommand = null
-                            )
-                        )
-                    )
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionLoopStatus::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionLoopStatus received from ${it.sourceNodeId}")
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.ConfirmAction(
-                                // title is the watch's curved header for the (read-only) lines screen.
-                                rh.gs(R.string.loop_status), message = "",
-                                lines = (targetsStatus() + loopStatus() + oAPSResultStatus()).map { l -> EventData.ConfirmActionLine(l.role.name, l.text) },
-                                returnCommand = null
-                            )
-                        )
-                    )
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionLoopStatusDetailed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionLoopStatusDetailed received from ${it.sourceNodeId}")
-                    val statusData = buildLoopStatusData()
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.LoopStatusResponse(
-                                timeStamp = System.currentTimeMillis(),
-                                data = statusData
-                            )
-                        )
-                    )
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-
-        disposable += rxBus
-            .toObservable(EventData.RunningModeRequest::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "RunningModeRequest received from ${it.sourceNodeId}")
-                    handleAvailableRunningModes()
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.RunningModeSelected::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "RunningModeSelected received from ${it.sourceNodeId}")
-                           handleRunningModeSelected(it)
-                       }, fabricPrivacy::logException)
-        disposable += rxBus
-            .toObservable(EventData.RunningModeConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "RunningModeConfirmed received from ${it.sourceNodeId}")
-                    handleRunningModeConfirmed(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionTddStatus::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionTddStatus received from ${it.sourceNodeId}")
-                    handleTddStatus()
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionProfileSwitchSendInitialData::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionProfileSwitchSendInitialData received $it from ${it.sourceNodeId}")
-                    handleProfileSwitchSendInitialData()
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionProfileSwitchPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionProfileSwitchPreCheck received $it from ${it.sourceNodeId}")
-                    handleProfileSwitchPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionProfileSwitchConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionProfileSwitchConfirmed received $it from ${it.sourceNodeId}")
-                    doProfileSwitch(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionTempTargetPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionTempTargetPreCheck received $it from ${it.sourceNodeId}")
-                    handleTempTargetPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionTempTargetConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionTempTargetConfirmed received $it from ${it.sourceNodeId}")
-                    // Consume the parked TT by id; confirm() applies it via the shared applyTempTarget (set or cancel).
-                    wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionBolusPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionBolusPreCheck received $it from ${it.sourceNodeId}")
-                    handleBolusPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionBolusConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionBolusConfirmed received $it from ${it.sourceNodeId}")
-                    // Consume the parked dose by id (capping already applied at prepare; consume-once = no double bolus).
-                    wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionECarbsPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionECarbsPreCheck received $it from ${it.sourceNodeId}")
-                    handleECarbsPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionECarbsConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionECarbsConfirmed received $it from ${it.sourceNodeId}")
-                    // Consume the parked eCarbs by id (the FIXED carbs-only branch delivers via deliverECarbs).
-                    wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionFillPresetPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionFillPresetPreCheck received $it from ${it.sourceNodeId}")
-                    handleFillPresetPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionFillPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionFillPreCheck received $it from ${it.sourceNodeId}")
-                    handleFillPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionFillConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionFillConfirmed received $it from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    if (constraintChecker.applyBolusConstraints(ConstraintObject(it.insulin, aapsLogger)).value() - it.insulin != 0.0) {
-                        rxBus.send(EventShowSnackbar("aborting: previously applied constraint changed", EventShowSnackbar.Type.Warning))
-                        sendError("aborting: previously applied constraint changed")
-                    } else
-                        wizardBolusExecutor.deliverFillBolus(it.insulin, null, Sources.Wear, ::sendError)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionQuickWizardPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionQuickWizardPreCheck received $it from ${it.sourceNodeId}")
-                    handleQuickWizardPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionWizardPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionWizardPreCheck received $it from ${it.sourceNodeId}")
-                    handleWizardPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionWizardConfirmed::class.java)
+            .toObservable(T::class.java)
             .observeOn(aapsSchedulers.io)
             .concatMapCompletable { event ->
                 rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionWizardConfirmed received $event from ${event.sourceNodeId}")
-                    // Consume-once dedup + delivery live in the shared executor; refresh the watch's
-                    // quick-wizard list (lastUsed) only when something was actually delivered.
-                    val result = wizardBolusExecutor.confirm(event.timeStamp, Sources.Wear, ::sendError)
-                    if (result is WizardBolusExecutor.ConfirmResult.Delivered) sendQuickWizardToWear()
+                    aapsLogger.debug(LTag.WEAR, "${T::class.java.simpleName} received from ${event.sourceNodeId}")
+                    handler(event)
                 }
                     .doOnError(fabricPrivacy::logException)
                     .onErrorComplete()
             }
             .subscribe()
+    }
+
+    /**
+     * Fire-immediately sibling of [onEvent] for non-suspend handlers (no concatMap serialization).
+     * Emits the same uniform "<Type> received from <node>" debug line; extra diagnostics go through
+     * [detail]. Errors are routed to [FabricPrivacy.logException], matching the prior subscriptions.
+     */
+    private inline fun <reified T : EventData> onEventSync(
+        crossinline detail: (T) -> String = { "" },
+        crossinline handler: (T) -> Unit
+    ) {
         disposable += rxBus
-            .toObservable(EventData.ActionUserActionPreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionUserActionPreCheck received $it from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    handleUserActionPreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionUserActionConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionUserActionConfirmed received $it from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    handleUserActionConfirmed(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionScenePreCheck::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionScenePreCheck received $it from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    handleScenePreCheck(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionSceneConfirmed::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionSceneConfirmed received $it from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    handleSceneConfirmed(it)
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionSceneStop::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable {
-                    aapsLogger.debug(LTag.WEAR, "ActionSceneStop received from ${it.sourceNodeId}")
-                    if (!config.appInitialized) return@rxCompletable
-                    scenes.stopActiveScene()
-                }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.SnoozeAlert::class.java)
+            .toObservable(T::class.java)
             .observeOn(aapsSchedulers.io)
             .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "SnoozeAlert received $it from ${it.sourceNodeId}")
-                           uiInteraction.stopAlarm("Muted from wear")
+                           aapsLogger.debug(LTag.WEAR, "${T::class.java.simpleName} received from ${it.sourceNodeId}${detail(it)}")
+                           handler(it)
                        }, fabricPrivacy::logException)
-        disposable += rxBus
-            .toObservable(EventData.WearException::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "WearException received $it from ${it.sourceNodeId}")
-                           fabricPrivacy.logWearException(it)
-                       }, fabricPrivacy::logException)
+    }
+
+    init {
+        // From Wear
+        onEventSync<EventData.ActionPong> { fabricPrivacy.logCustom("WearOS_${it.apiLevel}") }
+        onEventSync<EventData.CancelBolus> {
+            if (!config.appInitialized) return@onEventSync
+            activePlugin.activePump.stopBolusDelivering()
+        }
+        onEvent<EventData.OpenLoopRequestConfirmed> {
+            if (!config.appInitialized) return@onEvent
+            loop.acceptChangeRequest()
+            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(Constants.notificationID)
+        }
+        onEvent<EventData.ActionResendData> { resendData(it.from) }
+        onEvent<EventData.ActionPumpStatus> {
+            sendToWear(
+                EventData.ConfirmAction(
+                    rh.gs(R.string.pump_status).uppercase(),
+                    pumpStatusProvider.shortStatus(false),
+                    returnCommand = null
+                )
+            )
+        }
+        onEvent<EventData.ActionLoopStatus> {
+            sendToWear(
+                EventData.ConfirmAction(
+                    // title is the watch's curved header for the (read-only) lines screen.
+                    rh.gs(R.string.loop_status), message = "",
+                    lines = (targetsStatus() + loopStatus() + oAPSResultStatus()).map { l -> EventData.ConfirmActionLine(l.role.name, l.text) },
+                    returnCommand = null
+                )
+            )
+        }
+        onEvent<EventData.ActionLoopStatusDetailed> {
+            val statusData = buildLoopStatusData()
+            sendToWear(
+                EventData.LoopStatusResponse(
+                    timeStamp = System.currentTimeMillis(),
+                    data = statusData
+                )
+            )
+        }
+        onEvent<EventData.RunningModeRequest> { handleAvailableRunningModes() }
+        onEventSync<EventData.RunningModeSelected> { handleRunningModeSelected(it) }
+        onEvent<EventData.RunningModeConfirmed> { handleRunningModeConfirmed(it) }
+        onEvent<EventData.ActionTddStatus> { handleTddStatus() }
+        onEvent<EventData.ActionProfileSwitchSendInitialData> { handleProfileSwitchSendInitialData() }
+        onEvent<EventData.ActionProfileSwitchPreCheck> { handleProfileSwitchPreCheck(it) }
+        onEvent<EventData.ActionProfileSwitchConfirmed> { doProfileSwitch(it) }
+        onEvent<EventData.ActionTempTargetPreCheck> { handleTempTargetPreCheck(it) }
+        onEvent<EventData.ActionTempTargetConfirmed> {
+            // Consume the parked TT by id; confirm() applies it via the shared applyTempTarget (set or cancel).
+            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+        }
+        onEvent<EventData.ActionBolusPreCheck> { handleBolusPreCheck(it) }
+        onEvent<EventData.ActionBolusConfirmed> {
+            // Consume the parked dose by id (capping already applied at prepare; consume-once = no double bolus).
+            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+        }
+        onEvent<EventData.ActionECarbsPreCheck> { handleECarbsPreCheck(it) }
+        onEvent<EventData.ActionECarbsConfirmed> {
+            // Consume the parked eCarbs by id (the FIXED carbs-only branch delivers via deliverECarbs).
+            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+        }
+        onEvent<EventData.ActionFillPresetPreCheck> { handleFillPresetPreCheck(it) }
+        onEvent<EventData.ActionFillPreCheck> { handleFillPreCheck(it) }
+        onEvent<EventData.ActionFillConfirmed> {
+            if (!config.appInitialized) return@onEvent
+            if (constraintChecker.applyBolusConstraints(ConstraintObject(it.insulin, aapsLogger)).value() - it.insulin != 0.0) {
+                rxBus.send(EventShowSnackbar("aborting: previously applied constraint changed", EventShowSnackbar.Type.Warning))
+                sendError("aborting: previously applied constraint changed")
+            } else
+                wizardBolusExecutor.deliverFillBolus(it.insulin, null, Sources.Wear, ::sendError)
+        }
+        onEvent<EventData.ActionQuickWizardPreCheck> { handleQuickWizardPreCheck(it) }
+        onEvent<EventData.ActionWizardPreCheck> { handleWizardPreCheck(it) }
+        onEvent<EventData.ActionWizardConfirmed> {
+            // Consume-once dedup + delivery live in the shared executor; refresh the watch's
+            // quick-wizard list (lastUsed) only when something was actually delivered.
+            val result = wizardBolusExecutor.confirm(it.timeStamp, Sources.Wear, ::sendError)
+            if (result is WizardBolusExecutor.ConfirmResult.Delivered)
+                sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+        }
+        onEvent<EventData.ActionUserActionPreCheck> {
+            if (!config.appInitialized) return@onEvent
+            handleUserActionPreCheck(it)
+        }
+        onEvent<EventData.ActionUserActionConfirmed> {
+            if (!config.appInitialized) return@onEvent
+            handleUserActionConfirmed(it)
+        }
+        onEvent<EventData.ActionScenePreCheck> {
+            if (!config.appInitialized) return@onEvent
+            handleScenePreCheck(it)
+        }
+        onEvent<EventData.ActionSceneConfirmed> {
+            if (!config.appInitialized) return@onEvent
+            handleSceneConfirmed(it)
+        }
+        onEvent<EventData.ActionSceneStop> {
+            if (!config.appInitialized) return@onEvent
+            scenes.stopActiveScene()
+        }
+        onEventSync<EventData.SnoozeAlert> { uiInteraction.stopAlarm("Muted from wear") }
+        onEventSync<EventData.WearException> { fabricPrivacy.logWearException(it) }
         // Coalesce Wear reconnect-flush bursts (Data Layer replays queued events back-to-back).
         // publish/debounce keeps the timer idle when no events arrive, unlike fixed-window buffer().
         disposable += rxBus
@@ -599,13 +325,7 @@ class DataHandlerMobile @Inject constructor(
                     .onErrorComplete()
             }
             .subscribe()
-        disposable += rxBus
-            .toObservable(EventData.ActionGetCustomWatchface::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           aapsLogger.debug(LTag.WEAR, "Custom Watch face ${it.customWatchface} received from ${it.sourceNodeId}")
-                           handleGetCustomWatchface(it)
-                       }, fabricPrivacy::logException)
+        onEventSync<EventData.ActionGetCustomWatchface>(detail = { " watchface=${it.customWatchface}" }) { handleGetCustomWatchface(it) }
     }
 
     private fun maxOfNullable(vararg values: Long?): Long? {
@@ -803,7 +523,7 @@ class DataHandlerMobile @Inject constructor(
             val busy = activePump.isBusy()
             val message = rh.gs(app.aaps.core.ui.R.string.tdd_old_data) + ", " +
                 if (busy) rh.gs(app.aaps.core.ui.R.string.pump_busy) else rh.gs(R.string.pump_fetching_data)
-            rxBus.send(EventMobileToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.tdd_short), message, returnCommand = null)))
+            sendToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.tdd_short), message, returnCommand = null))
             if (!busy) {
                 commandQueue.loadTDDs()
                 val dummies1: MutableList<TDD> = LinkedList()
@@ -813,10 +533,10 @@ class DataHandlerMobile @Inject constructor(
                         rh.gs(R.string.pump_old_data) + "\n" + generateTDDMessage(historyList1, dummies1)
                     else
                         generateTDDMessage(historyList1, dummies1)
-                rxBus.send(EventMobileToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.tdd_short), reloadMessage, returnCommand = null)))
+                sendToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.tdd_short), reloadMessage, returnCommand = null))
             }
         } else {
-            rxBus.send(EventMobileToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.tdd_short), generateTDDMessage(historyList, dummies), returnCommand = null)))
+            sendToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.tdd_short), generateTDDMessage(historyList, dummies), returnCommand = null))
         }
     }
 
@@ -926,7 +646,7 @@ class DataHandlerMobile @Inject constructor(
             cob = bolusWizard.cob
         )
         wizardBolusExecutor.setPending(bolusWizard.calculatedTotalInsulin, bolusWizard.carbs, bolusWizard.createBolusCalculatorResult(), bolusWizard.timeStamp)
-        rxBus.send(EventMobileToWear(wizardResult))
+        sendToWear(wizardResult)
     }
 
     private suspend fun handleUserActionPreCheck(command: EventData.ActionUserActionPreCheck) {
@@ -937,12 +657,10 @@ class DataHandlerMobile @Inject constructor(
             // we re-check isEnabled/canRun below as the gating policy.
             automation.findEventById(command.id)?.takeIf { it.userAction }?.let { event ->
                 if (event.isEnabled && event.canRun()) {
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.ConfirmAction(
-                                rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
-                                returnCommand = EventData.ActionUserActionConfirmed(command.id, command.title)
-                            )
+                    sendToWear(
+                        EventData.ConfirmAction(
+                            rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
+                            returnCommand = EventData.ActionUserActionConfirmed(command.id, command.title)
                         )
                     )
                 } else {
@@ -987,12 +705,10 @@ class DataHandlerMobile @Inject constructor(
         if (loop.runningMode().isLoopRunning() && pump.isInitialized() && profile != null) {
             val scene = scenes.getScene(command.id)
             if (scene != null && scene.isEnabled) {
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
-                            returnCommand = EventData.ActionSceneConfirmed(command.id, command.title)
-                        )
+                sendToWear(
+                    EventData.ConfirmAction(
+                        rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
+                        returnCommand = EventData.ActionSceneConfirmed(command.id, command.title)
                     )
                 )
             } else {
@@ -1050,12 +766,10 @@ class DataHandlerMobile @Inject constructor(
                     carbDelayMessagePart +
                     eCarbsMessagePart + "\n_____________\n" + result.explanation
 
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                            returnCommand = EventData.ActionWizardConfirmed(result.bolusId)
-                        )
+                sendToWear(
+                    EventData.ConfirmAction(
+                        rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
+                        returnCommand = EventData.ActionWizardConfirmed(result.bolusId)
                     )
                 )
             }
@@ -1097,14 +811,12 @@ class DataHandlerMobile @Inject constructor(
         when (val result = wizardBolusExecutor.prepareBatch(listOf(bolus))) {
             is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
             is WizardBolusExecutor.PrepareResult.Preview ->
-                rxBus.send(
-                    EventMobileToWear(
-                        EventData.ConfirmAction(
-                            // title carries the watch's curved header for the lines screen.
-                            rh.gs(app.aaps.core.ui.R.string.overview_treatment_label), message = "",
-                            returnCommand = returnCommand(result.bolusId),
-                            lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                        )
+                sendToWear(
+                    EventData.ConfirmAction(
+                        // title carries the watch's curved header for the lines screen.
+                        rh.gs(app.aaps.core.ui.R.string.overview_treatment_label), message = "",
+                        returnCommand = returnCommand(result.bolusId),
+                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
                     )
                 )
         }
@@ -1125,12 +837,10 @@ class DataHandlerMobile @Inject constructor(
         val insulinAfterConstraints = constraintChecker.applyBolusConstraints(ConstraintObject(amount, aapsLogger)).value()
         var message = rh.gs(app.aaps.core.ui.R.string.prime_fill) + ": " + insulinAfterConstraints + rh.gs(R.string.units_short)
         if (insulinAfterConstraints - amount != 0.0) message += "\n" + rh.gs(app.aaps.core.ui.R.string.constraint_applied)
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                    returnCommand = EventData.ActionFillConfirmed(insulinAfterConstraints)
-                )
+        sendToWear(
+            EventData.ConfirmAction(
+                rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
+                returnCommand = EventData.ActionFillConfirmed(insulinAfterConstraints)
             )
         )
     }
@@ -1144,12 +854,10 @@ class DataHandlerMobile @Inject constructor(
         val insulinAfterConstraints = constraintChecker.applyBolusConstraints(ConstraintObject(command.insulin, aapsLogger)).value()
         var message = rh.gs(app.aaps.core.ui.R.string.prime_fill) + ": " + insulinAfterConstraints + rh.gs(R.string.units_short)
         if (insulinAfterConstraints - command.insulin != 0.0) message += "\n" + rh.gs(app.aaps.core.ui.R.string.constraint_applied)
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                    returnCommand = EventData.ActionFillConfirmed(insulinAfterConstraints)
-                )
+        sendToWear(
+            EventData.ConfirmAction(
+                rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
+                returnCommand = EventData.ActionFillConfirmed(insulinAfterConstraints)
             )
         )
     }
@@ -1157,9 +865,7 @@ class DataHandlerMobile @Inject constructor(
     private suspend fun handleProfileSwitchSendInitialData() {
         val activeProfileSwitch = persistenceLayer.getEffectiveProfileSwitchActiveAt(dateUtil.now())
         if (activeProfileSwitch != null) { // read CPP values
-            rxBus.send(
-                EventMobileToWear(EventData.ActionProfileSwitchOpenActivity(T.msecs(activeProfileSwitch.originalTimeshift).hours().toInt(), activeProfileSwitch.originalPercentage, activeProfileSwitch.originalDuration.toInt()))
-            )
+            sendToWear(EventData.ActionProfileSwitchOpenActivity(T.msecs(activeProfileSwitch.originalTimeshift).hours().toInt(), activeProfileSwitch.originalPercentage, activeProfileSwitch.originalDuration.toInt()))
         } else {
             sendError(rh.gs(R.string.no_active_profile))
             return
@@ -1183,16 +889,14 @@ class DataHandlerMobile @Inject constructor(
         }
         val profileName = profileFunction.getOriginalProfileName()
         val message = rh.gs(R.string.profile_message, profileName, command.timeShift, command.percentage, command.duration)
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
-                    returnCommand = EventData.ActionProfileSwitchConfirmed(command.timeShift, command.percentage, command.duration),
-                    profileName = profileName,
-                    profilePercentage = command.percentage,
-                    profileTimeshift = command.timeShift,
-                    profileDurationMinutes = command.duration,
-                )
+        sendToWear(
+            EventData.ConfirmAction(
+                rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), message,
+                returnCommand = EventData.ActionProfileSwitchConfirmed(command.timeShift, command.percentage, command.duration),
+                profileName = profileName,
+                profilePercentage = command.percentage,
+                profileTimeshift = command.timeShift,
+                profileDurationMinutes = command.duration,
             )
         )
     }
@@ -1214,14 +918,12 @@ class DataHandlerMobile @Inject constructor(
             when (val result = wizardBolusExecutor.prepareBatch(listOf(tt))) {
                 is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
                 is WizardBolusExecutor.PrepareResult.Preview ->
-                    rxBus.send(
-                        EventMobileToWear(
-                            EventData.ConfirmAction(
-                                // title is the watch's curved header for the lines screen.
-                                rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "",
-                                returnCommand = EventData.ActionTempTargetConfirmed(result.bolusId),
-                                lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                            )
+                    sendToWear(
+                        EventData.ConfirmAction(
+                            // title is the watch's curved header for the lines screen.
+                            rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "",
+                            returnCommand = EventData.ActionTempTargetConfirmed(result.bolusId),
+                            lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
                         )
                     )
             }
@@ -1304,10 +1006,8 @@ class DataHandlerMobile @Inject constructor(
         else allStates
         lastAuthorizedRunningModeChangeTS = System.currentTimeMillis()
         lastRunningModes = states
-        rxBus.send(
-            EventMobileToWear(
-                EventData.RunningModeList(lastAuthorizedRunningModeChangeTS!!, states)
-            )
+        sendToWear(
+            EventData.RunningModeList(lastAuthorizedRunningModeChangeTS!!, states)
         )
     }
 
@@ -1334,20 +1034,18 @@ class DataHandlerMobile @Inject constructor(
 
             else                                             -> null
         }
-        rxBus.send(
-            EventMobileToWear(
-                EventData.ConfirmAction(
-                    rh.gs(R.string.wear_action_running_mode_title),
-                    when (newState.state) {
-                        AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND -> rh.gs(R.string.wear_action_loop_state_changed_with_duration, runningModeName, nDuration)
-                        AvailableRunningMode.RunningMode.PUMP_DISCONNECT   -> rh.gs(R.string.wear_action_loop_state_changed_with_duration, runningModeName, nDuration)
-                        else                                               -> runningModeName
-                    },
-                    EventData.RunningModeConfirmed(action.timeStamp, action.index, action.duration),
-                    runningModeTitle = runningModeName,
-                    runningModeDurationMinutes = runningModeDuration,
-                    runningModeType = newState.state.name,
-                )
+        sendToWear(
+            EventData.ConfirmAction(
+                rh.gs(R.string.wear_action_running_mode_title),
+                when (newState.state) {
+                    AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND -> rh.gs(R.string.wear_action_loop_state_changed_with_duration, runningModeName, nDuration)
+                    AvailableRunningMode.RunningMode.PUMP_DISCONNECT   -> rh.gs(R.string.wear_action_loop_state_changed_with_duration, runningModeName, nDuration)
+                    else                                               -> runningModeName
+                },
+                EventData.RunningModeConfirmed(action.timeStamp, action.index, action.duration),
+                runningModeTitle = runningModeName,
+                runningModeDurationMinutes = runningModeDuration,
+                runningModeType = newState.state.name,
             )
         )
     }
@@ -1403,16 +1101,6 @@ class DataHandlerMobile @Inject constructor(
         handleAvailableRunningModes()
     }
 
-    private fun sendQuickWizardToWear() {
-        rxBus.send(
-            EventMobileToWear(
-                EventData.QuickWizard(
-                    ArrayList(quickWizard.list().filter { it.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { it.toWear() })
-                )
-            )
-        )
-    }
-
     private fun QuickWizardEntry.toWear(): EventData.QuickWizard.QuickWizardEntry =
         EventData.QuickWizard.QuickWizardEntry(
             guid = guid(),
@@ -1435,26 +1123,24 @@ class DataHandlerMobile @Inject constructor(
             return
         }
         // SingleBg
-        iobCobCalculator.ads.lastBg()?.let { rxBus.send(EventMobileToWear(getSingleBG(it))) }
+        iobCobCalculator.ads.lastBg()?.let { sendToWear(getSingleBG(it)) }
         // Preferences
-        rxBus.send(
-            EventMobileToWear(
-                EventData.Preferences(
-                    timeStamp = System.currentTimeMillis(),
-                    wearControl = preferences.get(BooleanKey.WearControl),
-                    unitsMgdl = profileFunction.getUnits() == GlucoseUnit.MGDL,
-                    bolusPercentage = preferences.get(IntKey.OverviewBolusPercentage),
-                    maxCarbs = preferences.get(IntKey.SafetyMaxCarbs),
-                    maxBolus = preferences.get(DoubleKey.SafetyMaxBolus),
-                    insulinButtonIncrement1 = preferences.get(DoubleKey.OverviewInsulinButtonIncrement1),
-                    insulinButtonIncrement2 = preferences.get(DoubleKey.OverviewInsulinButtonIncrement2),
-                    carbsButtonIncrement1 = preferences.get(IntKey.OverviewCarbsButtonIncrement1),
-                    carbsButtonIncrement2 = preferences.get(IntKey.OverviewCarbsButtonIncrement2)
-                )
+        sendToWear(
+            EventData.Preferences(
+                timeStamp = System.currentTimeMillis(),
+                wearControl = preferences.get(BooleanKey.WearControl),
+                unitsMgdl = profileFunction.getUnits() == GlucoseUnit.MGDL,
+                bolusPercentage = preferences.get(IntKey.OverviewBolusPercentage),
+                maxCarbs = preferences.get(IntKey.SafetyMaxCarbs),
+                maxBolus = preferences.get(DoubleKey.SafetyMaxBolus),
+                insulinButtonIncrement1 = preferences.get(DoubleKey.OverviewInsulinButtonIncrement1),
+                insulinButtonIncrement2 = preferences.get(DoubleKey.OverviewInsulinButtonIncrement2),
+                carbsButtonIncrement1 = preferences.get(IntKey.OverviewCarbsButtonIncrement1),
+                carbsButtonIncrement2 = preferences.get(IntKey.OverviewCarbsButtonIncrement2)
             )
         )
         // QuickWizard
-        sendQuickWizardToWear()
+        sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
         //UserAction
         sendUserActions()
         // Scenes
@@ -1468,13 +1154,7 @@ class DataHandlerMobile @Inject constructor(
             val lowLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewLowMark), units)
             val highLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewHighMark), units)
             val slopeArrow = (trendCalculator.getTrendArrow(iobCobCalculator.ads) ?: TrendArrow.NONE).symbol
-            rxBus.send(
-                EventMobileToWear(
-                    EventData.GraphData(
-                        ArrayList(bucketedData.map { buildSingleBg(it, glucoseStatus, units, lowLine, highLine, slopeArrow) })
-                    )
-                )
-            )
+            sendToWear(EventData.GraphData(ArrayList(bucketedData.map { buildSingleBg(it, glucoseStatus, units, lowLine, highLine, slopeArrow) })))
         }
         // Treatments
         sendTreatments()
@@ -1485,11 +1165,7 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private fun AutomationEvent.toWear(now: Long): EventData.UserAction.UserActionEntry =
-        EventData.UserAction.UserActionEntry(
-            timeStamp = now,
-            id = id,
-            title = title
-        )
+        EventData.UserAction.UserActionEntry(timeStamp = now, id = id, title = title)
 
     suspend fun sendUserActions() {
         val now = System.currentTimeMillis()
@@ -1500,36 +1176,20 @@ class DataHandlerMobile @Inject constructor(
             for (event in automation.events.value) {
                 if (event.userAction && event.isEnabled && event.canRun()) filtered.add(event)
             }
-        rxBus.send(
-            EventMobileToWear(
-                EventData.UserAction(
-                    ArrayList(filtered.map { it.toWear(now) })
-                )
-            )
-        )
+        sendToWear(EventData.UserAction(ArrayList(filtered.map { it.toWear(now) })))
     }
 
     private fun Scene.toWear(now: Long): EventData.SceneList.SceneEntry =
-        EventData.SceneList.SceneEntry(
-            timeStamp = now,
-            id = id,
-            title = name
-        )
+        EventData.SceneList.SceneEntry(timeStamp = now, id = id, title = name)
 
     fun sendScenes() {
         val now = System.currentTimeMillis()
         val enabled = scenes.getScenes().filter { it.isEnabled }
-        rxBus.send(
-            EventMobileToWear(
-                EventData.SceneList(
-                    ArrayList(enabled.map { it.toWear(now) })
-                )
-            )
-        )
+        sendToWear(EventData.SceneList(ArrayList(enabled.map { it.toWear(now) })))
     }
 
     fun sendActiveSceneState(active: Boolean) {
-        rxBus.send(EventMobileToWear(EventData.ActiveSceneState(active)))
+        sendToWear(EventData.ActiveSceneState(active))
     }
 
     private suspend fun sendTreatments() {
@@ -1664,7 +1324,7 @@ class DataHandlerMobile @Inject constructor(
                     )
                 )
             }
-        rxBus.send(EventMobileToWear(EventData.TreatmentData(temps, basals, boluses, predictions)))
+        sendToWear(EventData.TreatmentData(temps, basals, boluses, predictions))
     }
 
     private fun predictionColor(data: GV): Int {
@@ -1751,28 +1411,26 @@ class DataHandlerMobile @Inject constructor(
             else                   -> 0
         }
 
-        rxBus.send(
-            EventMobileToWear(
-                EventData.Status(
-                    dataset = 0,
-                    externalStatus = status,
-                    iobSum = iobSum,
-                    iobDetail = iobDetail,
-                    cob = cobString,
-                    currentBasal = currentBasal,
-                    battery = phoneBattery.toString(),
-                    rigBattery = rigBattery,
-                    openApsStatus = openApsStatus,
-                    bgi = bgiString,
-                    batteryLevel = if (phoneBattery >= 30) 1 else 0,
-                    patientName = patientName,
-                    tempTarget = tempTarget,
-                    tempTargetLevel = tempTargetLevel,
-                    tempTargetDuration = tempTargetDuration,
-                    reservoirString = reservoirString,
-                    reservoir = reservoir,
-                    reservoirLevel = reservoirLevel
-                )
+        sendToWear(
+            EventData.Status(
+                dataset = 0,
+                externalStatus = status,
+                iobSum = iobSum,
+                iobDetail = iobDetail,
+                cob = cobString,
+                currentBasal = currentBasal,
+                battery = phoneBattery.toString(),
+                rigBattery = rigBattery,
+                openApsStatus = openApsStatus,
+                bgi = bgiString,
+                batteryLevel = if (phoneBattery >= 30) 1 else 0,
+                patientName = patientName,
+                tempTarget = tempTarget,
+                tempTargetLevel = tempTargetLevel,
+                tempTargetDuration = tempTargetDuration,
+                reservoirString = reservoirString,
+                reservoir = reservoir,
+                reservoirLevel = reservoirLevel
             )
         )
     }
@@ -1996,8 +1654,12 @@ class DataHandlerMobile @Inject constructor(
         )
     }
 
-    @Synchronized private fun sendError(errorMessage: String) {
-        rxBus.send(EventMobileToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.error), errorMessage, returnCommand = EventData.Error(dateUtil.now())))) // ignore return path
+    private fun sendError(errorMessage: String) {
+        sendToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.error), errorMessage, returnCommand = EventData.Error(dateUtil.now()))) // ignore return path
+    }
+
+    private fun sendToWear(event: EventData) {
+        rxBus.send(EventMobileToWear(event))
     }
 
     /** Stores heart rate events coming from the Wear device. */

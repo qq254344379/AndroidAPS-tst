@@ -35,6 +35,8 @@ import org.mockito.Mock
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.never
+import org.mockito.kotlin.timeout
+import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyBlocking
 import org.mockito.kotlin.whenever
 import javax.inject.Provider
@@ -233,5 +235,28 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
 
         verifyBlocking(wizardBolusExecutor, never()) { prepareBatch(any()) }
         assertThat(sent.returnCommand).isInstanceOf(EventData.Error::class.java)
+    }
+
+    // --- Subscription wiring (the onEvent / onEventSync helpers actually register each type) --------------
+    //
+    // The tests above drive the handler methods directly. These two instead post the event onto the real
+    // RxBus and assert the handler runs — locking in that the helper-based subscriptions in init {} are
+    // wired (a dropped subscription is a mechanical refactor error the compiler can't catch).
+
+    @Test fun `onEventSync dispatches a posted SnoozeAlert to its handler`() {
+        // onEventSync subscribes directly; the trampoline io scheduler runs it inline.
+        rxBus.send(EventData.SnoozeAlert(0L))
+
+        verify(uiInteraction).stopAlarm("Muted from wear")
+    }
+
+    @Test fun `onEvent dispatches a posted ActionBolusPreCheck to the suspend handler`() {
+        // onEvent wraps the handler in rxCompletable, which runs the coroutine off the posting thread —
+        // hence a timeout verify rather than a synchronous capture.
+        stubPreview(1.0, 10, bolusId = 11L, lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "Bolus: 1.00 U")))
+
+        rxBus.send(EventData.ActionBolusPreCheck(insulin = 1.0, carbs = 10))
+
+        verifyBlocking(wizardBolusExecutor, timeout(2000)) { prepareBatch(any()) }
     }
 }
