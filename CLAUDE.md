@@ -45,7 +45,10 @@
     - Use `head_limit` to cap number of results
 - **Suppress verbose Bash output:**
     - Use `--quiet` flag for gradle: `.\gradlew.bat assembleFullDebug --quiet --no-daemon`
-    - Pipe to `tail -50` for long outputs
+    - Pipe to `tail -50` only when you just need to *read* output — ⚠️ a pipe makes the reported exit
+      code the **pipe's** (e.g. `tail`'s), NOT gradle's, so a FAILED build/test looks like it passed.
+      For pass/fail, redirect instead: `./gradlew.bat … --no-daemon > build.log 2>&1` then grep the log
+      (`^e: ` for Kotlin errors, `BUILD FAILED`/`BUILD SUCCESSFUL`).
     - Avoid commands that dump entire logs
 - **Be specific in searches:**
     - Narrow glob patterns: `src/**/specific/*.kt` instead of `**/*.kt`
@@ -216,6 +219,19 @@
 - If an approach requires more than 3 workarounds: **step back and reconsider the approach**
 - If you realize you're about to repeat a mistake from memory: **stop and follow the correct pattern
   **
+
+## On-Device Testing (ONLY on explicit request)
+
+Default stays **"Never install app automatically"** — only build / install / drive devices when the
+user explicitly asks. That request overrides the no-install rule; `connectedAndroidTest` still needs
+its own permission (it wipes the app). When asked:
+
+- Master runs the `full` flavor, a client runs an `aapsclient` flavor — build the needed APK(s) and
+  `adb install -r` (keep data; **never uninstall/wipe** the setup). Find devices via `adb devices -l`.
+- Drive the UI with **`uiautomator`** (dump hierarchy → tap by element `bounds`), not screenshots.
+- Verify behaviour from **`logcat`** (clear before the action, dump after, grep the relevant markers).
+- Use redirect-not-pipe for any gradle build/test so the real exit code shows (see caveat above).
+- Ask connected devices are test devices.
 
 ## Project Info
 

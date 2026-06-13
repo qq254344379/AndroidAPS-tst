@@ -288,7 +288,7 @@ class ClientControlRoundTrip @Inject constructor(
                 is ClientControlActionDispatcher.Command.BolusPrepare     -> ClientControlMessage.BolusPrepare(command.guid)
                 is ClientControlActionDispatcher.Command.BolusCommit      -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)
                 is ClientControlActionDispatcher.Command.WizardPrepare    -> with(command.inputs) {
-                    ClientControlMessage.WizardPrepare(bg, carbs, percentage, directCorrection, carbTime, useBg, useCob, useIob, useTt, useTrend, alarm, notes, eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours)
+                    ClientControlMessage.WizardPrepare(bg, carbs, percentage, directCorrection, carbTime, useBg, useCob, useIob, useTt, useTrend, alarm, notes, eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours, profileName)
                 }
 
                 is ClientControlActionDispatcher.Command.BatchPrepare     -> ClientControlMessage.BatchPrepare(command.actions.map { it.toDto() })

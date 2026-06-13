@@ -182,8 +182,11 @@ interface WizardBolusExecutor {
 
     /**
      * The manual Bolus Wizard's user inputs, sent client→master for [prepareWizard]. Only these user-entered
-     * values travel; the master fills in its own live profile / temp target / COB / IOB. [bg] is the value in
-     * the client's BG field (user-overridable); the rest mirror the wizard dialog's toggles + amounts.
+     * values travel; the master fills in its own live temp target / COB / IOB. [bg] is the value in the client's
+     * BG field (user-overridable); the rest mirror the wizard dialog's toggles + amounts. [profileName] is the
+     * dialog's profile selection: null → recompute on the master's CURRENT active profile (kept dynamic — the
+     * master is authoritative); a name → that stored profile from the master's profile store (the master resolves
+     * it, so a client/watch can relay a profile the master owns).
      */
     data class WizardInputs(
         val bg: Double,
@@ -200,6 +203,7 @@ interface WizardBolusExecutor {
         val notes: String,
         val eCarbsGrams: Int = 0,
         val eCarbsDelayMinutes: Int = 0,
-        val eCarbsDurationHours: Int = 0
+        val eCarbsDurationHours: Int = 0,
+        val profileName: String? = null
     )
 }

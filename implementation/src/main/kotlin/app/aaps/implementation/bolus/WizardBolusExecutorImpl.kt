@@ -29,6 +29,7 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
@@ -39,6 +40,7 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.objects.constraints.ConstraintObject
+import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.BolusWizard
@@ -179,12 +181,25 @@ class WizardBolusExecutorImpl @Inject constructor(
 
     override suspend fun prepareWizard(inputs: WizardBolusExecutor.WizardInputs): WizardBolusExecutor.PrepareResult {
         runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
-        val profile = profileFunction.getProfile() ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_active_profile))
-        val profileName = profileFunction.getProfileName()
+        // Resolve the dialog's profile selection: null → the master's active profile (kept dynamic — the master is
+        // authoritative); a name → that stored profile (a client/watch relays a name the master owns), wrapped so
+        // doCalc sees a full Profile. An unknown name fails the prepare (the picker offered a profile the master lacks).
+        // Captured to a local val first: a cross-module public property can't be smart-cast to non-null.
+        val selectedProfile = inputs.profileName
+        val profile: Profile
+        val profileName: String
+        if (selectedProfile == null) {
+            profile = profileFunction.getProfile() ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_active_profile))
+            profileName = profileFunction.getProfileName()
+        } else {
+            val pure = profileRepository.profile.value?.getSpecificProfile(selectedProfile)
+                ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.scene_profile_not_found, selectedProfile))
+            profile = ProfileSealed.Pure(pure, activePlugin)
+            profileName = selectedProfile
+        }
         val pump = activePlugin.activePump
         if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
-        // Recompute on the MASTER's live state (active profile + temp target + COB) using the client's inputs.
-        // The stored-profile selection isn't honored yet — the master uses its active profile (a refinement).
+        // Recompute on the MASTER's live state (temp target + COB) using the client's inputs + the resolved profile.
         val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
         val cob = if (inputs.useCob) iobCobCalculator.getCobInfo("WizardPrepare").displayCob ?: 0.0 else 0.0
         val carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(inputs.carbs, aapsLogger)).value()

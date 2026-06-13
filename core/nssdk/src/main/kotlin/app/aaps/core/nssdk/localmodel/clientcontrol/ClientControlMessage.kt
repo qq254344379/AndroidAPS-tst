@@ -164,7 +164,9 @@ sealed class ClientControlMessage {
         val notes: String,
         val eCarbsGrams: Int = 0,
         val eCarbsDelayMinutes: Int = 0,
-        val eCarbsDurationHours: Int = 0
+        val eCarbsDurationHours: Int = 0,
+        // null → the master's active profile; a name → that stored profile (additive, default keeps old clients wire-compatible).
+        val profileName: String? = null
     ) : ClientControlMessage()
 
     /**

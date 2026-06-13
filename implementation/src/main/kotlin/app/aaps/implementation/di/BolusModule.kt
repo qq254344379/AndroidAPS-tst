@@ -1,7 +1,9 @@
 package app.aaps.implementation.di
 
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.implementation.bolus.WizardBolusExecutorImpl
+import app.aaps.implementation.bolus.WizardExecutorImpl
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -13,4 +15,7 @@ import dagger.hilt.components.SingletonComponent
 interface BolusModule {
 
     @Binds fun bindWizardBolusExecutor(impl: WizardBolusExecutorImpl): WizardBolusExecutor
+
+    /** Role-transparent recompute-bolus facade (QuickWizard WIZARD + manual wizard) — sibling of BatchExecutor. */
+    @Binds fun bindWizardExecutor(impl: WizardExecutorImpl): WizardExecutor
 }

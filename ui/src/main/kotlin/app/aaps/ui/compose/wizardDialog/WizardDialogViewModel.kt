@@ -5,10 +5,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.time.T
+import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
-import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
+import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -71,7 +73,7 @@ class WizardDialogViewModel @Inject constructor(
     val decimalFormatter: DecimalFormatter,
     private val aapsLogger: AAPSLogger,
     private val runningModeGuard: RunningModeGuard,
-    private val clientControlDispatcher: ClientControlActionDispatcher,
+    private val wizardExecutor: WizardExecutor,
     private val rxBus: RxBus,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
@@ -142,9 +144,9 @@ class WizardDialogViewModel @Inject constructor(
         val totalIOB = bolusIob.iob + basalIob.basaliob
 
         val cantDeliverBolus = runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS) != null
-        // An AAPSCLIENT delivers via the master (see confirmRemote), so it is NOT forced into record-only here —
-        // only the master's own can't-deliver conditions force it. (The client routes remote before reaching this.)
-        val forcedRecordOnly = cantDeliverBolus || !activePlugin.activePump.isInitialized()
+        // An AAPSCLIENT always delivers via the master (deliverManualWizard), so it is NEVER forced record-only;
+        // only a master's own can't-deliver conditions force the local record-only log (matches Insulin/Treatment dialog).
+        val forcedRecordOnly = if (config.AAPSCLIENT) false else (cantDeliverBolus || !activePlugin.activePump.isInitialized())
 
         _uiState.update {
             WizardDialogUiState(
@@ -448,9 +450,6 @@ class WizardDialogViewModel @Inject constructor(
     fun hasAction(): Boolean =
         wizard?.let { it.insulinAfterConstraints > 0 || it.carbs > 0 || uiState.value.eCarbs > 0 } ?: false
 
-    fun needsBolusAdvisor(): Boolean =
-        wizard?.needsBolusAdvisor() ?: false
-
     fun getConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         return wizard?.buildConfirmationLines(
@@ -462,46 +461,21 @@ class WizardDialogViewModel @Inject constructor(
         ) ?: emptyList()
     }
 
-    fun getAdvisorSummary(): List<ConfirmationLine> {
+    /**
+     * Record-only path (MASTER only — a client always delivers via the master). Used when the master can't deliver
+     * (pump not initialized / mode forbids a bolus): log the wizard-calculated treatment + its BolusCalculatorResult
+     * locally via [BolusWizard.executeNormal] with forcedRecordOnly. The DELIVERY path is [deliverManualWizard].
+     * appScope: the screen pops on confirm, which would cancel viewModelScope before the write runs.
+     */
+    fun recordOnly() {
         val state = uiState.value
-        return wizard?.buildConfirmationLines(
-            advisor = true,
-            eCarbsGrams = state.eCarbs,
-            eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime,
-            eCarbsDurationHours = state.eCarbsDurationHours,
-            forcedRecordOnly = state.forcedRecordOnly
-        ) ?: emptyList()
-    }
-
-    fun executeNormal() {
-        val state = uiState.value
-        // appScope, not viewModelScope: the screen navigates back on confirm (onNavigateBack), which
-        // cancels viewModelScope — a delivery launched there would be cancelled before it ever runs.
         appScope.launch {
             wizard?.executeNormal(
-                onError = { comment ->
-                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(comment))
-                },
+                onError = { comment -> _sideEffect.tryEmit(SideEffect.ShowDeliveryError(comment)) },
                 eCarbsGrams = state.eCarbs,
                 eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime,
                 eCarbsDurationHours = state.eCarbsDurationHours,
-                forcedRecordOnly = state.forcedRecordOnly
-            )
-        }
-    }
-
-    fun executeBolusAdvisor() {
-        val state = uiState.value
-        // appScope, not viewModelScope: see executeNormal — the screen pops on confirm, cancelling viewModelScope.
-        appScope.launch {
-            wizard?.executeBolusAdvisor(
-                onError = { comment ->
-                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(comment))
-                },
-                eCarbsGrams = state.eCarbs,
-                eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime,
-                eCarbsDurationHours = state.eCarbsDurationHours,
-                forcedRecordOnly = state.forcedRecordOnly
+                forcedRecordOnly = true
             )
         }
     }
@@ -512,47 +486,40 @@ class WizardDialogViewModel @Inject constructor(
         preferences.put(BooleanNonKey.WizardIncludeTrend, state.useTrend)
     }
 
-    /** AAPSCLIENT → the manual wizard bolus delivers via the master (see [confirmRemote]), never record-only. */
-    val isAapsClient: Boolean get() = config.AAPSCLIENT
-
     /**
-     * AAPSCLIENT path: send the wizard inputs to the master, which recomputes + constraint-caps the dose on its
-     * OWN profile/COB/IOB and returns its color-coded confirmation (a real delivery — no "recorded only"). The
-     * client confirms the MASTER's number, then commits; the master decides the high-BG advisor fork. No dose
-     * leaves the client. Mirrors the remote QuickWizard path. (Dedupe with `MainViewModel.confirmWizardBolus` later.)
+     * Deliver the manual wizard bolus role-transparently via [WizardExecutor]: the master recomputes the dose on its
+     * OWN profile (the dialog's profile selection travels), temp target, COB and IOB, caps it, and authors the
+     * confirmation. Both roles render the master's EXACT lines via the shared [showWizardBolusConfirmation]; the user's
+     * OK commits (the advisor fork chooses correction-only). No dose is ever computed on a client. This is the DELIVERY
+     * path; a master that can't deliver records locally via [recordOnly] (master-only — a client always delivers).
+     * appScope, not viewModelScope: the screen pops right after this call.
      */
-    fun confirmRemote() {
+    fun deliverManualWizard() {
         val state = uiState.value
         val effectiveCarbs = state.carbs * state.carbsType.carbsPercent / 100
+        // null → recompute on the master's active profile (index 0 = "Active"); else the selected stored profile by name.
+        val profileName = if (state.selectedProfileIndex == 0) null else state.profileNames.getOrNull(state.selectedProfileIndex)
         val inputs = WizardBolusExecutor.WizardInputs(
             bg = state.bg, carbs = effectiveCarbs, percentage = state.percentage, directCorrection = state.directCorrection,
             carbTime = state.carbTime, useBg = state.useBg, useCob = state.useCOB, useIob = state.useIOB,
             useTt = state.useTT, useTrend = state.useTrend, alarm = state.alarmChecked, notes = state.notes,
-            eCarbsGrams = state.eCarbs, eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime, eCarbsDurationHours = state.eCarbsDurationHours
+            eCarbsGrams = state.eCarbs, eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime, eCarbsDurationHours = state.eCarbsDurationHours,
+            profileName = profileName
         )
         val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_deliver_bolus)
-        val title = rh.gs(app.aaps.core.ui.R.string.boluswizard)
-        // appScope, not viewModelScope: the screen pops right after this call (see executeNormal).
         appScope.launch {
-            val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.WizardPrepare(inputs), label)
-            if (prepared !is ActionProgress.Prepared) return@launch // a failure already surfaced through the pending modal
-            fun showConfirm(lines: List<ConfirmationLine>, asAdvisor: Boolean) =
-                rxBus.send(
-                    EventShowDialog.OkCancel(
-                        title = title, message = "", confirmationLines = lines, icon = IcCalculator,
-                        onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.id, asAdvisor), label) } }
-                    )
-                )
-            if (prepared.advisorApplies)
-                rxBus.send(
-                    EventShowDialog.YesNoCancel(
-                        title = rh.gs(app.aaps.core.ui.R.string.bolus_advisor),
-                        message = rh.gs(app.aaps.core.ui.R.string.bolus_advisor_message),
-                        onYes = { showConfirm(prepared.advisorLines, true) },
-                        onNo = { showConfirm(prepared.lines, false) }
-                    )
-                )
-            else showConfirm(prepared.lines, false)
+            when (val prepared = wizardExecutor.prepare(WizardExecutor.WizardSource.Manual(inputs), label)) {
+                is ActionProgress.Prepared ->
+                    showWizardBolusConfirmation(rxBus, rh, rh.gs(app.aaps.core.ui.R.string.boluswizard), IcCalculator, prepared.advisorApplies, prepared.lines, prepared.advisorLines) { asAdvisor ->
+                        appScope.launch { wizardExecutor.commit(prepared.id, asAdvisor, Sources.WizardDialog, label) }
+                    }
+                // Master-local compute failure (no modal) or client offline; a client round-trip failure already showed on the app modal.
+                is ActionProgress.Rejected ->
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                        rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.boluswizard), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+
+                else                       -> Unit // Unconfirmed → app modal
+            }
         }
     }
 }

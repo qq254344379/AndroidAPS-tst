@@ -12,21 +12,18 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
-import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
-import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -40,7 +37,6 @@ import app.aaps.core.interfaces.overview.graph.TempTargetState
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
-import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
@@ -56,7 +52,6 @@ import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.ui.IconsProvider
-import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
@@ -64,7 +59,6 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.toStringFull
-import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.objects.wizard.QuickWizardMode
@@ -84,6 +78,7 @@ import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
+import app.aaps.ui.compose.wizardDialog.showWizardBolusConfirmation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -107,7 +102,6 @@ import kotlin.math.abs
 @Stable
 class MainViewModel @Inject constructor(
     private val activePlugin: ActivePlugin,
-    private val insulin: Insulin,
     val config: Config,
     val preferences: Preferences,
     private val fabricPrivacy: FabricPrivacy,
@@ -122,12 +116,10 @@ class MainViewModel @Inject constructor(
     private val quickWizard: QuickWizard,
     private val automation: Automation,
     private val persistenceLayer: PersistenceLayer,
-    private val profileRepository: ProfileRepository,
     private val aapsLogger: AAPSLogger,
     private val quickLaunchResolver: QuickLaunchResolver,
-    private val wizardBolusExecutor: WizardBolusExecutor,
+    private val wizardExecutor: WizardExecutor,
     private val batchExecutor: BatchExecutor,
-    private val uiInteraction: UiInteraction,
     private val uel: UserEntryLogger,
     private val loop: Loop,
     private val protectionCheck: ProtectionCheck,
@@ -137,9 +129,7 @@ class MainViewModel @Inject constructor(
     private val sceneChainTargetResolver: SceneChainResolver,
     private val activeSceneManager: ActiveSceneSync,
     private val rxBus: RxBus,
-    private val runningModeGuard: RunningModeGuard,
     private val nsClient: NsClient,
-    private val clientControlDispatcher: ClientControlActionDispatcher,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -154,10 +144,6 @@ class MainViewModel @Inject constructor(
      * client-control round-trip under the hood.
      */
     val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
-
-    /** Actively probe the master (ping + config re-fetch) — call when the offline banner is showing so
-     *  it clears promptly if the master is in fact online. Rate-limited / no-op'd inside the plugin. */
-    fun requestMasterProbe() = nsClient.requestMasterProbe()
 
     /** Toolbar items as a separate StateFlow to avoid unnecessary recompositions of the main UI */
     private val _quickLaunchItems = MutableStateFlow<List<ResolvedQuickLaunchItem>>(emptyList())
@@ -453,7 +439,7 @@ class MainViewModel @Inject constructor(
             val entry = quickWizard.get(guid) ?: return@launch
             if (!entry.isActive()) return@launch
             when (entry.mode()) {
-                QuickWizardMode.WIZARD  -> if (config.AAPSCLIENT) executeRemoteQuickWizard(entry, guid) else executeQuickWizardMode(entry, guid)
+                QuickWizardMode.WIZARD  -> executeWizardQuickWizard(entry, guid)
                 QuickWizardMode.INSULIN -> executeInsulinMode(entry)
                 QuickWizardMode.CARBS   -> executeCarbsMode(entry)
             }
@@ -461,68 +447,26 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * Master local QuickWizard (WIZARD mode): the SAME prepare→confirm spine the client and watch use — only
-     * the transport differs (the master delivers locally via [WizardBolusExecutor.confirm]). The master builds
-     * + renders its own color-coded confirmation; the advisor fork is shared with the client.
+     * QuickWizard WIZARD mode, role-transparent via [WizardExecutor]: the master computes + caps the dose and authors
+     * the confirmation (locally on a master, returned in the signed ack to a client). Both roles render the master's
+     * EXACT lines via the shared [showWizardBolusConfirmation]; the user's OK rides back as a commit the master delivers
+     * once (the advisor fork chooses correction-only). No dose is ever computed on a client.
      */
-    private suspend fun executeQuickWizardMode(entry: QuickWizardEntry, guid: String) {
-        when (val prep = wizardBolusExecutor.prepareQuickWizard(guid)) {
-            is WizardBolusExecutor.PrepareResult.Error   ->
-                rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.boluswizard), message = prep.message))
-
-            is WizardBolusExecutor.PrepareResult.Preview ->
-                confirmWizardBolus(entry, prep.advisorApplies, prep.lines, prep.advisorLines) { asAdvisor ->
-                    appScope.launch {
-                        // The async delivery failure is now alarmed once, centrally, from the executor (URGENT
-                        // notification) — so no local runAlarm here (it would double).
-                        wizardBolusExecutor.confirm(prep.bolusId, Sources.QuickWizard, { }, asAdvisor)
-                    }
-                }
-        }
-    }
-
-    /**
-     * Client (AAPSCLIENT) QuickWizard (WIZARD mode): the master computes + caps the dose and returns its
-     * confirmation in the signed ack; the client renders the master's EXACT lines, and the user's OK rides back
-     * as a signed BolusCommit the master delivers once. No dose ever leaves the client.
-     */
-    private suspend fun executeRemoteQuickWizard(entry: QuickWizardEntry, guid: String) {
+    private suspend fun executeWizardQuickWizard(entry: QuickWizardEntry, guid: String) {
         val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_deliver_bolus)
-        val prepared = clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusPrepare(guid), label)
-        if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
-        confirmWizardBolus(entry, prepared.advisorApplies, prepared.lines, prepared.advisorLines) { asAdvisor ->
-            appScope.launch {
-                clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.id, asAdvisor), label)
-            }
-        }
-    }
+        when (val prepared = wizardExecutor.prepare(WizardExecutor.WizardSource.QuickWizard(guid), label)) {
+            is ActionProgress.Prepared ->
+                showWizardBolusConfirmation(rxBus, rh, entry.buttonText(), IcQuickwizard, prepared.advisorApplies, prepared.lines, prepared.advisorLines) { asAdvisor ->
+                    // The async delivery failure is alarmed once, centrally, from the executor — no local alarm here (it would double).
+                    appScope.launch { wizardExecutor.commit(prepared.id, asAdvisor, Sources.QuickWizard, label) }
+                }
+            // A master-local compute failure (no modal) or a client offline pre-check surfaces here; a client round-trip failure already showed on the app modal.
+            is ActionProgress.Rejected ->
+                if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                    rxBus.send(EventShowDialog.Ok(title = entry.buttonText(), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
 
-    /**
-     * Shared wizard-bolus confirmation for BOTH master (local confirm) and client (round-trip commit) — the
-     * master already built [normalLines]/[advisorLines]; this only renders them and routes the user's choice.
-     * When [advisorApplies], the high-BG "correct now, eat later?" Yes/No precedes the OkCancel; [onCommit]
-     * receives the chosen asAdvisor flag.
-     */
-    private fun confirmWizardBolus(
-        entry: QuickWizardEntry,
-        advisorApplies: Boolean,
-        normalLines: List<ConfirmationLine>,
-        advisorLines: List<ConfirmationLine>,
-        onCommit: (asAdvisor: Boolean) -> Unit
-    ) {
-        fun showConfirm(lines: List<ConfirmationLine>, asAdvisor: Boolean) =
-            rxBus.send(EventShowDialog.OkCancel(title = entry.buttonText(), message = "", confirmationLines = lines, icon = IcQuickwizard, onOk = { onCommit(asAdvisor) }))
-        if (advisorApplies)
-            rxBus.send(
-                EventShowDialog.YesNoCancel(
-                    title = rh.gs(app.aaps.core.ui.R.string.bolus_advisor),
-                    message = rh.gs(app.aaps.core.ui.R.string.bolus_advisor_message),
-                    onYes = { showConfirm(advisorLines, true) },
-                    onNo = { showConfirm(normalLines, false) }
-                )
-            )
-        else
-            showConfirm(normalLines, false)
+            else                       -> Unit // Unconfirmed → app modal
+        }
     }
 
     /**

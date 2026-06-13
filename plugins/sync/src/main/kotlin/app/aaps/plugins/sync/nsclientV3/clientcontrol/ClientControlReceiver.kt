@@ -106,7 +106,7 @@ class ClientControlReceiver @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val wizardBolusExecutor: WizardBolusExecutor,
     private val notificationManager: NotificationManager,
-    private val config: Config,
+    config: Config,
     private val bolusProgressData: BolusProgressData,
     private val commandQueue: CommandQueue,
     private val aapsLogger: AAPSLogger,
@@ -208,7 +208,7 @@ class ClientControlReceiver @Inject constructor(
         verifyAndAck(identifier, doc, dateUtil.now())
     }
 
-    private suspend fun verifyAndAck(identifier: String, doc: JSONObject, now: Long) = commandMutex.withLock {
+    private suspend fun verifyAndAck(identifier: String, doc: JSONObject, now: Long): Unit = commandMutex.withLock {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: return
         val envelopeObj = doc.optJSONObject("envelope") ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: $identifier has no envelope field, deleting")
@@ -283,7 +283,6 @@ class ClientControlReceiver @Inject constructor(
                 AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
             }
 
-            is ClientControlMessage.Hello             -> AckOutcome(AckStatus.Ok, null) // unreachable (handled above)
             ClientControlMessage.Ping                 -> onVerifiedPing(entry, envelope, now)
             is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
             is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
@@ -520,7 +519,8 @@ class ClientControlReceiver @Inject constructor(
             bg = message.bg, carbs = message.carbs, percentage = message.percentage, directCorrection = message.directCorrection,
             carbTime = message.carbTime, useBg = message.useBg, useCob = message.useCob, useIob = message.useIob,
             useTt = message.useTt, useTrend = message.useTrend, alarm = message.alarm, notes = message.notes,
-            eCarbsGrams = message.eCarbsGrams, eCarbsDelayMinutes = message.eCarbsDelayMinutes, eCarbsDurationHours = message.eCarbsDurationHours
+            eCarbsGrams = message.eCarbsGrams, eCarbsDelayMinutes = message.eCarbsDelayMinutes, eCarbsDurationHours = message.eCarbsDurationHours,
+            profileName = message.profileName
         )
         return when (val result = wizardBolusExecutor.prepareWizard(inputs)) {
             is WizardBolusExecutor.PrepareResult.Error   -> {

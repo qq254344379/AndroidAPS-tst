@@ -14,6 +14,7 @@ import app.aaps.plugins.automation.triggers.TriggerConnector
 import app.aaps.plugins.automation.triggers.TriggerLocation
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -123,6 +124,7 @@ class AutomationRuntimeTest : TestBaseWithProfile() {
      * equals forces every notifyChanged() to publish. If a future refactor drops the wrapper or
      * overrides AutomationEventObject.equals structurally, this test fails.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `notifyChanged always emits even when list contents are unchanged`() = runTest(UnconfinedTestDispatcher()) {
         val captured = mutableListOf<List<AutomationEvent>>()
