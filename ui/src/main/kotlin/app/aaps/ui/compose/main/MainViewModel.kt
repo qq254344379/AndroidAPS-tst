@@ -492,7 +492,7 @@ class MainViewModel @Inject constructor(
         if (prepared !is ActionProgress.Prepared) return // a failure already surfaced through the pending modal
         confirmWizardBolus(entry, prepared.advisorApplies, prepared.lines, prepared.advisorLines) { asAdvisor ->
             appScope.launch {
-                clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, asAdvisor), label)
+                clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.id, asAdvisor), label)
             }
         }
     }
@@ -537,7 +537,7 @@ class MainViewModel @Inject constructor(
                     EventShowDialog.OkCancel(
                         title = entry.buttonText(), message = "", confirmationLines = prepared.lines, icon = icon,
                         onOk = {
-                            appScope.launch { batchExecutor.commit(prepared.bolusId, Sources.QuickWizard, label) }
+                            appScope.launch { batchExecutor.commit(prepared.id, Sources.QuickWizard, label) }
                             entry.markAsUsed()
                         }
                     )
@@ -866,7 +866,7 @@ class MainViewModel @Inject constructor(
                 val label = rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)
                 val actions = listOf(BatchAction.ProfileSwitch(action.percentage, 0, action.durationMinutes, profileName = action.profileName))
                 when (val prepared = batchExecutor.prepare(actions, Sources.ProfileSwitchDialog, label)) {
-                    is ActionProgress.Prepared -> batchExecutor.commit(prepared.bolusId, Sources.ProfileSwitchDialog, label)
+                    is ActionProgress.Prepared -> batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label)
                     is ActionProgress.Rejected ->
                         if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
                             rxBus.send(EventShowDialog.Ok(title = label, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))

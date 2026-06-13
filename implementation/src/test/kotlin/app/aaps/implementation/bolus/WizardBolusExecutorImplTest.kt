@@ -3,6 +3,7 @@ package app.aaps.implementation.bolus
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.GlucoseUnit
+import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.time.T
@@ -351,6 +352,78 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         val result = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(100, 0, 0, profileName = "Ghost")))
 
         assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+    }
+
+    // ---- prepareBatch() → confirm(): running-mode changes (the shared path for the phone screen, a client, and wear) ----
+
+    @Test
+    fun prepareBatch_runningMode_parksAndConfirmAppliesViaHandleRunningModeChange() = runTest {
+        stubPassthroughConstraints()
+        whenever(loop.allowedNextModes()).thenReturn(listOf(RM.Mode.CLOSED_LOOP))
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.RunningMode(RM.Mode.CLOSED_LOOP))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        // RM-only batch: no pump bolus, no TT — only the dialog-free running-mode change with the mode-derived action.
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(loop).handleRunningModeChange(eq(RM.Mode.CLOSED_LOOP), eq(Action.CLOSED_LOOP_MODE), eq(Sources.NSClient), any(), eq(0), any())
+    }
+
+    @Test
+    fun prepareBatch_runningMode_illegalTransition_returnsErrorAndAppliesNothing() = runTest {
+        stubPassthroughConstraints()
+        whenever(loop.allowedNextModes()).thenReturn(emptyList()) // OPEN_LOOP not currently allowed
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.RunningMode(RM.Mode.OPEN_LOOP)))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(loop, never()).handleRunningModeChange(any(), any(), any(), any(), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_runningMode_temporaryModeWithoutDuration_returnsError() = runTest {
+        stubPassthroughConstraints()
+        whenever(loop.allowedNextModes()).thenReturn(listOf(RM.Mode.SUSPENDED_BY_USER))
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.RunningMode(RM.Mode.SUSPENDED_BY_USER, durationMinutes = 0)))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(loop, never()).handleRunningModeChange(any(), any(), any(), any(), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_runningMode_disconnectWithDuration_appliesWithDuration() = runTest {
+        stubPassthroughConstraints()
+        whenever(loop.allowedNextModes()).thenReturn(listOf(RM.Mode.DISCONNECTED_PUMP))
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.RunningMode(RM.Mode.DISCONNECTED_PUMP, durationMinutes = 60))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(loop).handleRunningModeChange(eq(RM.Mode.DISCONNECTED_PUMP), eq(Action.DISCONNECT), eq(Sources.NSClient), any(), eq(60), any())
+    }
+
+    @Test
+    fun prepareBatch_runningMode_resumeFromDisconnect_usesReconnectAction() = runTest {
+        stubPassthroughConstraints()
+        whenever(loop.allowedNextModes()).thenReturn(listOf(RM.Mode.RESUME))
+        whenever(loop.runningMode()).thenReturn(RM.Mode.DISCONNECTED_PUMP) // currently disconnected → RESUME is a pump reconnect
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.RunningMode(RM.Mode.RESUME))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        // RESUME resolves to RECONNECT (not RESUME) because the current mode is DISCONNECTED_PUMP — the UEL action differs.
+        verify(loop).handleRunningModeChange(eq(RM.Mode.RESUME), eq(Action.RECONNECT), eq(Sources.NSClient), any(), eq(0), any())
     }
 
     @Test

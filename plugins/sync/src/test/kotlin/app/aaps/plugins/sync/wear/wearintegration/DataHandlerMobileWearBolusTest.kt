@@ -1,7 +1,10 @@
 package app.aaps.plugins.sync.wear.wearintegration
 
 import app.aaps.core.data.model.GlucoseUnit
+import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TT
+import app.aaps.core.data.pump.defs.PumpDescription
+import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.aps.Loop
@@ -9,7 +12,6 @@ import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.db.PersistenceLayer
-import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.maintenance.ImportExportPrefs
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.pump.PumpStatusProvider
@@ -18,6 +20,7 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.receivers.ReceiverStatusStore
 import app.aaps.core.interfaces.rx.events.EventMobileToWear
 import app.aaps.core.interfaces.rx.weardata.EventData
+import app.aaps.core.interfaces.rx.weardata.EventData.RunningModeList.AvailableRunningMode
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.TrendCalculator
 import app.aaps.core.objects.runningMode.RunningModeGuard
@@ -25,8 +28,6 @@ import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
@@ -34,6 +35,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.timeout
 import org.mockito.kotlin.verify
@@ -66,7 +68,6 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
     @Mock private lateinit var receiverStatusStore: ReceiverStatusStore
     @Mock private lateinit var quickWizard: QuickWizard
     @Mock private lateinit var trendCalculator: TrendCalculator
-    @Mock private lateinit var uel: UserEntryLogger
     @Mock private lateinit var commandQueue: CommandQueue
     @Mock private lateinit var uiInteraction: UiInteraction
     @Mock private lateinit var persistenceLayer: PersistenceLayer
@@ -85,9 +86,9 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
             aapsSchedulers, context, rxBus, aapsLogger, rh, preferences, config,
             iobCobCalculator, processedTbrEbData, smbGlucoseStatusProvider, profileFunction, profileUtil,
             loop, processedDeviceStatusData, receiverStatusStore, quickWizard, trendCalculator, dateUtil,
-            constraintsChecker, uel, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
+            constraintsChecker, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
             persistenceLayer, importExportPrefs, decimalFormatter, bolusWizardProvider, pumpStatusProvider,
-            ch, runningModeGuard, wizardBolusExecutor, CoroutineScope(Dispatchers.Unconfined)
+            ch, runningModeGuard, wizardBolusExecutor
         )
         sut.automation = automation
         // Confirm-title + error-title + client-reject string all go through the single-arg gs().
@@ -259,6 +260,56 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
 
         assertThat(sent.returnCommand).isInstanceOf(EventData.Error::class.java)
         assertThat(sent.message).isEqualTo("no profile")
+    }
+
+    // --- Running mode (unified onto the shared negotiate → prepareBatch/confirm + applyRunningMode path) ---
+
+    /** Negotiate the available modes and return the master-issued nonce + the wear-tile list (to pick an index). */
+    private fun negotiateRunningModes(allowed: List<RM.Mode>): EventData.RunningModeList {
+        whenever(pump.pumpDescription).thenReturn(PumpDescription())
+        runBlocking {
+            whenever(profileFunction.isProfileValid(any())).thenReturn(true)
+            whenever(loop.allowedNextModes()).thenReturn(allowed)
+        }
+        var list: EventData.RunningModeList? = null
+        val d = rxBus.toObservable(EventMobileToWear::class.java).subscribe { (it.payload as? EventData.RunningModeList)?.let { l -> list = l } }
+        runBlocking { sut.handleAvailableRunningModes() }
+        d.dispose()
+        return list!!
+    }
+
+    @Test fun `running mode selected parks a RunningMode batch and ships its bolusId + master lines`() = runTest {
+        val list = negotiateRunningModes(listOf(RM.Mode.CLOSED_LOOP, RM.Mode.OPEN_LOOP))
+        val idx = list.states.indexOfFirst { it.state == AvailableRunningMode.RunningMode.LOOP_CLOSED }
+        stubPreview(0.0, 0, bolusId = 555L, lines = listOf(ConfirmationLine(ConfirmationRole.PRIMARY, "Running mode: Closed Loop")))
+
+        val confirm = capturedConfirm { runBlocking { sut.handleRunningModeSelected(EventData.RunningModeSelected(list.timeStamp, idx, null)) } }
+
+        // The selected tile maps to a single RunningMode batch action; the executor re-validates/parks and the ✓ confirms by bolusId.
+        verifyBlocking(wizardBolusExecutor) { prepareBatch(listOf(BatchAction.RunningMode(RM.Mode.CLOSED_LOOP, 0))) }
+        assertThat(confirm.returnCommand).isEqualTo(EventData.RunningModeConfirmed(555L))
+        assertThat(confirm.lines).containsExactly(EventData.ConfirmActionLine("PRIMARY", "Running mode: Closed Loop"))
+    }
+
+    @Test fun `running mode selected with a stale nonce is rejected before the executor`() = runTest {
+        negotiateRunningModes(listOf(RM.Mode.CLOSED_LOOP))
+
+        val sent = capturedConfirm { runBlocking { sut.handleRunningModeSelected(EventData.RunningModeSelected(timeStamp = 1L, index = 0, duration = null)) } }
+
+        assertThat(sent.returnCommand).isInstanceOf(EventData.Error::class.java)
+        verifyBlocking(wizardBolusExecutor, never()) { prepareBatch(any()) }
+    }
+
+    @Test fun `running mode confirmed commits the parked bolusId via the shared executor`() = runTest {
+        // The post-confirm tile refresh short-circuits when no profile is valid (no pumpDescription stub needed).
+        runBlocking {
+            whenever(wizardBolusExecutor.confirm(any(), any(), any(), any())).thenReturn(WizardBolusExecutor.ConfirmResult.Delivered)
+            whenever(profileFunction.isProfileValid(any())).thenReturn(false)
+        }
+
+        runBlocking { sut.handleRunningModeConfirmed(EventData.RunningModeConfirmed(777L)) }
+
+        verifyBlocking(wizardBolusExecutor) { confirm(eq(777L), eq(Sources.Wear), any(), eq(false)) }
     }
 
     // --- Subscription wiring (the onEvent / onEventSync helpers actually register each type) --------------

@@ -476,7 +476,7 @@ class ProfileManagementViewModel @Inject constructor(
                         title = label, message = "", confirmationLines = prepared.lines, icon = IcProfile,
                         onOk = {
                             appScope.launch {
-                                batchExecutor.commit(prepared.bolusId, Sources.ProfileSwitchDialog, label)
+                                batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label)
                                 if (percentage == 90 && durationMinutes == 10) preferences.put(BooleanNonKey.ObjectivesProfileSwitchUsed, true)
                             }
                         }

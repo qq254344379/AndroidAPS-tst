@@ -348,6 +348,8 @@
     <string name="temporary_target">Temporary target</string>
     <string name="temporary_targets">Temporary targets</string>
     <string name="running_mode">Running mode</string>
+    <string name="running_mode_change_not_allowed">Running mode change not available</string>
+    <string name="pump_reconnect">Reconnect pump</string>
     <string name="scene">Scene</string>
     <string name="scenes">Scenes</string>
     <string name="scene_desc">Situation presets — activate multiple actions at once</string>

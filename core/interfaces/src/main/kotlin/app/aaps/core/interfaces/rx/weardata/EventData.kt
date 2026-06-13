@@ -158,8 +158,9 @@ sealed class EventData : Event() {
     @Serializable
     data class RunningModeSelected(val timeStamp: Long, val index: Int, val duration: Int? = null) : EventData()
 
+    /** Wear ✓ on a running-mode change → the master's parked, consume-once [bolusId] (the shared batch confirm path). */
     @Serializable
-    data class RunningModeConfirmed(val timeStamp: Long, val index: Int, val duration: Int? = null) : EventData()
+    data class RunningModeConfirmed(val bolusId: Long) : EventData()
 
     @Serializable
     data class ActionHeartRate(
@@ -474,14 +475,9 @@ sealed class EventData : Event() {
         val title: String,
         val message: String,
         val returnCommand: EventData?,
-        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target / profile switch): the
-        // watch renders these verbatim, the same lines the phone dialog + every client show. Empty for the remaining
-        // typed-field case (RunningMode).
+        // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target / profile switch /
+        // running mode): the watch renders these verbatim, the same lines the phone dialog + every client show.
         val lines: List<ConfirmActionLine> = emptyList(),
-        // RunningMode fields
-        val runningModeTitle: String? = null,
-        val runningModeDurationMinutes: Int? = null,
-        val runningModeType: String? = null,
     ) : EventData()
 
     @Serializable

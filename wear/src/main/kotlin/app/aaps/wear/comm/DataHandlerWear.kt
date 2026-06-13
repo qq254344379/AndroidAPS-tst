@@ -126,9 +126,6 @@ class DataHandlerWear @Inject constructor(
                             bundle.putStringArray(DataLayerListenerServiceWear.KEY_LINE_TEXTS, it.lines.map { l -> l.text }.toTypedArray())
                         }
                         bundle.putBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, it.returnCommand is EventData.Error)
-                        it.runningModeTitle?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TITLE, v) }
-                        it.runningModeDurationMinutes?.let { v -> bundle.putInt(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES, v) }
-                        it.runningModeType?.let { v -> bundle.putString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TYPE, v) }
                     }
                 )
             })

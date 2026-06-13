@@ -358,7 +358,7 @@ class ClientControlRoundTrip @Inject constructor(
         val preview = runCatching { json.decodeFromString<BolusPreview>(payload) }.getOrNull()
             ?: return ActionProgress.Rejected(FailureReason.Internal)
         return ActionProgress.Prepared(
-            bolusId = preview.bolusId,
+            id = preview.bolusId,
             lines = preview.lines.map { ConfirmationLine(roleOf(it.role), it.text) },
             advisorApplies = preview.advisorApplies,
             advisorLines = preview.advisorLines.map { ConfirmationLine(roleOf(it.role), it.text) }

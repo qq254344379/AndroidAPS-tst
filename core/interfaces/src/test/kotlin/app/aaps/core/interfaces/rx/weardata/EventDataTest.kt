@@ -200,5 +200,21 @@ class EventDataTest {
             assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }
+        // Running mode now rides the generic confirm path: Selected/Confirmed + the master-authored lines.
+        EventData.RunningModeSelected(1, 2, 60).let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
+        EventData.RunningModeConfirmed(1234567890L).let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
+        EventData.ConfirmAction(
+            "Running mode", "", EventData.RunningModeConfirmed(42L),
+            lines = listOf(EventData.ConfirmActionLine("PRIMARY", "Running mode: Closed Loop"), EventData.ConfirmActionLine("NORMAL", "Duration: 60 min"))
+        ).let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
     }
 }

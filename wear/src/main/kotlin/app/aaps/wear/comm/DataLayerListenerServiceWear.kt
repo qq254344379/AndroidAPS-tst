@@ -291,9 +291,6 @@ class DataLayerListenerServiceWear : WearableListenerService() {
         const val KEY_MESSAGE = "message"
         const val KEY_TITLE = "title"
         const val KEY_IS_ERROR = "isError"
-        const val KEY_RUNNING_MODE_TITLE = "runningModeTitle"
-        const val KEY_RUNNING_MODE_DURATION_MINUTES = "runningModeDurationMinutes"
-        const val KEY_RUNNING_MODE_TYPE = "runningModeType"
 
         const val BOLUS_PROGRESS_NOTIF_ID = 1
         const val CONFIRM_NOTIF_ID = 2

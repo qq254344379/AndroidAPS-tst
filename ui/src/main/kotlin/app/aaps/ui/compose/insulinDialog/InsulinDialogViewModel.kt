@@ -232,7 +232,7 @@ class InsulinDialogViewModel @Inject constructor(
                 return@launch
             }
             when (val prepared = batchExecutor.prepare(actions, Sources.InsulinDialog, rh.gs(app.aaps.core.ui.R.string.bolus))) {
-                is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.bolusId, prepared.lines))
+                is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
                 // Offline block (and a master-local failure) surface here; a client round-trip failure already showed
                 // on the app-level modal, so only re-surface NotReachable or a master-side detail message.
                 is ActionProgress.Rejected ->

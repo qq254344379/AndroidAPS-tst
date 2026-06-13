@@ -245,7 +245,6 @@ fun NavGraphBuilder.appNavGraph(
     composable(AppRoute.RunningMode.route) {
         RunningModeScreen(
             viewModel = runningModeManagementViewModel,
-            showOkCancel = true,
             onNavigateBack = { navController.safePopBackStack() }
         )
     }

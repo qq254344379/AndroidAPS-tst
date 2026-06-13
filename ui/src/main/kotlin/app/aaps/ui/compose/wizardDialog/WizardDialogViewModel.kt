@@ -540,7 +540,7 @@ class WizardDialogViewModel @Inject constructor(
                 rxBus.send(
                     EventShowDialog.OkCancel(
                         title = title, message = "", confirmationLines = lines, icon = IcCalculator,
-                        onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.bolusId, asAdvisor), label) } }
+                        onOk = { appScope.launch { clientControlDispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(prepared.id, asAdvisor), label) } }
                     )
                 )
             if (prepared.advisorApplies)

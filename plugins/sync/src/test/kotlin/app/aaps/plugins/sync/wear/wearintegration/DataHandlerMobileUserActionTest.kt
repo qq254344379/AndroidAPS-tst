@@ -6,24 +6,21 @@ import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.db.PersistenceLayer
-import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.maintenance.ImportExportPrefs
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.profile.EffectiveProfile
 import app.aaps.core.interfaces.pump.PumpStatusProvider
 import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.CommandQueue
-import app.aaps.core.interfaces.utils.TrendCalculator
-import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.interfaces.receivers.ReceiverStatusStore
 import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.ui.UiInteraction
+import app.aaps.core.interfaces.utils.TrendCalculator
+import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.plugins.sync.R
 import app.aaps.shared.tests.TestBaseWithProfile
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
@@ -56,7 +53,6 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
     @Mock private lateinit var receiverStatusStore: ReceiverStatusStore
     @Mock private lateinit var quickWizard: QuickWizard
     @Mock private lateinit var trendCalculator: TrendCalculator
-    @Mock private lateinit var uel: UserEntryLogger
     @Mock private lateinit var commandQueue: CommandQueue
     @Mock private lateinit var uiInteraction: UiInteraction
     @Mock private lateinit var persistenceLayer: PersistenceLayer
@@ -77,9 +73,9 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
             aapsSchedulers, context, rxBus, aapsLogger, rh, preferences, config,
             iobCobCalculator, processedTbrEbData, smbGlucoseStatusProvider, profileFunction, profileUtil,
             loop, processedDeviceStatusData, receiverStatusStore, quickWizard, trendCalculator, dateUtil,
-            constraintsChecker, uel, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
+            constraintsChecker, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
             persistenceLayer, importExportPrefs, decimalFormatter, bolusWizardProvider, pumpStatusProvider,
-            ch, runningModeGuard, wizardBolusExecutor, CoroutineScope(Dispatchers.Unconfined)
+            ch, runningModeGuard, wizardBolusExecutor
         )
         // @Inject lateinit field — Dagger is not running, set manually.
         sut.automation = automation

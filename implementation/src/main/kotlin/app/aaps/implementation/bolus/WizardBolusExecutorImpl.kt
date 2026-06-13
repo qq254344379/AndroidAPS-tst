@@ -111,6 +111,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         // delivered together in [confirm] (decision-B order). Null/false for a plain fixed or wizard prepare.
         val tempTarget: BatchAction.TempTarget? = null,
         val profileSwitch: BatchAction.ProfileSwitch? = null,
+        val runningMode: BatchAction.RunningMode? = null,
         val recordOnly: Boolean = false,
         val iCfg: ICfg? = null,
         val bolusTimestamp: Long? = null
@@ -227,6 +228,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         val bolus = actions.filterIsInstance<BatchAction.Bolus>().firstOrNull()
         val tt = actions.filterIsInstance<BatchAction.TempTarget>().firstOrNull() // ≤1 by construction
         val ps = actions.filterIsInstance<BatchAction.ProfileSwitch>().firstOrNull() // ≤1 by construction
+        val rm = actions.filterIsInstance<BatchAction.RunningMode>().firstOrNull() // ≤1 by construction
         val recordOnly = bolus?.recordOnly == true
         // Gate + pump-init only for an actual INSULIN delivery — carbs-only, a record-only log, and a TT-only batch
         // are always allowed (mirrors executeBolus, which gates only when insulin > 0).
@@ -259,7 +261,15 @@ class WizardBolusExecutorImpl @Inject constructor(
             if (ps.durationMinutes < 0 || ps.durationMinutes > Constants.MAX_PROFILE_SWITCH_DURATION)
                 return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.valueoutofrange, "Profile-Duration"))
         }
-        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null)
+        // Validate a running-mode change up-front: the master re-checks the mode is still a legal transition
+        // (a client/watch list may be stale — TOCTOU), and the temporary modes require a positive duration.
+        if (rm != null) {
+            if (rm.mode !in loop.allowedNextModes())
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.running_mode_change_not_allowed))
+            if ((rm.mode == RM.Mode.SUSPENDED_BY_USER || rm.mode == RM.Mode.DISCONNECTED_PUMP) && rm.durationMinutes <= 0)
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.valueoutofrange, "Duration"))
+        }
+        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null && rm == null)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_action_selected))
         val bolusId = dateUtil.now()
         evictStalePending()
@@ -267,13 +277,14 @@ class WizardBolusExecutorImpl @Inject constructor(
             insulin = insulin, carbs = carbs, bcr = null, bolusId = bolusId, entry = null,
             carbTimeMinutes = bolus?.carbsTimeOffsetMinutes ?: 0, notes = bolus?.notes, mode = BolusMode.FIXED,
             eventType = eventType, carbsDurationHours = bolus?.carbsDurationHours ?: 0,
-            tempTarget = tt, profileSwitch = ps, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L }
+            tempTarget = tt, profileSwitch = ps, runningMode = rm, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L }
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
         val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) +
             (tt?.let { buildTtLine(it) } ?: emptyList()) +
-            (ps?.let { buildPsLine(it) } ?: emptyList())
+            (ps?.let { buildPsLine(it) } ?: emptyList()) +
+            (rm?.let { buildRmLine(it) } ?: emptyList())
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, "", bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
@@ -331,6 +342,8 @@ class WizardBolusExecutorImpl @Inject constructor(
             if (tt != null && !raising && accepted) applyTempTarget(tt, source)
             // A profile switch isn't gated on a dose (a PS-only batch funnels through here with a no-op deliver(0,0)).
             p.profileSwitch?.let { applyProfileSwitch(it, source) }
+            // A running-mode change is likewise independent of any dose (an RM-only batch no-ops the deliver(0,0)).
+            p.runningMode?.let { applyRunningMode(it, source) }
             return WizardBolusExecutor.ConfirmResult.Delivered
         }
 
@@ -561,6 +574,64 @@ class WizardBolusExecutorImpl @Inject constructor(
         TT.Reason.ACTIVITY     -> rh.gs(R.string.activity)
         TT.Reason.EATING_SOON  -> rh.gs(R.string.eatingsoon)
         else                   -> ""
+    }
+
+    /**
+     * Apply a batch RunningMode change via the dialog-free domain path — the single execution point for every
+     * source (phone screen, client round-trip, wear). The [Action] is resolved from the [mode] (+ current loop
+     * state for RESUME: a reconnect vs a resume) so the UEL records the right entry, mirroring the screen/wear.
+     */
+    private suspend fun applyRunningMode(rm: BatchAction.RunningMode, source: Sources) {
+        val profile = profileFunction.getProfile() ?: return
+        when (rm.mode) {
+            RM.Mode.CLOSED_LOOP                                                      -> loop.handleRunningModeChange(newRM = RM.Mode.CLOSED_LOOP, action = Action.CLOSED_LOOP_MODE, source = source, profile = profile)
+            RM.Mode.CLOSED_LOOP_LGS                                                  -> loop.handleRunningModeChange(newRM = RM.Mode.CLOSED_LOOP_LGS, action = Action.LGS_LOOP_MODE, source = source, profile = profile)
+            RM.Mode.OPEN_LOOP                                                        -> loop.handleRunningModeChange(newRM = RM.Mode.OPEN_LOOP, action = Action.OPEN_LOOP_MODE, source = source, profile = profile)
+            RM.Mode.DISABLED_LOOP                                                    -> loop.handleRunningModeChange(newRM = RM.Mode.DISABLED_LOOP, action = Action.LOOP_DISABLED, source = source, profile = profile)
+
+            RM.Mode.RESUME                                                           -> {
+                // Resume-from-suspend vs reconnect-the-pump share the RESUME mode; the UEL action differs.
+                val action = if (loop.runningMode() == RM.Mode.DISCONNECTED_PUMP) Action.RECONNECT else Action.RESUME
+                loop.handleRunningModeChange(newRM = RM.Mode.RESUME, action = action, source = source, profile = profile)
+            }
+
+            RM.Mode.SUSPENDED_BY_USER                                                -> loop.handleRunningModeChange(
+                newRM = RM.Mode.SUSPENDED_BY_USER,
+                durationInMinutes = rm.durationMinutes,
+                action = Action.SUSPEND,
+                source = source,
+                profile = profile
+            )
+
+            RM.Mode.DISCONNECTED_PUMP                                                -> loop.handleRunningModeChange(
+                newRM = RM.Mode.DISCONNECTED_PUMP, durationInMinutes = rm.durationMinutes, action = Action.DISCONNECT, source = source, profile = profile,
+                listValues = listOf(if (rm.durationMinutes >= 60) ValueWithUnit.Hour(rm.durationMinutes / 60) else ValueWithUnit.Minute(rm.durationMinutes))
+            )
+
+            // Non-user-selectable modes (super-bolus / pump-suspend / DST) never arrive here — prepareBatch gates on allowedNextModes.
+            RM.Mode.SUPER_BOLUS, RM.Mode.SUSPENDED_BY_PUMP, RM.Mode.SUSPENDED_BY_DST -> Unit
+        }
+    }
+
+    /** The RM line(s) for any batch (wear / client / phone) — the target mode title + an optional duration. */
+    private suspend fun buildRmLine(rm: BatchAction.RunningMode): List<ConfirmationLine> {
+        val out = mutableListOf<ConfirmationLine>()
+        out += ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.running_mode), rmModeTitle(rm.mode)))
+        if (rm.durationMinutes > 0)
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, rm.durationMinutes)))
+        return out
+    }
+
+    /** Localized title for a target running mode (RESUME resolves to reconnect vs resume by the current loop state). */
+    private suspend fun rmModeTitle(mode: RM.Mode): String = when (mode) {
+        RM.Mode.CLOSED_LOOP                                                      -> rh.gs(R.string.closedloop)
+        RM.Mode.CLOSED_LOOP_LGS                                                  -> rh.gs(R.string.lowglucosesuspend)
+        RM.Mode.OPEN_LOOP                                                        -> rh.gs(R.string.openloop)
+        RM.Mode.DISABLED_LOOP                                                    -> rh.gs(R.string.disableloop)
+        RM.Mode.SUSPENDED_BY_USER                                                -> rh.gs(R.string.suspendloop)
+        RM.Mode.DISCONNECTED_PUMP                                                -> rh.gs(R.string.pump_disconnected)
+        RM.Mode.RESUME                                                           -> if (loop.runningMode() == RM.Mode.DISCONNECTED_PUMP) rh.gs(R.string.pump_reconnect) else rh.gs(R.string.resumeloop)
+        RM.Mode.SUPER_BOLUS, RM.Mode.SUSPENDED_BY_PUMP, RM.Mode.SUSPENDED_BY_DST -> rh.gs(R.string.running_mode)
     }
 
     override suspend fun deliverWizardBolus(

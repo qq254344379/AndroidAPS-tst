@@ -19,9 +19,7 @@ import app.aaps.core.data.model.TDD
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.model.TrendArrow
 import app.aaps.core.data.time.T
-import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.aps.GlucoseStatus
@@ -34,14 +32,12 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
-import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
-import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.maintenance.ImportExportPrefs
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.plugin.ActivePlugin
@@ -99,7 +95,6 @@ import app.aaps.core.ui.compose.LightGeneralColors
 import app.aaps.plugins.sync.R
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.rx3.rxCompletable
 import java.text.DateFormat
 import java.text.SimpleDateFormat
@@ -138,7 +133,6 @@ class DataHandlerMobile @Inject constructor(
     private val trendCalculator: TrendCalculator,
     private val dateUtil: DateUtil,
     private val constraintChecker: ConstraintsChecker,
-    private val uel: UserEntryLogger,
     private val activePlugin: ActivePlugin,
     private val insulin: Insulin,
     private val commandQueue: CommandQueue,
@@ -152,7 +146,6 @@ class DataHandlerMobile @Inject constructor(
     private val ch: ConcentrationHelper,
     private val runningModeGuard: RunningModeGuard,
     private val wizardBolusExecutor: WizardBolusExecutor,
-    @ApplicationScope private val appScope: CoroutineScope,
 ) {
 
     @Inject lateinit var automation: Automation
@@ -241,7 +234,7 @@ class DataHandlerMobile @Inject constructor(
             )
         }
         onEvent<EventData.RunningModeRequest> { handleAvailableRunningModes() }
-        onEventSync<EventData.RunningModeSelected> { handleRunningModeSelected(it) }
+        onEvent<EventData.RunningModeSelected> { handleRunningModeSelected(it) }
         onEvent<EventData.RunningModeConfirmed> { handleRunningModeConfirmed(it) }
         onEvent<EventData.ActionTddStatus> { handleTddStatus() }
         onEvent<EventData.ActionProfileSwitchSendInitialData> { handleProfileSwitchSendInitialData() }
@@ -965,7 +958,8 @@ class DataHandlerMobile @Inject constructor(
     private var lastAuthorizedRunningModeChangeTS: Long? = null
     private var lastRunningModes: List<AvailableRunningMode>? = null
 
-    private suspend fun handleAvailableRunningModes() {
+    // internal so DataHandlerMobileWearBolusTest can negotiate the available modes (populating the nonce + tile list).
+    internal suspend fun handleAvailableRunningModes() {
         if (!profileFunction.isProfileValid("WearDataHandler_LoopChangeState")) return
 
         val pumpDescription = activePlugin.activePump.pumpDescription
@@ -1004,93 +998,47 @@ class DataHandlerMobile @Inject constructor(
         )
     }
 
-    private fun handleRunningModeSelected(action: EventData.RunningModeSelected) {
-        if (action.timeStamp != lastAuthorizedRunningModeChangeTS) return sendError(rh.gs(R.string.wear_action_loop_state_unauthorized))
-        val newState = lastRunningModes?.elementAtOrNull(action.index) ?: return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
-        val nDuration = action.duration ?: 0
-        val runningModeName = when (newState.state) {
-            AvailableRunningMode.RunningMode.LOOP_CLOSED       -> rh.gs(R.string.wear_action_loop_state_now_closed)
-            AvailableRunningMode.RunningMode.LOOP_LGS          -> rh.gs(R.string.wear_action_loop_state_now_lgs)
-            AvailableRunningMode.RunningMode.LOOP_OPEN         -> rh.gs(R.string.wear_action_loop_state_now_open)
-            AvailableRunningMode.RunningMode.LOOP_RESUME       -> rh.gs(R.string.wear_action_loop_state_now_resumed)
-            AvailableRunningMode.RunningMode.PUMP_RECONNECT    -> rh.gs(R.string.wear_action_loop_state_now_pump_reconnected)
-            AvailableRunningMode.RunningMode.LOOP_DISABLE      -> rh.gs(R.string.wear_action_loop_state_now_disabled)
-            AvailableRunningMode.RunningMode.SUPERBOLUS        -> rh.gs(R.string.wear_action_loop_state_now_superbolus)
-            AvailableRunningMode.RunningMode.LOOP_UNKNOWN      -> rh.gs(R.string.wear_action_loop_state_now_invalid)
-            AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND -> rh.gs(R.string.wear_action_loop_state_now_suspended)
-            AvailableRunningMode.RunningMode.LOOP_PUMP_SUSPEND -> rh.gs(R.string.wear_action_loop_state_now_pump_suspended)
-            AvailableRunningMode.RunningMode.PUMP_DISCONNECT   -> rh.gs(R.string.wear_action_loop_state_now_pump_disconnected)
-        }
-        val runningModeDuration = when (newState.state) {
-            AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND,
-            AvailableRunningMode.RunningMode.PUMP_DISCONNECT -> if (nDuration > 0) nDuration else null
+    /** Wire (wear-tile) running mode → domain [RM.Mode]; null for the non-user-selectable states (gated out anyway). */
+    private fun AvailableRunningMode.RunningMode.toRmMode(): RM.Mode? = when (this) {
+        AvailableRunningMode.RunningMode.LOOP_CLOSED       -> RM.Mode.CLOSED_LOOP
+        AvailableRunningMode.RunningMode.LOOP_LGS          -> RM.Mode.CLOSED_LOOP_LGS
+        AvailableRunningMode.RunningMode.LOOP_OPEN         -> RM.Mode.OPEN_LOOP
+        AvailableRunningMode.RunningMode.LOOP_DISABLE      -> RM.Mode.DISABLED_LOOP
+        AvailableRunningMode.RunningMode.LOOP_RESUME,
+        AvailableRunningMode.RunningMode.PUMP_RECONNECT    -> RM.Mode.RESUME
 
-            else                                             -> null
-        }
-        sendToWear(
-            EventData.ConfirmAction(
-                rh.gs(R.string.wear_action_running_mode_title),
-                when (newState.state) {
-                    AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND -> rh.gs(R.string.wear_action_loop_state_changed_with_duration, runningModeName, nDuration)
-                    AvailableRunningMode.RunningMode.PUMP_DISCONNECT   -> rh.gs(R.string.wear_action_loop_state_changed_with_duration, runningModeName, nDuration)
-                    else                                               -> runningModeName
-                },
-                EventData.RunningModeConfirmed(action.timeStamp, action.index, action.duration),
-                runningModeTitle = runningModeName,
-                runningModeDurationMinutes = runningModeDuration,
-                runningModeType = newState.state.name,
-            )
-        )
+        AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND -> RM.Mode.SUSPENDED_BY_USER
+        AvailableRunningMode.RunningMode.PUMP_DISCONNECT   -> RM.Mode.DISCONNECTED_PUMP
+        AvailableRunningMode.RunningMode.SUPERBOLUS,
+        AvailableRunningMode.RunningMode.LOOP_UNKNOWN,
+        AvailableRunningMode.RunningMode.LOOP_PUMP_SUSPEND -> null
     }
 
-    private suspend fun handleRunningModeConfirmed(action: EventData.RunningModeConfirmed) {
-        val profile = profileFunction.getProfile() ?: return sendError(rh.gs(R.string.no_active_profile))
+    // internal + suspend so DataHandlerMobileWearBolusTest can drive it; routes through the shared prepare/confirm.
+    internal suspend fun handleRunningModeSelected(action: EventData.RunningModeSelected) {
         if (action.timeStamp != lastAuthorizedRunningModeChangeTS) return sendError(rh.gs(R.string.wear_action_loop_state_unauthorized))
-        lastAuthorizedRunningModeChangeTS = null
         val newState = lastRunningModes?.elementAtOrNull(action.index) ?: return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
-        lastRunningModes = null
-
-        val nDuration = action.duration ?: 0
-        val durationValid = action.duration != null && action.duration!! > 0
-        when (newState.state) {
-            AvailableRunningMode.RunningMode.LOOP_CLOSED                                                                                                   ->
-                loop.handleRunningModeChange(newRM = RM.Mode.CLOSED_LOOP, action = Action.CLOSED_LOOP_MODE, source = Sources.Wear, profile = profile)
-
-            AvailableRunningMode.RunningMode.LOOP_LGS                                                                                                      ->
-                loop.handleRunningModeChange(newRM = RM.Mode.CLOSED_LOOP_LGS, action = Action.LGS_LOOP_MODE, source = Sources.Wear, profile = profile)
-
-            AvailableRunningMode.RunningMode.LOOP_OPEN                                                                                                     ->
-                loop.handleRunningModeChange(newRM = RM.Mode.OPEN_LOOP, action = Action.OPEN_LOOP_MODE, source = Sources.Wear, profile = profile)
-
-            AvailableRunningMode.RunningMode.LOOP_DISABLE                                                                                                  ->
-                loop.handleRunningModeChange(newRM = RM.Mode.DISABLED_LOOP, action = Action.LOOP_DISABLED, source = Sources.Wear, profile = profile)
-
-            AvailableRunningMode.RunningMode.LOOP_RESUME,
-            AvailableRunningMode.RunningMode.PUMP_RECONNECT                                                                                                -> {
-                loop.handleRunningModeChange(newRM = RM.Mode.RESUME, action = Action.LOOP_RESUME, source = Sources.Wear, profile = profile)
-            }
-
-            AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND                                                                                             -> {
-                if (!durationValid) return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
-                loop.handleRunningModeChange(newRM = RM.Mode.SUSPENDED_BY_USER, durationInMinutes = nDuration, action = Action.SUSPEND, source = Sources.Wear, profile = profile)
-            }
-
-            AvailableRunningMode.RunningMode.PUMP_DISCONNECT                                                                                               -> {
-                if (!durationValid) return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
-                loop.handleRunningModeChange(
-                    newRM = RM.Mode.DISCONNECTED_PUMP,
-                    durationInMinutes = nDuration,
-                    action = Action.DISCONNECT,
-                    source = Sources.Wear,
-                    profile = profile,
-                    listValues = listOf(if (nDuration >= 60) ValueWithUnit.Hour(nDuration / 60) else ValueWithUnit.Minute(nDuration))
+        val mode = newState.state.toRmMode() ?: return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
+        // Park on the master via the shared batch path (which re-validates the transition + caps the duration); ship
+        // its master-authored lines + bolusId. The wear ✓ then calls confirm(bolusId) → the shared applyRunningMode —
+        // the SAME execution path the phone screen and a client use. Title is the watch's curved header for the lines.
+        when (val result = wizardBolusExecutor.prepareBatch(listOf(BatchAction.RunningMode(mode, action.duration ?: 0)))) {
+            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
+            is WizardBolusExecutor.PrepareResult.Preview ->
+                sendToWear(
+                    EventData.ConfirmAction(
+                        rh.gs(R.string.wear_action_running_mode_title), message = "",
+                        returnCommand = EventData.RunningModeConfirmed(result.bolusId),
+                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
+                    )
                 )
-            }
-
-            AvailableRunningMode.RunningMode.LOOP_UNKNOWN, AvailableRunningMode.RunningMode.SUPERBOLUS, AvailableRunningMode.RunningMode.LOOP_PUMP_SUSPEND -> {
-                return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
-            }
         }
+    }
+
+    internal suspend fun handleRunningModeConfirmed(action: EventData.RunningModeConfirmed) {
+        // The parked bolusId is consume-once; the executor applies via the shared applyRunningMode. Refresh the wear
+        // tiles afterwards so the next negotiation reflects the new mode (and issues a fresh authorization nonce).
+        wizardBolusExecutor.confirm(action.bolusId, Sources.Wear, ::sendError)
         handleAvailableRunningModes()
     }
 

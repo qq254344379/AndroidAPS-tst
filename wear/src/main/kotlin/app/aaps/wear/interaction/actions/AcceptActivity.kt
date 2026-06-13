@@ -68,15 +68,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
             else emptyList()
 
         val isError = extras?.getBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, false) ?: false
-        // Curved header for the lines screen (e.g. "Treatment" / "Temporary target"), authored by the master.
+        // Curved header for the lines screen (e.g. "Treatment" / "Temporary target" / "Running mode"), authored by the master.
         val title = extras?.getString(DataLayerListenerServiceWear.KEY_TITLE, "") ?: ""
-        val runningModeTitle = extras?.getString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TITLE)
-        val runningModeDuration = extras?.let { if (it.containsKey(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES)) it.getInt(DataLayerListenerServiceWear.KEY_RUNNING_MODE_DURATION_MINUTES) else null }
-        val runningModeType = extras?.getString(DataLayerListenerServiceWear.KEY_RUNNING_MODE_TYPE)
 
-        val hasRunningModeData = runningModeTitle != null
-
-        if (message.isEmpty() && lines.isEmpty() && !hasRunningModeData) {
+        if (message.isEmpty() && lines.isEmpty()) {
             finish()
             return
         }
@@ -85,7 +80,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
         vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 50, 100, 50), -1))
 
         val hasLines = lines.isNotEmpty()
-        val hasAnyStructuredSummary = hasLines || hasRunningModeData
+        val hasAnyStructuredSummary = hasLines
 
         setContent {
             MaterialTheme {
@@ -100,11 +95,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                     HorizontalPager(state = pagerState) { page ->
                         when (page) {
                             0    -> {
-                                val curvedTitle = when {
-                                    hasLines           -> title.ifEmpty { null }
-                                    hasRunningModeData -> stringResource(R.string.status_running_mode)
-                                    else               -> null
-                                }
+                                val curvedTitle = if (hasLines) title.ifEmpty { null } else null
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     if (curvedTitle != null) CurvedTitle(curvedTitle)
                                     if (hasLines) {
@@ -130,60 +121,15 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                                 Text(
                                                     text = text,
                                                     color = when (role) {
-                                                        "BOLUS"        -> InsulinBlue
+                                                        "BOLUS" -> InsulinBlue
                                                         "CARBS", "COB" -> CarbsOrange
-                                                        "WARNING"      -> Color(0xFFFFB300)
-                                                        "INFO"         -> WearSecondaryText
-                                                        else           -> Color.White
+                                                        "WARNING" -> Color(0xFFFFB300)
+                                                        "INFO" -> WearSecondaryText
+                                                        else -> Color.White
                                                     },
                                                     fontSize = 16.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     textAlign = TextAlign.Center,
-                                                )
-                                            }
-                                        }
-                                    } else if (hasRunningModeData) {
-                                        // RunningMode structured summary
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 24.dp, vertical = 16.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center,
-                                        ) {
-                                            Text(
-                                                text = stringResource(R.string.confirm),
-                                                color = Color.White,
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                            Spacer(Modifier.height(8.dp))
-                                            val stateColor = when (runningModeType) {
-                                                "LOOP_CLOSED"       -> LoopClosedColor
-                                                "LOOP_OPEN"         -> LoopOpenColor
-                                                "LOOP_LGS"          -> LoopLgsColor
-                                                "LOOP_USER_SUSPEND" -> LoopSuspendedColor
-                                                "LOOP_DISABLE"      -> LoopDisabledColor
-                                                "PUMP_DISCONNECT"   -> LoopDisconnectedColor
-                                                "SUPERBOLUS"        -> LoopSuperbolusColor
-                                                "LOOP_RESUME",
-                                                "PUMP_RECONNECT"    -> LoopClosedColor
-
-                                                else                -> ConfirmGreen
-                                            }
-                                            Text(
-                                                text = runningModeTitle,
-                                                color = stateColor,
-                                                fontSize = 20.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                textAlign = TextAlign.Center,
-                                            )
-                                            if (runningModeDuration != null) {
-                                                Text(
-                                                    text = stringResource(R.string.action_confirm_duration, formatDurationMinutes(runningModeDuration)),
-                                                    color = WearSecondaryText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
                                                 )
                                             }
                                         }

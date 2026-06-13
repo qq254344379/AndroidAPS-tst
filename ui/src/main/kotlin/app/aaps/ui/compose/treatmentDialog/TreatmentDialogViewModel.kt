@@ -134,7 +134,7 @@ class TreatmentDialogViewModel @Inject constructor(
                 return@launch
             }
             when (val prepared = batchExecutor.prepare(actions, Sources.TreatmentDialog, rh.gs(app.aaps.core.ui.R.string.bolus))) {
-                is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.bolusId, prepared.lines))
+                is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
                 is ActionProgress.Rejected ->
                     if (prepared.reason == FailureReason.NotReachable) _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
                     else prepared.detail?.let { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) }

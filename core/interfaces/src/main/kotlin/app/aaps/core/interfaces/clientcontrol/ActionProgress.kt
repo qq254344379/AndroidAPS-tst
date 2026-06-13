@@ -32,7 +32,7 @@ sealed interface ActionProgress {
      * before the matching `BolusCommit`. The client must NOT treat this as "delivered".
      */
     data class Prepared(
-        val bolusId: Long,
+        val id: Long,
         val lines: List<ConfirmationLine> = emptyList(),
         val advisorApplies: Boolean = false,
         val advisorLines: List<ConfirmationLine> = emptyList()

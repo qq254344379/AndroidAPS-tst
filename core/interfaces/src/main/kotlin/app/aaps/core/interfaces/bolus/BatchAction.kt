@@ -1,6 +1,7 @@
 package app.aaps.core.interfaces.bolus
 
 import app.aaps.core.data.model.ICfg
+import app.aaps.core.data.model.RM
 
 /**
  * One action in a multi-action batch ([WizardBolusExecutor.prepareBatch]) — the dose/carbs a dialog submits
@@ -50,5 +51,15 @@ sealed interface BatchAction {
         val durationMinutes: Int,
         val profileName: String? = null,
         val notes: String? = null
+    ) : BatchAction
+
+    /**
+     * A loop running-mode change ([RM.Mode]). [durationMinutes] is required (>0) for the temporary modes
+     * (SUSPENDED_BY_USER / DISCONNECTED_PUMP) and 0 for the loop modes. The master re-validates the [mode] is a
+     * legal transition (`Loop.allowedNextModes`) at prepare time, so a client/watch can relay a mode the master owns.
+     */
+    data class RunningMode(
+        val mode: RM.Mode,
+        val durationMinutes: Int = 0
     ) : BatchAction
 }

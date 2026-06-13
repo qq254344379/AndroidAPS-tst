@@ -1,6 +1,7 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.ICfg
+import app.aaps.core.data.model.RM
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.nssdk.localmodel.clientcontrol.BatchActionDto
 import app.aaps.core.objects.extensions.fromJsonObject
@@ -27,6 +28,11 @@ internal fun BatchAction.toDto(): BatchActionDto = when (this) {
         percentage = percentage, timeShiftHours = timeShiftHours, durationMinutes = durationMinutes,
         profileName = profileName, notes = notes ?: ""
     )
+
+    is BatchAction.RunningMode   -> BatchActionDto(
+        type = BatchActionDto.TYPE_RUNNING_MODE,
+        runningMode = mode.name, durationMinutes = durationMinutes
+    )
 }
 
 /** Wire [BatchActionDto] → domain [BatchAction] (master receive side); null if the type is unknown. */
@@ -39,5 +45,6 @@ internal fun BatchActionDto.toDomain(): BatchAction? = when (type) {
 
     BatchActionDto.TYPE_TEMP_TARGET    -> reason?.let { BatchAction.TempTarget(it, lowMgdl, highMgdl, durationMinutes, startOffsetMinutes) }
     BatchActionDto.TYPE_PROFILE_SWITCH -> BatchAction.ProfileSwitch(percentage, timeShiftHours, durationMinutes, profileName, notes.ifEmpty { null })
+    BatchActionDto.TYPE_RUNNING_MODE   -> runningMode?.let { name -> runCatching { RM.Mode.valueOf(name) }.getOrNull()?.let { BatchAction.RunningMode(it, durationMinutes) } }
     else                               -> null
 }
