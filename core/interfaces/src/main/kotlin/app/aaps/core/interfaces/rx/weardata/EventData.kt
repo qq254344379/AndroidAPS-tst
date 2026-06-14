@@ -460,10 +460,12 @@ sealed class EventData : Event() {
         // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target / profile switch /
         // running mode): the watch renders these verbatim, the same lines the phone dialog + every client show.
         val lines: List<ConfirmActionLine> = emptyList(),
-        // [deferConfirm] = the commit is a CLIENT→master round-trip (insulin relayed off a watch-on-client): the watch
-        // must NOT flash the local success animation on ✓, but instead show the "contacting master" spinner and wait
-        // for the master's real terminal ([RemoteDelivered] = success, or an error [ConfirmAction]). False = the
-        // confirm is local/instant (master-paired watch, TT/PS/RM/eCarbs) → the watch shows success immediately as before.
+        // [deferConfirm] = the commit is a CLIENT→master round-trip (the watch is paired to an AAPSCLIENT, so every
+        // action — bolus/wizard/TT/PS/RM/eCarbs — is relayed and executed on the master): the watch must NOT flash the
+        // local success animation on ✓, but instead show the "contacting master" spinner and wait for the master's real
+        // terminal ([RemoteDelivered] = success, or an error [ConfirmAction]). False = a master-paired watch (executes
+        // locally, no relay) → the watch shows success immediately as before. Set from config.AAPSCLIENT, so it is
+        // role-based, not per-action.
         val deferConfirm: Boolean = false,
     ) : EventData()
 

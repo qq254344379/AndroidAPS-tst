@@ -146,9 +146,10 @@ class DataHandlerMobile @Inject constructor(
     private val ch: ConcentrationHelper,
     private val runningModeGuard: RunningModeGuard,
     private val wizardBolusExecutor: WizardBolusExecutor,
-    // Role-transparent insulin relays: on a MASTER they run locally (same as wizardBolusExecutor); on a CLIENT they
-    // route the bolus/quick-wizard/wizard to the master over the signed round-trip (gated on masterReachable). The
-    // local wizardBolusExecutor stays for carbs/eCarbs/TT/PS/RM/Fill, which apply locally + NS-sync (no master needed).
+    // Role-transparent relays: on a MASTER they run locally (via wizardBolusExecutor); on a CLIENT they route the
+    // action to the master over the signed round-trip (gated on masterReachable). EVERY wear therapy action goes
+    // through these — bolus/eCarbs/TT/PS/RM via batchExecutor, quick-wizard/wizard via wizardExecutor. The local
+    // wizardBolusExecutor stays on the wear path for Fill ONLY (no relay command for Fill).
     private val batchExecutor: BatchExecutor,
     private val wizardExecutor: WizardExecutor,
 ) {
