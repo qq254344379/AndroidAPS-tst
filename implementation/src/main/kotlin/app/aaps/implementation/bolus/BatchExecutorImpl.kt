@@ -39,14 +39,14 @@ class BatchExecutorImpl @Inject constructor(
         }
     }
 
-    override suspend fun commit(bolusId: Long, source: Sources, label: String): ActionProgress {
+    override suspend fun commit(id: Long, source: Sources, label: String): ActionProgress {
         if (config.AAPSCLIENT) {
             if (!nsClient.masterReachable.value) return ActionProgress.Rejected(FailureReason.NotReachable)
-            return dispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(bolusId), label)
+            return dispatcher.run(ClientControlActionDispatcher.Command.BolusCommit(id), label)
         }
         // Master: deliver the parked bundle locally (decision-B order lives in the executor's confirm()).
         var error: String? = null
-        val result = wizardBolusExecutor.confirm(bolusId, source, { error = it })
+        val result = wizardBolusExecutor.confirm(id, source, { error = it })
         val err = error
         return when {
             result is WizardBolusExecutor.ConfirmResult.NoPending -> ActionProgress.Rejected(FailureReason.NoPendingBolus)

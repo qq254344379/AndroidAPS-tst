@@ -20,7 +20,8 @@ internal fun BatchAction.toDto(): BatchActionDto = when (this) {
 
     is BatchAction.TempTarget    -> BatchActionDto(
         type = BatchActionDto.TYPE_TEMP_TARGET,
-        reason = reason, lowMgdl = lowMgdl, highMgdl = highMgdl, durationMinutes = durationMinutes, startOffsetMinutes = startOffsetMinutes
+        reason = reason, lowMgdl = lowMgdl, highMgdl = highMgdl, durationMinutes = durationMinutes, startOffsetMinutes = startOffsetMinutes,
+        notes = notes ?: ""
     )
 
     is BatchAction.ProfileSwitch -> BatchActionDto(
@@ -43,7 +44,7 @@ internal fun BatchActionDto.toDomain(): BatchAction? = when (type) {
         iCfg = iCfgJson?.let { j -> runCatching { (Json.parseToJsonElement(j) as? JsonObject)?.let { ICfg.fromJsonObject(it) } }.getOrNull() }
     )
 
-    BatchActionDto.TYPE_TEMP_TARGET    -> reason?.let { BatchAction.TempTarget(it, lowMgdl, highMgdl, durationMinutes, startOffsetMinutes) }
+    BatchActionDto.TYPE_TEMP_TARGET    -> reason?.let { BatchAction.TempTarget(it, lowMgdl, highMgdl, durationMinutes, startOffsetMinutes, notes.ifEmpty { null }) }
     BatchActionDto.TYPE_PROFILE_SWITCH -> BatchAction.ProfileSwitch(percentage, timeShiftHours, durationMinutes, profileName, notes.ifEmpty { null })
     BatchActionDto.TYPE_RUNNING_MODE   -> runningMode?.let { name -> runCatching { RM.Mode.valueOf(name) }.getOrNull()?.let { BatchAction.RunningMode(it, durationMinutes) } }
     else                               -> null

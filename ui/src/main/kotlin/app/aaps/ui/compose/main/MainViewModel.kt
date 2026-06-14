@@ -50,7 +50,6 @@ import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
-import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.ui.IconsProvider
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
@@ -125,7 +124,6 @@ class MainViewModel @Inject constructor(
     private val protectionCheck: ProtectionCheck,
     private val sceneRepository: SceneStore,
     private val sceneActions: SceneActions,
-    private val tempTargetActions: TempTargetActions,
     private val sceneChainTargetResolver: SceneChainResolver,
     private val activeSceneManager: ActiveSceneSync,
     private val rxBus: RxBus,
@@ -620,41 +618,54 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /** QuickLaunch TT preset → contact the master, render the master's confirmation, commit on OK (role-transparent). */
     fun requestTempTargetPresetConfirmation(presetId: String) {
         val presets = preferences.get(StringNonKey.TempTargetPresets).toTTPresetsWithNameRes()
         val preset = presets.find { it.id == presetId } ?: return
-        val name = preset.name ?: preset.nameRes?.let { rh.gs(it) } ?: "?"
-        val durationMin = (preset.duration / 60000L).toInt()
-        val message = "$name\n${rh.gs(app.aaps.core.ui.R.string.format_mins, durationMin)}"
-        _actionConfirmation.update {
-            ActionConfirmation(
-                title = rh.gs(app.aaps.core.ui.R.string.temp_target_management),
-                message = message,
-                icon = when (preset.reason) {
-                    TT.Reason.ACTIVITY     -> IcTtActivity
-                    TT.Reason.EATING_SOON  -> IcTtEatingSoon
-                    TT.Reason.HYPOGLYCEMIA -> IcTtHypo
-                    else                   -> IcTtManual
-                },
-                onConfirmAction = ConfirmableAction.ActivateTempTargetPreset(presetId)
-            )
+        val icon = when (preset.reason) {
+            TT.Reason.ACTIVITY     -> IcTtActivity
+            TT.Reason.EATING_SOON  -> IcTtEatingSoon
+            TT.Reason.HYPOGLYCEMIA -> IcTtHypo
+            else                   -> IcTtManual
+        }
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_set_temp_target)
+        val actions = listOf(BatchAction.TempTarget(preset.reason.text, preset.targetValue, preset.targetValue, (preset.duration / 60000L).toInt(), 0))
+        viewModelScope.launch {
+            when (val prepared = batchExecutor.prepare(actions, Sources.TTDialog, label)) {
+                is ActionProgress.Prepared ->
+                    rxBus.send(
+                        EventShowDialog.OkCancel(
+                            title = rh.gs(app.aaps.core.ui.R.string.temporary_target),
+                            message = "",
+                            confirmationLines = prepared.lines,
+                            icon = icon,
+                            onOk = { appScope.launch { batchExecutor.commit(prepared.id, Sources.TTDialog, label) } })
+                    )
+
+                is ActionProgress.Rejected ->
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                        rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+
+                else                       -> Unit
+            }
         }
     }
 
+    /** QuickLaunch profile switch → contact the master, render the master's confirmation, commit on OK (role-transparent). */
     fun requestProfileConfirmation(profileName: String, percentage: Int, durationMinutes: Int) {
-        val details = buildString {
-            append(profileName)
-            if (percentage != 100) append("\n${rh.gs(app.aaps.ui.R.string.quick_launch_profile_confirm_pct, percentage)}")
-            if (durationMinutes > 0) append("\n${rh.gs(app.aaps.ui.R.string.quick_launch_profile_confirm_dur, durationMinutes)}")
-            else append("\n${rh.gs(app.aaps.ui.R.string.quick_launch_profile_permanent)}")
-        }
-        _actionConfirmation.update {
-            ActionConfirmation(
-                title = rh.gs(app.aaps.ui.R.string.activate_profile),
-                message = details,
-                icon = IcProfile,
-                onConfirmAction = ConfirmableAction.ActivateProfile(profileName, percentage, durationMinutes)
-            )
+        val label = rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)
+        val actions = listOf(BatchAction.ProfileSwitch(percentage, 0, durationMinutes, profileName = profileName))
+        viewModelScope.launch {
+            when (val prepared = batchExecutor.prepare(actions, Sources.ProfileSwitchDialog, label)) {
+                is ActionProgress.Prepared ->
+                    rxBus.send(EventShowDialog.OkCancel(title = label, message = "", confirmationLines = prepared.lines, icon = IcProfile, onOk = { appScope.launch { batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label) } }))
+
+                is ActionProgress.Rejected ->
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                        rxBus.send(EventShowDialog.Ok(title = label, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+
+                else                       -> Unit
+            }
         }
     }
 
@@ -785,48 +796,19 @@ class MainViewModel @Inject constructor(
     fun executeConfirmableAction(action: ConfirmableAction) = viewModelScope.launch {
         _actionConfirmation.update { null }
         when (action) {
-            is ConfirmableAction.ExecuteAutomation        -> {
+            is ConfirmableAction.ExecuteAutomation       -> {
                 val event = automation.findEventById(action.automationId) ?: return@launch
                 viewModelScope.launch { automation.processEvent(event) }
             }
 
-            is ConfirmableAction.ActivateTempTargetPreset -> {
-                val presets = preferences.get(StringNonKey.TempTargetPresets).toTTPresetsWithNameRes()
-                val preset = presets.find { it.id == action.presetId } ?: return@launch
-                // One path for both roles (master writes locally, client round-trips → app-level modal).
-                // The active-TT chip follows from DB observers / sync-back, so we don't need the result.
-                viewModelScope.launch {
-                    tempTargetActions.set(
-                        reason = preset.reason, lowMgdl = preset.targetValue, highMgdl = preset.targetValue,
-                        durationMinutes = (preset.duration / 60000L).toInt(), timestamp = dateUtil.now(),
-                        source = Sources.TTDialog, note = null
-                    )
-                }
-            }
-
-            is ConfirmableAction.ActivateProfile          -> {
-                // The user already confirmed via the ActionConfirmation modal, so prepare+commit straight through the
-                // role-transparent BatchExecutor (master applies locally; a client relays the named switch to the master).
-                val label = rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)
-                val actions = listOf(BatchAction.ProfileSwitch(action.percentage, 0, action.durationMinutes, profileName = action.profileName))
-                when (val prepared = batchExecutor.prepare(actions, Sources.ProfileSwitchDialog, label)) {
-                    is ActionProgress.Prepared -> batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label)
-                    is ActionProgress.Rejected ->
-                        if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                            rxBus.send(EventShowDialog.Ok(title = label, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
-
-                    else                       -> Unit // Unconfirmed → app modal
-                }
-            }
-
-            is ConfirmableAction.ActivateScene            ->
+            is ConfirmableAction.ActivateScene           ->
                 // One path for both roles. Master honours the passed duration; client round-trips.
                 sceneActions.start(action.sceneId, action.durationMinutes)
 
-            is ConfirmableAction.DeactivateScene          ->
+            is ConfirmableAction.DeactivateScene         ->
                 sceneActions.stop(triggerChain = false)
 
-            is ConfirmableAction.DeactivateAndChainScene  ->
+            is ConfirmableAction.DeactivateAndChainScene ->
                 // The master derives the chain target from its active scene's endAction and posts the
                 // SCENE_CHAINED / SCENE_CHAIN_ERROR notification itself (in SceneAutomationApiImpl.
                 // stopActiveSceneAndChain), so this is identical for UI- and client-triggered chains.

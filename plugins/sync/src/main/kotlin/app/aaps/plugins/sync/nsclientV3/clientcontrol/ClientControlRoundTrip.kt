@@ -275,23 +275,19 @@ class ClientControlRoundTrip @Inject constructor(
         try {
             send(ActionProgress.Sending)
             val message = when (command) {
-                is ClientControlActionDispatcher.Command.InsulinActivate  -> ClientControlMessage.InsulinActivate(command.iCfgJson)
-                is ClientControlActionDispatcher.Command.PreferenceEdit   ->
+                is ClientControlActionDispatcher.Command.InsulinActivate -> ClientControlMessage.InsulinActivate(command.iCfgJson)
+                is ClientControlActionDispatcher.Command.PreferenceEdit  ->
                     ClientControlMessage.PreferencesUpdate(command.prefs.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) })
 
-                is ClientControlActionDispatcher.Command.SceneStart       -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
-                is ClientControlActionDispatcher.Command.SceneStop        -> ClientControlMessage.SceneStop(command.triggerChain)
-                is ClientControlActionDispatcher.Command.TempTargetSet    ->
-                    ClientControlMessage.TempTargetSet(command.timestamp, command.lowTargetMgdl, command.highTargetMgdl, command.durationMinutes, command.reason)
-
-                is ClientControlActionDispatcher.Command.TempTargetCancel -> ClientControlMessage.TempTargetCancel
-                is ClientControlActionDispatcher.Command.BolusPrepare     -> ClientControlMessage.BolusPrepare(command.guid)
-                is ClientControlActionDispatcher.Command.BolusCommit      -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)
-                is ClientControlActionDispatcher.Command.WizardPrepare    -> with(command.inputs) {
+                is ClientControlActionDispatcher.Command.SceneStart      -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
+                is ClientControlActionDispatcher.Command.SceneStop       -> ClientControlMessage.SceneStop(command.triggerChain)
+                is ClientControlActionDispatcher.Command.BolusPrepare    -> ClientControlMessage.BolusPrepare(command.guid)
+                is ClientControlActionDispatcher.Command.BolusCommit     -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)
+                is ClientControlActionDispatcher.Command.WizardPrepare   -> with(command.inputs) {
                     ClientControlMessage.WizardPrepare(bg, carbs, percentage, directCorrection, carbTime, useBg, useCob, useIob, useTt, useTrend, alarm, notes, eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours, profileName)
                 }
 
-                is ClientControlActionDispatcher.Command.BatchPrepare     -> ClientControlMessage.BatchPrepare(command.actions.map { it.toDto() })
+                is ClientControlActionDispatcher.Command.BatchPrepare    -> ClientControlMessage.BatchPrepare(command.actions.map { it.toDto() })
             }
             val validUntil = dateUtil.now() + ROUND_TRIP_TTL_MS
             val tracked = publisher.publishTracked(message, validUntil)

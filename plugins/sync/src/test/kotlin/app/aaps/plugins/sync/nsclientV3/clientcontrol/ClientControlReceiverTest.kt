@@ -1,8 +1,6 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
 import app.aaps.core.data.model.ICfg
-import app.aaps.core.data.model.TT
-import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
@@ -484,36 +482,6 @@ internal class ClientControlReceiverTest {
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.SceneStop(true), counter = 5L)))
 
         verify(aapsLogger).warn(eq(LTag.NSCLIENT), argThat<String> { contains("scene.stop failed") && contains("chain-partial") })
-    }
-
-    @Test
-    fun tempTargetSetAppliesViaPersistenceAsRemote() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}temp_target_set_$clientId"
-        whenever(persistenceLayer.insertAndCancelCurrentTemporaryTarget(any(), any(), any(), anyOrNull(), any()))
-            .thenReturn(PersistenceLayer.TransactionResult())
-
-        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.TempTargetSet(now, 90.0, 110.0, 45, "custom"), counter = 5L)))
-
-        // Inbound command applied directly via the domain layer (NOT the facade) as a remote NSClient action.
-        verify(persistenceLayer).insertAndCancelCurrentTemporaryTarget(
-            argThat { reason == TT.Reason.fromString("custom") && lowTarget == 90.0 && highTarget == 110.0 && duration == 45 * 60_000L },
-            eq(Action.TT), eq(Sources.NSClient), anyOrNull(), any()
-        )
-    }
-
-    @Test
-    fun tempTargetCancelAppliesViaPersistenceAsRemote() = runTest {
-        val (clientId, secret) = pair()
-        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}temp_target_cancel_$clientId"
-        whenever(persistenceLayer.cancelCurrentTemporaryTargetIfAny(any(), any(), any(), anyOrNull(), any()))
-            .thenReturn(PersistenceLayer.TransactionResult())
-
-        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = ClientControlMessage.TempTargetCancel, counter = 5L)))
-
-        verify(persistenceLayer).cancelCurrentTemporaryTargetIfAny(any(), eq(Action.CANCEL_TT), eq(Sources.NSClient), anyOrNull(), any())
     }
 
     @Test

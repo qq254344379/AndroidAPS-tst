@@ -78,18 +78,6 @@ interface ClientControlActionDispatcher {
         /** Deactivate the master's active scene; [triggerChain] = also fire its configured chain target. */
         data class SceneStop(val triggerChain: Boolean) : Command
 
-        /** Set a temp target on the master ([timestamp] = intended start time; targets mg/dL; reason text). */
-        data class TempTargetSet(
-            val timestamp: Long,
-            val lowTargetMgdl: Double,
-            val highTargetMgdl: Double,
-            val durationMinutes: Int,
-            val reason: String
-        ) : Command
-
-        /** Cancel the master's currently active temp target. */
-        data object TempTargetCancel : Command
-
         /** Prepare a QuickWizard (WIZARD-mode) bolus on the master ([guid] = the synced entry); master returns the preview. */
         data class BolusPrepare(val guid: String) : Command
 

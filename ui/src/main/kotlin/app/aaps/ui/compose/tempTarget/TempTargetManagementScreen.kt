@@ -61,7 +61,6 @@ import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.dialogs.DatePickerModal
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
 import app.aaps.core.ui.compose.dialogs.TimePickerModal
-import app.aaps.core.ui.compose.formatMinutesAsDuration
 import app.aaps.core.ui.compose.masterEditingEnabled
 import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.labelResId
@@ -131,8 +130,6 @@ fun TempTargetManagementScreen(
 
     // Dialog states
     var showDeleteDialog by remember { mutableStateOf(false) }
-    var showActivateDialog by remember { mutableStateOf(false) }
-    var showCancelDialog by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
 
@@ -147,33 +144,6 @@ fun TempTargetManagementScreen(
                 showDeleteDialog = false
             },
             onDismiss = { showDeleteDialog = false }
-        )
-    }
-
-    // Activate confirmation dialog
-    if (showActivateDialog) {
-        val confirmMessage = buildActivationMessage(viewModel, uiState)
-        OkCancelDialog(
-            title = viewModel.rh.gs(app.aaps.core.ui.R.string.activate_profile).removeSuffix(" profile"),
-            message = confirmMessage,
-            onConfirm = {
-                viewModel.activateWithEditorValues(onSuccess = onNavigateBack)
-                showActivateDialog = false
-            },
-            onDismiss = { showActivateDialog = false }
-        )
-    }
-
-    // Cancel active TT confirmation dialog
-    if (showCancelDialog) {
-        OkCancelDialog(
-            title = viewModel.rh.gs(app.aaps.core.ui.R.string.cancel),
-            message = viewModel.rh.gs(app.aaps.core.ui.R.string.confirm_cancel_temp_target),
-            onConfirm = {
-                viewModel.cancelActive()
-                showCancelDialog = false
-            },
-            onDismiss = { showCancelDialog = false }
         )
     }
 
@@ -264,9 +234,11 @@ fun TempTargetManagementScreen(
                 )
             }
         ) { paddingValues ->
-            Column(modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
                 MasterOfflineBanner(editingEnabled = editingEnabled)
                 Box(
                     modifier = Modifier
@@ -419,7 +391,7 @@ fun TempTargetManagementScreen(
                     // unreachable — canceling a TT is a master/NS action that couldn't be delivered.
                     if (editingEnabled && uiState.activeTT != null) {
                         SmallFloatingActionButton(
-                            onClick = { showCancelDialog = true },
+                            onClick = { viewModel.cancelActive() },
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(end = 16.dp, bottom = 88.dp),
@@ -490,7 +462,7 @@ fun TempTargetManagementScreen(
                         // activating a TT is a master/remote action that couldn't be delivered.
                         if (editingEnabled) {
                             AapsFab(
-                                onClick = { showActivateDialog = true }
+                                onClick = { viewModel.activateWithEditorValues(onSuccess = onNavigateBack) }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.PlayArrow,
@@ -505,44 +477,4 @@ fun TempTargetManagementScreen(
     }
 }
 
-/**
- * Build activation confirmation message showing all details
- */
-private fun buildActivationMessage(
-    viewModel: TempTargetManagementViewModel,
-    uiState: TempTargetManagementUiState
-): String {
-    return buildString {
-        append(viewModel.rh.gs(app.aaps.core.ui.R.string.temporary_target))
-        append(": ")
-        // editorTarget is already in user units, convert to mg/dL for proper formatting
-        val targetMgdl = viewModel.profileUtil.convertToMgdl(uiState.editorTarget, viewModel.units)
-        append(viewModel.profileUtil.fromMgdlToStringInUnits(targetMgdl))
-        append("<br/>")
-        append(viewModel.rh.gs(app.aaps.core.ui.R.string.duration))
-        append(": ")
-        val durationMinutes = (uiState.editorDuration / 60000L).toInt()
-        append(formatMinutesAsDuration(durationMinutes, viewModel.rh))
-
-        if (uiState.selectedPreset != null) {
-            append("<br/>")
-            append(viewModel.rh.gs(app.aaps.core.ui.R.string.reason))
-            append(": ")
-            append(uiState.selectedPreset.getDisplayName(viewModel.rh))
-        }
-
-        if (uiState.eventTimeChanged) {
-            append("<br/>")
-            append(viewModel.rh.gs(app.aaps.core.ui.R.string.time))
-            append(": ")
-            append(viewModel.dateUtil.dateAndTimeString(uiState.eventTime))
-        }
-
-        if (uiState.notes.isNotBlank()) {
-            append("<br/>")
-            append(viewModel.rh.gs(app.aaps.core.ui.R.string.notes_label))
-            append(": ")
-            append(uiState.notes)
-        }
-    }
-}
+// (TT activation confirmation is now built by the master — see TempTargetManagementViewModel.activateWithEditorValues.)

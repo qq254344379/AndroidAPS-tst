@@ -86,12 +86,6 @@ data class ActionConfirmation(
 sealed class ConfirmableAction {
 
     data class ExecuteAutomation(val automationId: String) : ConfirmableAction()
-    data class ActivateTempTargetPreset(val presetId: String) : ConfirmableAction()
-    data class ActivateProfile(
-        val profileName: String,
-        val percentage: Int,
-        val durationMinutes: Int
-    ) : ConfirmableAction()
 
     data class ActivateScene(val sceneId: String, val durationMinutes: Int) : ConfirmableAction()
     data object DeactivateScene : ConfirmableAction()

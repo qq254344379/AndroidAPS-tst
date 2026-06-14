@@ -163,6 +163,9 @@ class WizardBolusExecutorImpl @Inject constructor(
         val minStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)
         if (abs(insulinAfterConstraints - wizard.calculatedTotalInsulin) >= minStep)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_constraint_bolus_size, wizard.calculatedTotalInsulin))
+        // A correction-only QuickWizard (0 carbs) that nets to nothing → reject rather than show an empty confirm.
+        if (wizard.calculatedTotalInsulin <= 0.0 && wizard.carbs <= 0)
+            return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_insulin_required))
 
         evictStalePending()
         pending[wizard.timeStamp] = PendingBolus(wizard.calculatedTotalInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry, carbTimeMinutes = entry.carbTime(), notes = entry.buttonText())
@@ -212,6 +215,11 @@ class WizardBolusExecutorImpl @Inject constructor(
         val minStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)
         if (abs(insulinAfterConstraints - wizard.calculatedTotalInsulin) >= minStep)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_constraint_bolus_size, wizard.calculatedTotalInsulin))
+        // Nothing to deliver (e.g. BG below target + high IOB, no carbs): reject so the caller shows the standard
+        // "no insulin required" instead of an empty confirmation. The guard lives here so every surface that recomputes
+        // through this path — phone wizard dialog, client relay, watch — gets it (it was previously only in the wear handler).
+        if (wizard.calculatedTotalInsulin <= 0.0 && wizard.carbs <= 0)
+            return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_insulin_required))
         evictStalePending()
         pending[wizard.timeStamp] =
             PendingBolus(
@@ -463,7 +471,7 @@ class WizardBolusExecutorImpl @Inject constructor(
             ),
             action = Action.TT,
             source = source,
-            note = null,
+            note = tt.notes,
             listValues = listOf(ValueWithUnit.Mgdl(tt.lowMgdl), ValueWithUnit.Minute(tt.durationMinutes))
         )
     }

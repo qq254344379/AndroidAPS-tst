@@ -36,7 +36,8 @@ sealed interface BatchAction {
         val lowMgdl: Double,
         val highMgdl: Double,
         val durationMinutes: Int,
-        val startOffsetMinutes: Int
+        val startOffsetMinutes: Int,
+        val notes: String? = null
     ) : BatchAction
 
     /**

@@ -132,8 +132,6 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.SceneStop,
             is ClientControlMessage.InsulinActivate,
             ClientControlMessage.Ping,
-            is ClientControlMessage.TempTargetSet,
-            ClientControlMessage.TempTargetCancel,
             ClientControlMessage.DismissAlarm,
             ClientControlMessage.StopBolus,
             is ClientControlMessage.PreferencesUpdate,

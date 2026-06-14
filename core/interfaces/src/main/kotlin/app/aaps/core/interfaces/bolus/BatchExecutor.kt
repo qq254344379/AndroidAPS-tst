@@ -20,9 +20,9 @@ interface BatchExecutor {
     suspend fun prepare(actions: List<BatchAction>, source: Sources, label: String): ActionProgress
 
     /**
-     * Commit a prepared batch by [bolusId] (the `bolusId` from a prior [prepare]'s [ActionProgress.Prepared]): the
+     * Commit a prepared batch by [id] (the `bolusId` from a prior [prepare]'s [ActionProgress.Prepared]): the
      * master applies the parked bundle (bolus + TT per the ordering rule) EXACTLY once. Client → round-trip; master →
      * local. Returns [ActionProgress.Applied] or a failure ([ActionProgress.Rejected.NoPendingBolus] if already consumed).
      */
-    suspend fun commit(bolusId: Long, source: Sources, label: String): ActionProgress
+    suspend fun commit(id: Long, source: Sources, label: String): ActionProgress
 }

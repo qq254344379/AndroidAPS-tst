@@ -6,10 +6,12 @@ import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
+import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.interfaces.aps.AutosensDataStore
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
@@ -23,10 +25,12 @@ import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.profile.EffectiveProfile
 import app.aaps.core.interfaces.profile.ProfileStore
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
+import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
+import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -424,6 +428,42 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
         // RESUME resolves to RECONNECT (not RESUME) because the current mode is DISCONNECTED_PUMP — the UEL action differs.
         verify(loop).handleRunningModeChange(eq(RM.Mode.RESUME), eq(Action.RECONNECT), eq(Sources.NSClient), any(), eq(0), any())
+    }
+
+    // ---- recompute paths reject a net-zero dose instead of parking an empty confirmation ----
+
+    @Test
+    fun prepareQuickWizard_netZeroInsulinAndZeroCarbs_returnsNoInsulinRequiredAndParksNothing() = runTest {
+        // A correction-only QuickWizard (0 carbs) that nets to <= 0 insulin must error, not park an empty confirm.
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        val ads = mock<AutosensDataStore>()
+        whenever(iobCobCalculator.ads).thenReturn(ads)
+        whenever(ads.actualBg()).thenReturn(mock())
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        whenever(profileFunction.getProfileName()).thenReturn("Test")
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription())
+        whenever(constraintsChecker.applyCarbsConstraints(any())).thenAnswer { it.getArgument<Constraint<Int>>(0) }
+        whenever(rh.gs(any<Int>())).thenReturn("No insulin required")
+        val entry = mock<QuickWizardEntry>()
+        whenever(quickWizard.get("g")).thenReturn(entry)
+        whenever(entry.carbs()).thenReturn(0)
+        val bw = mock<BolusWizard>()
+        whenever(entry.doCalc(anyOrNull(), anyOrNull(), anyOrNull())).thenReturn(bw)
+        whenever(bw.insulinAfterConstraints).thenReturn(0.0)
+        whenever(bw.calculatedTotalInsulin).thenReturn(0.0)
+        whenever(bw.carbs).thenReturn(0)
+        val executor = create()
+
+        val result = executor.prepareQuickWizard("g")
+
+        // The guard is the SAME two lines in prepareWizard, so this covers the manual-wizard path too.
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        assertThat((result as WizardBolusExecutor.PrepareResult.Error).message).isEqualTo("No insulin required")
+        // Nothing parked → a confirm of the wizard timestamp finds no pending dose (no phantom delivery).
+        verify(commandQueue, never()).bolus(anyOrNull())
     }
 
     @Test

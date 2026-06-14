@@ -8,17 +8,22 @@ import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.model.TTPreset
 import app.aaps.core.data.ue.Sources
+import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.bolus.BatchExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.observeChanges
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.rx.events.EventShowSnackbar
-import app.aaps.core.interfaces.tempTargets.TempTargetActions
 import app.aaps.core.interfaces.tempTargets.toJson
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.BooleanKey
@@ -26,7 +31,11 @@ import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.ScreenMode
+import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.ui.compose.navigation.icon
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +48,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.math.abs
@@ -58,7 +68,9 @@ class TempTargetManagementViewModel @Inject constructor(
     val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger,
     private val rxBus: RxBus,
-    private val tempTargetActions: TempTargetActions
+    private val batchExecutor: BatchExecutor,
+    private val config: Config,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
     val units: GlucoseUnit
@@ -381,12 +393,12 @@ class TempTargetManagementViewModel @Inject constructor(
 
         // Get defaults from Constants (target in mg/dL, duration in minutes)
         val (targetMgdl, durationMin) = when (preset.reason) {
-            TT.Reason.EATING_SOON  -> Pair(
+            TT.Reason.EATING_SOON -> Pair(
                 Constants.DEFAULT_TT_EATING_SOON_TARGET,
                 Constants.DEFAULT_TT_EATING_SOON_DURATION
             )
 
-            TT.Reason.ACTIVITY     -> Pair(
+            TT.Reason.ACTIVITY -> Pair(
                 Constants.DEFAULT_TT_ACTIVITY_TARGET,
                 Constants.DEFAULT_TT_ACTIVITY_DURATION
             )
@@ -396,7 +408,7 @@ class TempTargetManagementViewModel @Inject constructor(
                 Constants.DEFAULT_TT_HYPO_DURATION
             )
 
-            else                   -> return null
+            else -> return null
         }
 
         val durationMs = durationMin.toLong() * 60L * 1000L
@@ -549,40 +561,74 @@ class TempTargetManagementViewModel @Inject constructor(
     }
 
     /**
-     * Activate temp target with current editor values
+     * Activate temp target with current editor values — the bolus-style two-step: contact the master (shows the
+     * pending modal), render the MASTER's confirmation lines, and commit on the user's OK. The client never confirms
+     * locally; a contact failure is visible (no confirmation dialog appears — the error shows instead). A back-dated
+     * event time rides as startOffsetMinutes. The PREPARE rides viewModelScope (abandoned if you leave the screen); the
+     * COMMIT rides appScope (survives a screen pop) and the back-navigation hops to Main (NavController is main-thread-only).
      */
     fun activateWithEditorValues(onSuccess: () -> Unit) {
+        val currentState = uiState.value
+        val timestamp = if (currentState.eventTimeChanged) currentState.eventTime else dateUtil.now()
+        // Convert target from user units (display) to mg/dL (database storage)
+        val targetMgdl = profileUtil.convertToMgdl(currentState.editorTarget, units)
+        val durationMinutes = (currentState.editorDuration / 60000L).toInt()
+        val reason = currentState.selectedPreset?.reason ?: TT.Reason.CUSTOM
+        val notes = currentState.notes.takeIf { it.isNotBlank() }
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_set_temp_target)
+        val startOffsetMinutes = ((timestamp - dateUtil.now()) / 60000L).toInt()
+        val actions = listOf(BatchAction.TempTarget(reason.text, targetMgdl, targetMgdl, durationMinutes, startOffsetMinutes, notes))
         viewModelScope.launch {
-            val currentState = uiState.value
-            val timestamp = if (currentState.eventTimeChanged) currentState.eventTime else dateUtil.now()
-            // Convert target from user units (display) to mg/dL (database storage)
-            val targetMgdl = profileUtil.convertToMgdl(currentState.editorTarget, units)
-            val durationMinutes = (currentState.editorDuration / 60000L).toInt()
-            val reason = currentState.selectedPreset?.reason ?: TT.Reason.CUSTOM
-            val notes = currentState.notes.takeIf { it.isNotBlank() }
+            when (val prepared = batchExecutor.prepare(actions, Sources.TTDialog, label)) {
+                is ActionProgress.Prepared ->
+                    rxBus.send(
+                        EventShowDialog.OkCancel(
+                            title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "", confirmationLines = prepared.lines,
+                            icon = ElementType.TEMP_TARGET_MANAGEMENT.icon(),
+                            onOk = {
+                                appScope.launch {
+                                    if (batchExecutor.commit(prepared.id, Sources.TTDialog, label) is ActionProgress.Applied) {
+                                        if (durationMinutes == 10) preferences.put(BooleanNonKey.ObjectivesTempTargetUsed, true)
+                                        withContext(Dispatchers.Main) { onSuccess() }
+                                    }
+                                }
+                            }
+                        )
+                    )
+                // Master-local failure (no modal) or a client offline pre-check; a client round-trip failure already showed on the app modal.
+                is ActionProgress.Rejected ->
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                        rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
 
-            // One path for both roles: master writes locally, client round-trips (driving the app-level
-            // modal). Only continue (mark objective / close) once the master has actually applied it.
-            val result = tempTargetActions.set(
-                reason = reason, lowMgdl = targetMgdl, highMgdl = targetMgdl,
-                durationMinutes = durationMinutes, timestamp = timestamp,
-                source = Sources.TTDialog, note = notes
-            )
-            if (result is ActionProgress.Applied) {
-                if (durationMinutes == 10) preferences.put(BooleanNonKey.ObjectivesTempTargetUsed, true)
-                onSuccess()
+                else                       -> Unit
             }
-            // Rejected/Unconfirmed are surfaced by the central modal; the screen stays open.
         }
     }
 
     /**
-     * Cancel the currently active temp target
+     * Cancel the currently active temp target — a duration-0 [BatchAction.TempTarget]. Same bolus-style flow:
+     * contact the master, show the master's "cancel" confirmation, commit on OK.
      */
     fun cancelActive() {
+        val label = rh.gs(app.aaps.core.ui.R.string.clientcontrol_action_cancel_temp_target)
+        val actions = listOf(BatchAction.TempTarget(TT.Reason.CUSTOM.text, 0.0, 0.0, 0, 0))
         viewModelScope.launch {
-            tempTargetActions.cancel(source = Sources.TTDialog, note = null)
-            loadData()
+            when (val prepared = batchExecutor.prepare(actions, Sources.TTDialog, label)) {
+                is ActionProgress.Prepared ->
+                    rxBus.send(
+                        EventShowDialog.OkCancel(
+                            title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "", confirmationLines = prepared.lines,
+                            icon = ElementType.TEMP_TARGET_MANAGEMENT.icon(),
+                            onOk = { appScope.launch { batchExecutor.commit(prepared.id, Sources.TTDialog, label); loadData() } }
+                        )
+                    )
+
+                is ActionProgress.Rejected ->
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                        rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+
+                else                       -> Unit
+            }
         }
     }
 }

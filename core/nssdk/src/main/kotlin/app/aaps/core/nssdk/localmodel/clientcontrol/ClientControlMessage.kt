@@ -99,26 +99,6 @@ sealed class ClientControlMessage {
     ) : ClientControlMessage()
 
     /**
-     * Client asks the master to set a temp target. The master re-creates the TT (with its own source)
-     * and applies it locally; the resulting record syncs back. [timestamp] carries the client's intended
-     * start time (supports a back-dated event time); targets are mg/dL; [reason] is `TT.Reason.text`.
-     */
-    @Serializable
-    @SerialName("temp_target_set")
-    data class TempTargetSet(
-        val timestamp: Long,
-        val lowTargetMgdl: Double,
-        val highTargetMgdl: Double,
-        val durationMinutes: Int,
-        val reason: String
-    ) : ClientControlMessage()
-
-    /** Client asks the master to cancel the currently active temp target. */
-    @Serializable
-    @SerialName("temp_target_cancel")
-    data object TempTargetCancel : ClientControlMessage()
-
-    /**
      * Client asks the master to PREPARE a QuickWizard (WIZARD-mode) bolus: the master computes + constraint-caps
      * the dose on its own live state and returns the preview in the signed ack. Nothing is delivered yet. [guid]
      * identifies the QuickWizard entry (defs are synced to the client).
