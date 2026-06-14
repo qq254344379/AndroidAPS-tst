@@ -216,5 +216,21 @@ class EventDataTest {
             assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
             assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
         }
+        // Watch-on-client insulin relay feedback: the spinner trigger, the commit-success terminal, and a deferred confirm.
+        EventData.ContactingMaster.let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
+        EventData.RemoteDelivered.let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
+        EventData.ConfirmAction(
+            "Bolus", "", EventData.ActionBolusConfirmed(7L),
+            lines = listOf(EventData.ConfirmActionLine("BOLUS", "Bolus: 1.5 U")), deferConfirm = true
+        ).let {
+            assertThat(EventData.deserializeByte(it.serializeByte())).isEqualTo(it)
+            assertThat(EventData.deserialize(it.serialize())).isEqualTo(it)
+        }
     }
 }

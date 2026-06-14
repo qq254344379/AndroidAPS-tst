@@ -426,6 +426,7 @@
     <string name="clientcontrol_fail_bolus_compute">The master couldn\'t calculate the bolus (missing glucose / profile, or pump not ready).</string>
     <string name="clientcontrol_fail_internal">Something went wrong.</string>
     <string name="clientcontrol_fail_unknown">The command failed.</string>
+    <string name="clientcontrol_unconfirmed_wear">State unknown — check phone/Nightscout before re-bolusing.</string>
     <string name="scene_revert_tt">Cancel temporary target</string>
     <string name="scene_revert_profile">Revert profile change</string>
     <string name="scene_revert_smb_on">Re-enable SMB</string>

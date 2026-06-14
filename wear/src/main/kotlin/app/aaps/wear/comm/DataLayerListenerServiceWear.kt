@@ -291,6 +291,7 @@ class DataLayerListenerServiceWear : WearableListenerService() {
         const val KEY_MESSAGE = "message"
         const val KEY_TITLE = "title"
         const val KEY_IS_ERROR = "isError"
+        const val KEY_DEFER_CONFIRM = "deferConfirm"
 
         const val BOLUS_PROGRESS_NOTIF_ID = 1
         const val CONFIRM_NOTIF_ID = 2

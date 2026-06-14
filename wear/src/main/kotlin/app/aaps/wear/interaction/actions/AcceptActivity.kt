@@ -52,12 +52,18 @@ class AcceptActivity : DaggerAppCompatActivity() {
 
     private var actionKey = ""
 
+    private var deferConfirm = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // This confirm/error screen IS the resolved terminal of any in-flight prepare round-trip → dismiss its spinner.
+        ContactingMasterActivity.dismiss()
 
         val extras = intent.extras
         val message = extras?.getString(DataLayerListenerServiceWear.KEY_MESSAGE, "") ?: ""
         actionKey = extras?.getString(DataLayerListenerServiceWear.KEY_ACTION_DATA, "") ?: ""
+        // CLIENT relay: the commit is a master round-trip → don't flash local success on ✓; show the spinner + wait.
+        deferConfirm = extras?.getBoolean(DataLayerListenerServiceWear.KEY_DEFER_CONFIRM, false) ?: false
 
         // Master-authored confirmation rows (role name + text), rendered verbatim. Non-empty for bolus / eCarbs.
         val lineRoles = extras?.getStringArray(DataLayerListenerServiceWear.KEY_LINE_ROLES)
@@ -80,11 +86,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
         vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 50, 100, 50), -1))
 
         val hasLines = lines.isNotEmpty()
-        val hasAnyStructuredSummary = hasLines
 
         setContent {
             MaterialTheme {
-                val pagerState = rememberPagerState(pageCount = { if (isError && !hasAnyStructuredSummary) 1 else 2 })
+                val pagerState = rememberPagerState(pageCount = { if (isError && !hasLines) 1 else 2 })
 
                 LaunchedEffect(Unit) {
                     delay(60_000)
@@ -231,12 +236,19 @@ class AcceptActivity : DaggerAppCompatActivity() {
     private fun confirm() {
         if (actionKey.isNotEmpty()) startService(IntentWearToMobile(this, actionKey))
         startForegroundService(IntentCancelNotification(this))
-        startActivity(
-            Intent(this, ConfirmationActivity::class.java).apply {
-                putExtra(ConfirmationActivity.EXTRA_ANIMATION_TYPE, ConfirmationActivity.SUCCESS_ANIMATION)
-                putExtra(ConfirmationActivity.EXTRA_MESSAGE, getString(R.string.wizard_confirmation_sent))
-            }
-        )
+        if (deferConfirm) {
+            // CLIENT relay: the commit is a master round-trip in flight — do NOT show a (false) success animation.
+            // Show the "contacting master" spinner; the real terminal arrives as RemoteDelivered (→ success) or an
+            // error ConfirmAction, both of which dismiss the spinner.
+            ContactingMasterActivity.show(this)
+        } else {
+            startActivity(
+                Intent(this, ConfirmationActivity::class.java).apply {
+                    putExtra(ConfirmationActivity.EXTRA_ANIMATION_TYPE, ConfirmationActivity.SUCCESS_ANIMATION)
+                    putExtra(ConfirmationActivity.EXTRA_MESSAGE, getString(R.string.wizard_confirmation_sent))
+                }
+            )
+        }
         finish()
     }
 }

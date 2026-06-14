@@ -22,7 +22,10 @@ import app.aaps.core.data.ui.ConfirmationLine
  */
 interface WizardBolusExecutor {
 
-    /** Park a pending bolus (the full-wizard precheck computes wear-side and stores its result here). */
+    /**
+     * Park a pending bolus directly. **Test-only seeding seam** for the consume-once [confirm] contract — there is
+     * no production caller: every surface now parks via [prepareWizard] / [prepareQuickWizard] / [prepareBatch].
+     */
     fun setPending(insulin: Double, carbs: Int, bolusCalculatorResult: BCR?, bolusId: Long)
 
     /** Drop any pending bolus (a non-wizard precheck supersedes it). */

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.interfaces.clientcontrol.PendingAction
 import app.aaps.ui.R
 import app.aaps.core.ui.R as CoreUiR
@@ -87,24 +88,6 @@ fun ClientControlPendingDialog(
     )
 }
 
-/** Localized message for a [FailureReason] code (unknown codes from a newer master → generic). */
+/** Localized message for a [FailureReason] code (the shared mapping; unknown codes from a newer master → generic). */
 @Composable
-private fun reasonText(reason: FailureReason): String = stringResource(
-    when (reason) {
-        FailureReason.NotPaired          -> CoreUiR.string.clientcontrol_fail_not_paired
-        FailureReason.NotReachable       -> CoreUiR.string.clientcontrol_fail_not_reachable
-        FailureReason.NoReply            -> CoreUiR.string.clientcontrol_fail_no_reply
-        FailureReason.Expired            -> CoreUiR.string.clientcontrol_fail_expired
-        FailureReason.Busy               -> CoreUiR.string.clientcontrol_fail_busy
-        FailureReason.SendFailed         -> CoreUiR.string.clientcontrol_fail_send_failed
-        FailureReason.NoActiveProfile    -> CoreUiR.string.clientcontrol_fail_no_active_profile
-        FailureReason.SceneNotFound      -> CoreUiR.string.clientcontrol_fail_scene_not_found
-        FailureReason.SceneDisabled      -> CoreUiR.string.clientcontrol_fail_scene_disabled
-        FailureReason.PartialFailure     -> CoreUiR.string.clientcontrol_fail_partial
-        FailureReason.ExecutionFailed    -> CoreUiR.string.clientcontrol_fail_execution
-        FailureReason.NoPendingBolus     -> CoreUiR.string.clientcontrol_fail_no_pending_bolus
-        FailureReason.BolusComputeFailed -> CoreUiR.string.clientcontrol_fail_bolus_compute
-        FailureReason.Internal           -> CoreUiR.string.clientcontrol_fail_internal
-        FailureReason.Unknown            -> CoreUiR.string.clientcontrol_fail_unknown
-    }
-)
+private fun reasonText(reason: FailureReason): String = stringResource(reason.failTextResId())

@@ -48,9 +48,10 @@ import app.aaps.wear.complications.TargetComplication
 import app.aaps.wear.complications.UploaderBatteryComplication
 import app.aaps.wear.data.ComplicationDataRepository
 import app.aaps.wear.interaction.WatchfaceConfigurationActivity
+import androidx.wear.activity.ConfirmationActivity
 import app.aaps.wear.interaction.actions.AcceptActivity
+import app.aaps.wear.interaction.actions.ContactingMasterActivity
 import app.aaps.wear.interaction.actions.ProfileSwitchActivity
-import app.aaps.wear.interaction.actions.WizardResultActivity
 import app.aaps.wear.tile.ActionsTileService
 import app.aaps.wear.tile.BgGraphTileService
 import app.aaps.wear.tile.QuickWizardTileService
@@ -114,6 +115,9 @@ class DataHandlerWear @Inject constructor(
             rxBus.send(EventWearToMobile(EventData.ActionPong(System.currentTimeMillis(), Build.VERSION.SDK_INT)))
         }
         onEvent<EventData.ConfirmAction> {
+            // The resolving terminal (master-authored lines, or an error) arrived → dismiss the "contacting master"
+            // spinner if one is up (prepare round-trip finished), then show the confirm/error screen.
+            ContactingMasterActivity.dismiss()
             context.startActivity(Intent(context, AcceptActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtras(
@@ -126,37 +130,26 @@ class DataHandlerWear @Inject constructor(
                             bundle.putStringArray(DataLayerListenerServiceWear.KEY_LINE_TEXTS, it.lines.map { l -> l.text }.toTypedArray())
                         }
                         bundle.putBoolean(DataLayerListenerServiceWear.KEY_IS_ERROR, it.returnCommand is EventData.Error)
+                        // CLIENT relay: the ✓ must NOT flash success — it shows the spinner + waits for the master's
+                        // real commit terminal ([RemoteDelivered] / error). False on a master (instant local success).
+                        bundle.putBoolean(DataLayerListenerServiceWear.KEY_DEFER_CONFIRM, it.deferConfirm)
                     }
                 )
             })
         }
-        onEvent<EventData.ActionWizardResult> { event ->
-            try {
-                val resultIntent = Intent(context, WizardResultActivity::class.java).apply {
+        onEvent<EventData.ContactingMaster> {
+            ContactingMasterActivity.show(context)
+        }
+        onEvent<EventData.RemoteDelivered> {
+            // A deferred (relayed) commit was APPLIED on the master → dismiss the spinner + show the success animation.
+            ContactingMasterActivity.dismiss()
+            context.startActivity(
+                Intent(context, ConfirmationActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    putExtra("timestamp", event.timestamp)
-                    putExtra("total_insulin", event.totalInsulin)
-                    putExtra("carbs", event.carbs)
-                    putExtra("ic", event.ic)
-                    putExtra("sens", event.sens)
-                    putExtra("insulin_carbs", event.insulinFromCarbs)
-                    putExtra("insulin_bg", event.insulinFromBG ?: Double.NaN)
-                    putExtra("insulin_cob", event.insulinFromCOB ?: Double.NaN)
-                    putExtra("insulin_bolus_iob", event.insulinFromBolusIOB ?: Double.NaN)
-                    putExtra("insulin_basal_iob", event.insulinFromBasalIOB ?: Double.NaN)
-                    putExtra("insulin_trend", event.insulinFromTrend ?: Double.NaN)
-                    putExtra("insulin_superbolus", event.insulinFromSuperBolus ?: Double.NaN)
-                    putExtra("temp_target", event.tempTarget ?: "")
-                    putExtra("percentage", event.percentageCorrection ?: 100)
-                    putExtra("total_before_percentage", event.totalBeforePercentage ?: Double.NaN)
-                    putExtra("cob", event.cob)
+                    putExtra(ConfirmationActivity.EXTRA_ANIMATION_TYPE, ConfirmationActivity.SUCCESS_ANIMATION)
+                    putExtra(ConfirmationActivity.EXTRA_MESSAGE, context.getString(R.string.wizard_confirmation_sent))
                 }
-
-                context.startActivity(resultIntent)
-                aapsLogger.debug(LTag.WEAR, "WizardResultActivity started successfully")
-            } catch (e: Exception) {
-                aapsLogger.error(LTag.WEAR, "Error starting WizardResultActivity", e)
-            }
+            )
         }
         onEvent<EventData.CancelNotification> {
             (context.getSystemService(WearableListenerService.NOTIFICATION_SERVICE) as NotificationManager).cancel(DataLayerListenerServiceWear.CHANGE_NOTIF_ID)

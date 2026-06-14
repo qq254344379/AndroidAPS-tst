@@ -27,7 +27,10 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
 import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.bolus.WizardExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -46,7 +49,6 @@ import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.PumpStatusProvider
-import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.receivers.ReceiverStatusStore
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -87,9 +89,9 @@ import app.aaps.core.objects.extensions.toStringShort
 import app.aaps.core.objects.extensions.valueToUnits
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
-import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
+import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.ui.compose.DarkGeneralColors
 import app.aaps.core.ui.compose.LightGeneralColors
 import app.aaps.plugins.sync.R
@@ -103,7 +105,6 @@ import java.util.LinkedList
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
-import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.math.abs
 import kotlin.math.min
@@ -141,11 +142,15 @@ class DataHandlerMobile @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val importExportPrefs: ImportExportPrefs,
     private val decimalFormatter: DecimalFormatter,
-    private val bolusWizardProvider: Provider<BolusWizard>,
     private val pumpStatusProvider: PumpStatusProvider,
     private val ch: ConcentrationHelper,
     private val runningModeGuard: RunningModeGuard,
     private val wizardBolusExecutor: WizardBolusExecutor,
+    // Role-transparent insulin relays: on a MASTER they run locally (same as wizardBolusExecutor); on a CLIENT they
+    // route the bolus/quick-wizard/wizard to the master over the signed round-trip (gated on masterReachable). The
+    // local wizardBolusExecutor stays for carbs/eCarbs/TT/PS/RM/Fill, which apply locally + NS-sync (no master needed).
+    private val batchExecutor: BatchExecutor,
+    private val wizardExecutor: WizardExecutor,
 ) {
 
     @Inject lateinit var automation: Automation
@@ -240,23 +245,25 @@ class DataHandlerMobile @Inject constructor(
         onEvent<EventData.ActionProfileSwitchSendInitialData> { handleProfileSwitchSendInitialData() }
         onEvent<EventData.ActionProfileSwitchPreCheck> { handleProfileSwitchPreCheck(it) }
         onEvent<EventData.ActionProfileSwitchConfirmed> {
-            // Consume the parked profile switch by id; confirm() applies it via the shared applyProfileSwitch.
-            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+            // Commit the parked profile switch through the role-transparent relay (MASTER → local applyProfileSwitch;
+            // CLIENT → signed BolusCommit so the MASTER applies it, not the follower locally).
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)))
         }
         onEvent<EventData.ActionTempTargetPreCheck> { handleTempTargetPreCheck(it) }
         onEvent<EventData.ActionTempTargetConfirmed> {
-            // Consume the parked TT by id; confirm() applies it via the shared applyTempTarget (set or cancel).
-            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+            // Commit the parked TT through the relay (MASTER → local applyTempTarget set/cancel; CLIENT → master applies).
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.temporary_target)))
         }
         onEvent<EventData.ActionBolusPreCheck> { handleBolusPreCheck(it) }
         onEvent<EventData.ActionBolusConfirmed> {
-            // Consume the parked dose by id (capping already applied at prepare; consume-once = no double bolus).
-            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+            // Commit the parked dose by id through the role-transparent relay (MASTER → local deliver; CLIENT →
+            // signed BolusCommit). Consume-once = no double bolus; a failure surfaces to the watch.
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)))
         }
         onEvent<EventData.ActionECarbsPreCheck> { handleECarbsPreCheck(it) }
         onEvent<EventData.ActionECarbsConfirmed> {
-            // Consume the parked eCarbs by id (the FIXED carbs-only branch delivers via deliverECarbs).
-            wizardBolusExecutor.confirm(it.bolusId, Sources.Wear, ::sendError)
+            // Commit the parked eCarbs through the relay (MASTER → local deliverECarbs; CLIENT → master records them).
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)))
         }
         onEvent<EventData.ActionFillPresetPreCheck> { handleFillPresetPreCheck(it) }
         onEvent<EventData.ActionFillPreCheck> { handleFillPreCheck(it) }
@@ -271,11 +278,12 @@ class DataHandlerMobile @Inject constructor(
         onEvent<EventData.ActionQuickWizardPreCheck> { handleQuickWizardPreCheck(it) }
         onEvent<EventData.ActionWizardPreCheck> { handleWizardPreCheck(it) }
         onEvent<EventData.ActionWizardConfirmed> {
-            // Consume-once dedup + delivery live in the shared executor; refresh the watch's
-            // quick-wizard list (lastUsed) only when something was actually delivered.
-            val result = wizardBolusExecutor.confirm(it.timeStamp, Sources.Wear, ::sendError)
-            if (result is WizardBolusExecutor.ConfirmResult.Delivered)
+            // Commit the parked wizard/quick-wizard dose by id through the role-transparent relay (MASTER → local
+            // deliver; CLIENT → signed BolusCommit; wear has no advisor fork → asAdvisor=false). Refresh the watch's
+            // quick-wizard list (lastUsed) only when something was actually delivered; a failure surfaces to the watch.
+            onCommitResult(wizardExecutor.commit(it.timeStamp, asAdvisor = false, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.boluswizard))) {
                 sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+            }
         }
         onEvent<EventData.ActionUserActionPreCheck> {
             if (!config.appInitialized) return@onEvent
@@ -544,105 +552,36 @@ class DataHandlerMobile @Inject constructor(
         return false
     }
 
-    private suspend fun handleWizardPreCheck(command: EventData.ActionWizardPreCheck) {
-        if (rejectIfAapsClient()) return
-        runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS)?.let {
-            sendError(it)
-            return
-        }
-        val pump = activePlugin.activePump
-        if (!pump.isInitialized()) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
-            return
-        }
-        val carbsBeforeConstraints = command.carbs
-        val carbsAfterConstraints = constraintChecker.applyCarbsConstraints(ConstraintObject(carbsBeforeConstraints, aapsLogger)).value()
-        if (carbsAfterConstraints - carbsBeforeConstraints != 0) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_carbs_constraint))
-            return
-        }
-        val percentage = command.percentage
-        val profile = profileFunction.getProfile()
-        val profileName = profileFunction.getProfileName()
-        if (profile == null) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_active_profile))
-            return
-        }
-        val bgReading = iobCobCalculator.ads.actualBg()
-        if (bgReading == null) {
+    // internal + suspend so DataHandlerMobileWearBolusTest can drive it; routes through the shared recompute path.
+    internal suspend fun handleWizardPreCheck(command: EventData.ActionWizardPreCheck) {
+        // Role-transparent recompute: MASTER recomputes + caps + parks + authors lines locally; CLIENT relays a
+        // WizardPrepare(inputs) to the master (gated on masterReachable). The watch renders the master's lines in
+        // AcceptActivity (no bespoke breakdown — same as the phone confirm). The recompute trusts inputs.bg, so the
+        // caller supplies the current BG (the master's own on a master; the follower's NS-synced BG on a client, as
+        // the manual-wizard dialog does) and null-checks it; profile/pump/COB/constraints/zero-net live in prepareWizard.
+        val bgReading = iobCobCalculator.ads.actualBg() ?: run {
             sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_actual_bg))
             return
         }
-        val cobInfo = iobCobCalculator.getCobInfo("Wizard wear")
-        if (cobInfo.displayCob == null) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_cob))
-            return
-        }
-        val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
-
-        // Store the preference values before calling doCalc
-        val useBgPref = preferences.get(BooleanKey.WearWizardBg)
-        val useCobPref = preferences.get(BooleanKey.WearWizardCob)
-        val useIobPref = preferences.get(BooleanKey.WearWizardIob)
-        val useTTPref = preferences.get(BooleanKey.WearWizardTt)
-        val useTrendPref = preferences.get(BooleanKey.WearWizardTrend)
-
-        val bolusWizard = bolusWizardProvider.get().doCalc(
-            profile = profile,
-            profileName = profileName,
-            tempTarget = tempTarget,
-            carbs = carbsAfterConstraints,
-            cob = cobInfo.displayCob!!,
+        val inputs = WizardBolusExecutor.WizardInputs(
             bg = bgReading.valueToUnits(profileFunction.getUnits()),
-            correction = 0.0,
-            percentageCorrection = percentage,
-            useBg = useBgPref,
-            useCob = useCobPref,
-            includeBolusIOB = useIobPref,
-            includeBasalIOB = useIobPref,
-            useSuperBolus = false,
-            useTT = useTTPref,
-            useTrend = useTrendPref,
-            useAlarm = false
+            carbs = command.carbs,
+            percentage = command.percentage,
+            directCorrection = 0.0,
+            carbTime = 0,
+            useBg = preferences.get(BooleanKey.WearWizardBg),
+            useCob = preferences.get(BooleanKey.WearWizardCob),
+            useIob = preferences.get(BooleanKey.WearWizardIob),
+            useTt = preferences.get(BooleanKey.WearWizardTt),
+            useTrend = preferences.get(BooleanKey.WearWizardTrend),
+            alarm = false,
+            notes = ""
         )
-        val insulinAfterConstraints = bolusWizard.insulinAfterConstraints
-        val minStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)
-        if (abs(insulinAfterConstraints - bolusWizard.calculatedTotalInsulin) >= minStep) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_constraint_bolus_size, bolusWizard.calculatedTotalInsulin))
-            return
-        }
-        if (bolusWizard.calculatedTotalInsulin <= 0 && bolusWizard.carbs <= 0) {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_no_insulin_required))
-            return
-        }
-
-        // Format temp target string if present
-        val tempTargetString = if (useTTPref && tempTarget != null) {
-            profileUtil.toTargetRangeString(tempTarget.lowTarget, tempTarget.highTarget, GlucoseUnit.MGDL)
-        } else null
-
-        // Build structured wizard result
-        // Use the public properties that ARE available
-        val wizardResult = EventData.ActionWizardResult(
-            timestamp = bolusWizard.timeStamp,
-            totalInsulin = bolusWizard.calculatedTotalInsulin,
-            carbs = bolusWizard.carbs,
-            ic = bolusWizard.ic,
-            sens = bolusWizard.sens,
-            insulinFromCarbs = bolusWizard.insulinFromCarbs,
-            insulinFromBG = if (useBgPref) bolusWizard.insulinFromBG else null,
-            insulinFromCOB = if (useCobPref) bolusWizard.insulinFromCOB else null,
-            insulinFromBolusIOB = if (useIobPref) -bolusWizard.insulinFromBolusIOB else null,
-            insulinFromBasalIOB = if (useIobPref) -bolusWizard.insulinFromBasalIOB else null,
-            insulinFromTrend = if (useTrendPref) bolusWizard.insulinFromTrend else null,
-            insulinFromSuperBolus = null,
-            tempTarget = tempTargetString,
-            percentageCorrection = if (percentage != 100) percentage else null,
-            totalBeforePercentage = if (percentage != 100) bolusWizard.totalBeforePercentageAdjustment else null,
-            cob = bolusWizard.cob
-        )
-        wizardBolusExecutor.setPending(bolusWizard.calculatedTotalInsulin, bolusWizard.carbs, bolusWizard.createBolusCalculatorResult(), bolusWizard.timeStamp)
-        sendToWear(wizardResult)
+        contacting()
+        shipPrepared(
+            wizardExecutor.prepare(WizardExecutor.WizardSource.Manual(inputs), rh.gs(app.aaps.core.ui.R.string.boluswizard)),
+            rh.gs(app.aaps.core.ui.R.string.boluswizard)
+        ) { EventData.ActionWizardConfirmed(it) }
     }
 
     private suspend fun handleUserActionPreCheck(command: EventData.ActionUserActionPreCheck) {
@@ -729,41 +668,38 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
-        if (rejectIfAapsClient()) return
-        // Gate + compute + constraint-cap + park-in-slot + author the confirmation all live in the shared executor;
-        // this adapter only relays the master-authored lines to the watch (the SAME lines the phone + client render).
-        when (val result = wizardBolusExecutor.prepareQuickWizard(command.guid)) {
-            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
-            is WizardBolusExecutor.PrepareResult.Preview ->
-                sendToWear(
-                    EventData.ConfirmAction(
-                        // title is the watch's curved header for the lines screen.
-                        rh.gs(app.aaps.core.ui.R.string.boluswizard), message = "",
-                        returnCommand = EventData.ActionWizardConfirmed(result.bolusId),
-                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                    )
-                )
-        }
+        // Role-transparent recompute: MASTER computes + caps + parks + authors lines locally; CLIENT relays a
+        // BolusPrepare(guid) to the master (gated on masterReachable). The watch renders the master's EXACT lines.
+        contacting()
+        shipPrepared(
+            wizardExecutor.prepare(WizardExecutor.WizardSource.QuickWizard(command.guid), rh.gs(app.aaps.core.ui.R.string.boluswizard)),
+            rh.gs(app.aaps.core.ui.R.string.boluswizard)
+        ) { EventData.ActionWizardConfirmed(it) }
     }
 
     // internal (not private) so DataHandlerMobileWearBolusTest can drive it without RxBus scaffolding.
     internal suspend fun handleBolusPreCheck(command: EventData.ActionBolusPreCheck) {
-        // A client must not deliver insulin directly; carbs-only is allowed (it syncs).
-        if (command.insulin > 0 && rejectIfAapsClient()) return
-        // The executor is the single capping authority (constraints, negative-carb clamp), parks the dose, and
-        // authors the confirmation lines. The watch renders those lines and echoes back only the bolusId on
-        // confirm (consume-once) — no locally-capped amount travels back.
-        wizardBolusExecutor.clearPending()
-        sendBatchPreCheck(
-            BatchAction.Bolus(
-                insulin = command.insulin, carbs = command.carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
-                recordOnly = false, notes = "", timestamp = 0L, iCfg = null
-            )
+        // Role-transparent: MASTER caps + parks + authors lines locally; CLIENT relays a BatchPrepare to the master
+        // (gated on masterReachable). The watch renders the master's lines and echoes back only the bolusId on confirm
+        // (consume-once) — no locally-capped amount travels back. The gate is now masterReachable (inside BatchExecutor),
+        // not a blanket client refusal. NOTE: a carbs-only watch *bolus* on an offline client is blocked here — offline
+        // carb entry goes through eCarbs (handleECarbsPreCheck), which stays local + NS-syncs.
+        contacting()
+        shipPrepared(
+            batchExecutor.prepare(
+                listOf(
+                    BatchAction.Bolus(
+                        insulin = command.insulin, carbs = command.carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                        recordOnly = false, notes = "", timestamp = 0L, iCfg = null
+                    )
+                ),
+                Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)
+            ),
+            rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)
         ) { EventData.ActionBolusConfirmed(it) }
     }
 
     internal suspend fun handleECarbsPreCheck(command: EventData.ActionECarbsPreCheck) {
-        wizardBolusExecutor.clearPending()
         sendBatchPreCheck(
             BatchAction.Bolus(
                 insulin = 0.0, carbs = command.carbs, carbsTimeOffsetMinutes = command.carbsTimeShift, carbsDurationHours = command.duration,
@@ -773,23 +709,67 @@ class DataHandlerMobile @Inject constructor(
     }
 
     /**
-     * Shared wear fixed-bolus/eCarbs precheck: cap + park on the master via [WizardBolusExecutor.prepareBatch], then
-     * push the master-authored confirmation [lines][EventData.ConfirmAction.lines] to the watch with the type-specific
-     * confirm command carrying only the parked [bolusId][WizardBolusExecutor.PrepareResult.Preview.bolusId].
+     * Shared wear eCarbs precheck: cap + park + author the confirmation on the MASTER via the role-transparent
+     * [BatchExecutor] (MASTER → local prepareBatch; CLIENT → signed BatchPrepare so the master records them), then push
+     * the master-authored [lines][EventData.ConfirmAction.lines] to the watch with the parked bolusId. The wear ✓
+     * commits by id (consume-once). (Was a local-only `wizardBolusExecutor.prepareBatch`; now everything runs on the master.)
      */
     private suspend fun sendBatchPreCheck(bolus: BatchAction.Bolus, returnCommand: (bolusId: Long) -> EventData) {
-        when (val result = wizardBolusExecutor.prepareBatch(listOf(bolus))) {
-            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
-            is WizardBolusExecutor.PrepareResult.Preview ->
-                sendToWear(
-                    EventData.ConfirmAction(
-                        // title carries the watch's curved header for the lines screen.
-                        rh.gs(app.aaps.core.ui.R.string.overview_treatment_label), message = "",
-                        returnCommand = returnCommand(result.bolusId),
-                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                    )
+        val label = rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)
+        contacting()
+        shipPrepared(batchExecutor.prepare(listOf(bolus), Sources.Wear, label), label, returnCommand)
+    }
+
+    /** Show the watch's transient "Contacting master…" spinner while a CLIENT→master round-trip is in flight (no-op on a master). */
+    private fun contacting() {
+        if (config.AAPSCLIENT) sendToWear(EventData.ContactingMaster)
+    }
+
+    /**
+     * Relay a role-transparent PREPARE ([BatchExecutor]/[WizardExecutor]) result to the watch: a [ActionProgress.Prepared]
+     * becomes the master-authored confirmation lines screen (carrying only the parked [returnCommand] bolusId); any
+     * failure becomes a [sendError]. [title] is the watch's curved header. On a CLIENT the confirm is marked
+     * [EventData.ConfirmAction.deferConfirm] so the watch waits for the master's real commit terminal (no false "sent").
+     */
+    private fun shipPrepared(progress: ActionProgress, title: String, returnCommand: (bolusId: Long) -> EventData) {
+        when (progress) {
+            is ActionProgress.Prepared -> sendToWear(
+                EventData.ConfirmAction(
+                    title, message = "",
+                    returnCommand = returnCommand(progress.id),
+                    lines = progress.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) },
+                    deferConfirm = config.AAPSCLIENT
                 )
+            )
+
+            else                       -> sendError(relayReason(progress))
         }
+    }
+
+    /**
+     * Map a role-transparent COMMIT result: [ActionProgress.Applied] runs [onApplied] and — on a CLIENT — tells the
+     * watch to show its (deferred) success animation via [EventData.RemoteDelivered]; any failure → [sendError].
+     * On a master the watch already showed success locally on ✓ (the confirm wasn't deferred), so no RemoteDelivered.
+     */
+    private fun onCommitResult(progress: ActionProgress, onApplied: () -> Unit = {}) {
+        when (progress) {
+            is ActionProgress.Applied -> {
+                onApplied()
+                if (config.AAPSCLIENT) sendToWear(EventData.RemoteDelivered)
+            }
+
+            else                      -> sendError(relayReason(progress))
+        }
+    }
+
+    /**
+     * Localized failure text for a relayed prepare/commit. [Unconfirmed][ActionProgress.Unconfirmed] (commit timed out —
+     * the dose state is UNKNOWN) gets a distinct, do-not-re-bolus message, NOT the same wording as a definite rejection.
+     */
+    private fun relayReason(progress: ActionProgress): String = when (progress) {
+        is ActionProgress.Unconfirmed -> rh.gs(app.aaps.core.ui.R.string.clientcontrol_unconfirmed_wear)
+        is ActionProgress.Rejected    -> progress.detail ?: rh.gs(progress.reason.failTextResId())
+        else                          -> rh.gs(app.aaps.core.ui.R.string.error)
     }
 
     private suspend fun handleFillPresetPreCheck(command: EventData.ActionFillPresetPreCheck) {
@@ -843,22 +823,17 @@ class DataHandlerMobile @Inject constructor(
 
     }
 
-    // internal + suspend so DataHandlerMobileWearBolusTest can drive it; routes through the shared prepare/confirm.
+    // internal + suspend so DataHandlerMobileWearBolusTest can drive it; routes through the role-transparent relay.
     internal suspend fun handleProfileSwitchPreCheck(command: EventData.ActionProfileSwitchPreCheck) {
-        // Validate (active profile + CPP ranges) + park on the master via the shared batch path; ship its
-        // master-authored lines + bolusId. The wear ✓ then calls confirm(bolusId) → the shared applyProfileSwitch.
-        when (val result = wizardBolusExecutor.prepareBatch(listOf(BatchAction.ProfileSwitch(command.percentage, command.timeShift, command.duration)))) {
-            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
-            is WizardBolusExecutor.PrepareResult.Preview ->
-                sendToWear(
-                    EventData.ConfirmAction(
-                        // title is the watch's curved header for the lines screen.
-                        rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch), message = "",
-                        returnCommand = EventData.ActionProfileSwitchConfirmed(result.bolusId),
-                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                    )
-                )
-        }
+        // Validate (active profile + CPP ranges) + park + author the confirmation on the MASTER via BatchExecutor
+        // (MASTER → local; CLIENT → signed BatchPrepare so the master applies the switch, not the follower locally).
+        // The wear ✓ then commits by bolusId → the shared applyProfileSwitch on the master.
+        val label = rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)
+        contacting()
+        shipPrepared(
+            batchExecutor.prepare(listOf(BatchAction.ProfileSwitch(command.percentage, command.timeShift, command.duration)), Sources.Wear, label),
+            label
+        ) { EventData.ActionProfileSwitchConfirmed(it) }
     }
 
     private fun formatGlucose(value: Double, isMgdl: Boolean): String {
@@ -872,21 +847,12 @@ class DataHandlerMobile @Inject constructor(
     internal suspend fun handleTempTargetPreCheck(action: EventData.ActionTempTargetPreCheck) {
         val presetIsMGDL = profileFunction.getUnits() == GlucoseUnit.MGDL
 
-        // Park the TT on the master via the shared batch path; ship its master-authored lines + bolusId. The wear
-        // ✓ then calls confirm(bolusId) → the shared applyTempTarget (set, or cancel for duration 0).
+        // Park + author the confirmation on the MASTER via BatchExecutor (MASTER → local applyTempTarget;
+        // CLIENT → signed BatchPrepare so the master applies it, not the follower locally). Wear ✓ commits by id.
         suspend fun sendTt(tt: BatchAction.TempTarget) {
-            when (val result = wizardBolusExecutor.prepareBatch(listOf(tt))) {
-                is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
-                is WizardBolusExecutor.PrepareResult.Preview ->
-                    sendToWear(
-                        EventData.ConfirmAction(
-                            // title is the watch's curved header for the lines screen.
-                            rh.gs(app.aaps.core.ui.R.string.temporary_target), message = "",
-                            returnCommand = EventData.ActionTempTargetConfirmed(result.bolusId),
-                            lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                        )
-                    )
-            }
+            val label = rh.gs(app.aaps.core.ui.R.string.temporary_target)
+            contacting()
+            shipPrepared(batchExecutor.prepare(listOf(tt), Sources.Wear, label), label) { EventData.ActionTempTargetConfirmed(it) }
         }
 
         suspend fun sendPreset(reason: TT.Reason) {
@@ -993,26 +959,21 @@ class DataHandlerMobile @Inject constructor(
         if (action.timeStamp != lastAuthorizedRunningModeChangeTS) return sendError(rh.gs(R.string.wear_action_loop_state_unauthorized))
         val newState = lastRunningModes?.elementAtOrNull(action.index) ?: return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
         val mode = newState.state.toRmMode() ?: return sendError(rh.gs(R.string.wear_action_loop_state_invalid))
-        // Park on the master via the shared batch path (which re-validates the transition + caps the duration); ship
-        // its master-authored lines + bolusId. The wear ✓ then calls confirm(bolusId) → the shared applyRunningMode —
-        // the SAME execution path the phone screen and a client use. Title is the watch's curved header for the lines.
-        when (val result = wizardBolusExecutor.prepareBatch(listOf(BatchAction.RunningMode(mode, action.duration ?: 0)))) {
-            is WizardBolusExecutor.PrepareResult.Error   -> sendError(result.message)
-            is WizardBolusExecutor.PrepareResult.Preview ->
-                sendToWear(
-                    EventData.ConfirmAction(
-                        rh.gs(R.string.wear_action_running_mode_title), message = "",
-                        returnCommand = EventData.RunningModeConfirmed(result.bolusId),
-                        lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) }
-                    )
-                )
-        }
+        // Park + author the confirmation on the MASTER via BatchExecutor (which re-validates the transition + caps the
+        // duration). MASTER → local prepareBatch; CLIENT → signed BatchPrepare so the MASTER applies the mode change
+        // (not the follower locally). The wear ✓ then commits by bolusId → the shared applyRunningMode on the master.
+        val label = rh.gs(R.string.wear_action_running_mode_title)
+        contacting()
+        shipPrepared(
+            batchExecutor.prepare(listOf(BatchAction.RunningMode(mode, action.duration ?: 0)), Sources.Wear, label),
+            label
+        ) { EventData.RunningModeConfirmed(it) }
     }
 
     internal suspend fun handleRunningModeConfirmed(action: EventData.RunningModeConfirmed) {
-        // The parked bolusId is consume-once; the executor applies via the shared applyRunningMode. Refresh the wear
-        // tiles afterwards so the next negotiation reflects the new mode (and issues a fresh authorization nonce).
-        wizardBolusExecutor.confirm(action.bolusId, Sources.Wear, ::sendError)
+        // Commit the parked mode change through the relay (MASTER → local applyRunningMode; CLIENT → master applies),
+        // then refresh the wear tiles so the next negotiation reflects the new mode (and issues a fresh nonce).
+        onCommitResult(batchExecutor.commit(action.bolusId, Sources.Wear, rh.gs(R.string.wear_action_running_mode_title)))
         handleAvailableRunningModes()
     }
 

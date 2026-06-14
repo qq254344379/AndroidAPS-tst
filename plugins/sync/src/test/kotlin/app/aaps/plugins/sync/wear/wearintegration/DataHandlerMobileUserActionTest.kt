@@ -4,7 +4,9 @@ import app.aaps.core.data.model.RM
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.automation.AutomationEvent
+import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.maintenance.ImportExportPrefs
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
@@ -17,7 +19,6 @@ import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.TrendCalculator
 import app.aaps.core.objects.runningMode.RunningModeGuard
-import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.plugins.sync.R
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -31,7 +32,6 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyBlocking
 import org.mockito.kotlin.whenever
-import javax.inject.Provider
 
 /**
  * Focused tests for the wear `UserAction` confirm handler in [DataHandlerMobile].
@@ -57,10 +57,11 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
     @Mock private lateinit var uiInteraction: UiInteraction
     @Mock private lateinit var persistenceLayer: PersistenceLayer
     @Mock private lateinit var importExportPrefs: ImportExportPrefs
-    @Mock private lateinit var bolusWizardProvider: Provider<BolusWizard>
     @Mock private lateinit var pumpStatusProvider: PumpStatusProvider
     @Mock private lateinit var runningModeGuard: RunningModeGuard
     @Mock private lateinit var wizardBolusExecutor: WizardBolusExecutor
+    @Mock private lateinit var batchExecutor: BatchExecutor
+    @Mock private lateinit var wizardExecutor: WizardExecutor
     @Mock private lateinit var pump: PumpWithConcentration
     @Mock private lateinit var automation: Automation
     @Mock private lateinit var event: AutomationEvent
@@ -74,8 +75,8 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
             iobCobCalculator, processedTbrEbData, smbGlucoseStatusProvider, profileFunction, profileUtil,
             loop, processedDeviceStatusData, receiverStatusStore, quickWizard, trendCalculator, dateUtil,
             constraintsChecker, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
-            persistenceLayer, importExportPrefs, decimalFormatter, bolusWizardProvider, pumpStatusProvider,
-            ch, runningModeGuard, wizardBolusExecutor
+            persistenceLayer, importExportPrefs, decimalFormatter, pumpStatusProvider,
+            ch, runningModeGuard, wizardBolusExecutor, batchExecutor, wizardExecutor
         )
         // @Inject lateinit field — Dagger is not running, set manually.
         sut.automation = automation
@@ -97,7 +98,7 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
     /** All gating preconditions OK and canRun()==true and re-fetch matches → processEvent runs, no error sent. */
     @Test fun `confirmed runs processEvent on the happy path`() = runTest {
         whenever(automation.findEventById("evt-uuid")).thenReturn(event)
-        runBlocking { whenever(event.canRun()).thenReturn(true) }
+        whenever(event.canRun()).thenReturn(true)
 
         sut.handleUserActionConfirmed(EventData.ActionUserActionConfirmed("evt-uuid", "title"))
 
@@ -140,7 +141,7 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
     /** canRun() returns false → sendError fires, processEvent NOT called. */
     @Test fun `confirmed sends error when canRun is false`() = runTest {
         whenever(automation.findEventById("evt-uuid")).thenReturn(event)
-        runBlocking { whenever(event.canRun()).thenReturn(false) }
+        whenever(event.canRun()).thenReturn(false)
 
         sut.handleUserActionConfirmed(EventData.ActionUserActionConfirmed("evt-uuid", "title"))
 
@@ -163,7 +164,7 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
         whenever(automation.findEventById("evt-uuid"))
             .thenReturn(event)
             .thenReturn(replacement)
-        runBlocking { whenever(event.canRun()).thenReturn(true) }
+        whenever(event.canRun()).thenReturn(true)
 
         sut.handleUserActionConfirmed(EventData.ActionUserActionConfirmed("evt-uuid", "title"))
 
@@ -176,7 +177,7 @@ class DataHandlerMobileUserActionTest : TestBaseWithProfile() {
         whenever(automation.findEventById("evt-uuid"))
             .thenReturn(event)
             .thenReturn(null)
-        runBlocking { whenever(event.canRun()).thenReturn(true) }
+        whenever(event.canRun()).thenReturn(true)
 
         sut.handleUserActionConfirmed(EventData.ActionUserActionConfirmed("evt-uuid", "title"))
 

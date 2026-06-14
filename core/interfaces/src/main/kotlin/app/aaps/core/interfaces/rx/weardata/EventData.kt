@@ -115,26 +115,6 @@ sealed class EventData : Event() {
     data class ActionQuickWizardPreCheck(val guid: String) : EventData()
 
     @Serializable
-    data class ActionWizardResult(
-        val timestamp: Long,
-        val totalInsulin: Double,
-        val carbs: Int,
-        val ic: Double,
-        val sens: Double,
-        val insulinFromCarbs: Double,
-        val insulinFromBG: Double?,
-        val insulinFromCOB: Double?,
-        val insulinFromBolusIOB: Double?,
-        val insulinFromBasalIOB: Double?,
-        val insulinFromTrend: Double?,
-        val insulinFromSuperBolus: Double?,
-        val tempTarget: String?,
-        val percentageCorrection: Int?,
-        val totalBeforePercentage: Double?,
-        val cob: Double
-    ) : EventData()
-
-    @Serializable
     data class ActionUserActionPreCheck(val id: String, val title: String) : EventData()
 
     @Serializable
@@ -207,6 +187,8 @@ sealed class EventData : Event() {
 
     // Mobile <- Wear return
 
+    /** Wear ✓ on a wizard / quick-wizard bolus → the master's parked, consume-once bolusId ([timeStamp] is the
+     *  opaque id field, == the master `wizard.timeStamp`; the wear caller echoes the id `prepareWizard`/`prepareQuickWizard` returned). */
     @Serializable
     data class ActionWizardConfirmed(val timeStamp: Long) : EventData()
 
@@ -478,7 +460,27 @@ sealed class EventData : Event() {
         // Master-authored, color-coded confirmation rows (bolus / carbs / eCarbs / temp target / profile switch /
         // running mode): the watch renders these verbatim, the same lines the phone dialog + every client show.
         val lines: List<ConfirmActionLine> = emptyList(),
+        // [deferConfirm] = the commit is a CLIENT→master round-trip (insulin relayed off a watch-on-client): the watch
+        // must NOT flash the local success animation on ✓, but instead show the "contacting master" spinner and wait
+        // for the master's real terminal ([RemoteDelivered] = success, or an error [ConfirmAction]). False = the
+        // confirm is local/instant (master-paired watch, TT/PS/RM/eCarbs) → the watch shows success immediately as before.
+        val deferConfirm: Boolean = false,
     ) : EventData()
+
+    /**
+     * Mobile→Wear: show a transient "Contacting master…" spinner while a CLIENT→master round-trip is in flight (the
+     * watch-on-client insulin relay). Dismissed when the resolving [ConfirmAction] (prepare lines / error) or
+     * [RemoteDelivered] (commit success) arrives, or by the spinner's own timeout. Emitted only on an AAPSCLIENT.
+     */
+    @Serializable
+    data object ContactingMaster : EventData()
+
+    /**
+     * Mobile→Wear: terminal for a deferred (relayed) commit that the master APPLIED — the watch shows its success
+     * animation now (it deferred it on ✓). Only sent on an AAPSCLIENT; a master-paired watch shows success locally.
+     */
+    @Serializable
+    data object RemoteDelivered : EventData()
 
     @Serializable
     data class SnoozeAlert(val timeStamp: Long) : EventData()
