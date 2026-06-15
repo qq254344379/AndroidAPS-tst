@@ -430,6 +430,164 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         verify(loop).handleRunningModeChange(eq(RM.Mode.RESUME), eq(Action.RECONNECT), eq(Sources.NSClient), any(), eq(0), any())
     }
 
+    // ---- prepareBatch() → confirm(): manual temp basal / extended bolus (relayed from a client, or master-local) ----
+
+    @Test
+    fun prepareBatch_tempBasalPercent_parksAndConfirmAppliesViaCommandQueue() = runTest {
+        stubPassthroughConstraints()
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        whenever(constraintsChecker.applyBasalPercentConstraints(any(), any())).thenAnswer { it.getArgument<Constraint<Int>>(0) }
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isTempBasalCapable = true; it.tempBasalStyle = PumpDescription.PERCENT })
+        whenever(commandQueue.tempBasalPercent(any(), any(), any(), any(), any())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.TempBasal(rate = 150.0, isPercent = true, durationMinutes = 30))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(commandQueue).tempBasalPercent(eq(150), eq(30), eq(true), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_tempBasal_styleMismatch_returnsOutOfSyncAndAppliesNothing() = runTest {
+        stubPassthroughConstraints()
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        // The master's pump is ABSOLUTE-only, but the client relayed a PERCENT action → out of sync → reject, apply nothing.
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isTempBasalCapable = true; it.tempBasalStyle = PumpDescription.ABSOLUTE })
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.TempBasal(rate = 150.0, isPercent = true, durationMinutes = 30)))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(commandQueue, never()).tempBasalPercent(any(), any(), any(), any(), any())
+        verify(commandQueue, never()).tempBasalAbsolute(any(), any(), any(), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_extendedBolus_parksAndConfirmDeliversViaCommandQueue() = runTest {
+        stubPassthroughConstraints()
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(constraintsChecker.applyExtendedBolusConstraints(any())).thenAnswer { it.getArgument<Constraint<Double>>(0) }
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isExtendedBolusCapable = true })
+        whenever(commandQueue.extendedBolus(any(), any())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.ExtendedBolus(insulin = 1.5, durationMinutes = 120))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(commandQueue).extendedBolus(eq(1.5), eq(120))
+    }
+
+    @Test
+    fun prepareBatch_tempBasalAbsolute_appliesViaCommandQueueAbsolute() = runTest {
+        stubPassthroughConstraints()
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        whenever(constraintsChecker.applyBasalConstraints(any(), any())).thenAnswer { it.getArgument<Constraint<Double>>(0) }
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isTempBasalCapable = true; it.tempBasalStyle = PumpDescription.ABSOLUTE })
+        whenever(commandQueue.tempBasalAbsolute(any(), any(), any(), any(), any())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.TempBasal(rate = 1.25, isPercent = false, durationMinutes = 45))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(commandQueue).tempBasalAbsolute(eq(1.25), eq(45), eq(true), any(), any())
+        verify(commandQueue, never()).tempBasalPercent(any(), any(), any(), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_tempBasalZeroPercent_isAllowedNotRejected() = runTest {
+        // A 0% temp basal is a valid "suspend basal" command — it must NOT be rejected like a 0 U extended bolus.
+        stubPassthroughConstraints()
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(profileFunction.getProfile()).thenReturn(mock<EffectiveProfile>())
+        whenever(constraintsChecker.applyBasalPercentConstraints(any(), any())).thenAnswer { it.getArgument<Constraint<Int>>(0) }
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isTempBasalCapable = true; it.tempBasalStyle = PumpDescription.PERCENT })
+        whenever(commandQueue.tempBasalPercent(any(), any(), any(), any(), any())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.TempBasal(rate = 0.0, isPercent = true, durationMinutes = 30))) as WizardBolusExecutor.PrepareResult.Preview
+        executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        verify(commandQueue).tempBasalPercent(eq(0), eq(30), eq(true), any(), any())
+    }
+
+    @Test
+    fun prepareBatch_extendedBolus_cappedToZero_returnsErrorAndDeliversNothing() = runTest {
+        // Closed loop / safety can cap the EB to 0 → reject (no empty confirmation, no phantom delivery).
+        stubPassthroughConstraints()
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        val zero = mock<Constraint<Double>>()
+        whenever(zero.value()).thenReturn(0.0)
+        whenever(constraintsChecker.applyExtendedBolusConstraints(any())).thenReturn(zero)
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isExtendedBolusCapable = true })
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.ExtendedBolus(insulin = 1.0, durationMinutes = 30)))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(commandQueue, never()).extendedBolus(any(), any())
+    }
+
+    @Test
+    fun prepareBatch_cancelTempBasal_parksAndConfirmCancelsViaCommandQueue() = runTest {
+        stubPassthroughConstraints()
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isTempBasalCapable = true })
+        whenever(commandQueue.cancelTempBasal(any(), any())).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.CancelTempBasal)) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(commandQueue).cancelTempBasal(eq(true), any())
+    }
+
+    @Test
+    fun prepareBatch_cancelExtendedBolus_parksAndConfirmCancelsViaCommandQueue() = runTest {
+        stubPassthroughConstraints()
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isInitialized()).thenReturn(true)
+        whenever(pump.pumpDescription).thenReturn(PumpDescription().also { it.isExtendedBolusCapable = true })
+        whenever(commandQueue.cancelExtended()).thenReturn(pumpEnactResultProvider.get().success(true))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.CancelExtendedBolus)) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(commandQueue).cancelExtended()
+    }
+
     // ---- recompute paths reject a net-zero dose instead of parking an empty confirmation ----
 
     @Test

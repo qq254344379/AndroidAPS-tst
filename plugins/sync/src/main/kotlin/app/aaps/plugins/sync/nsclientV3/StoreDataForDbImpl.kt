@@ -25,7 +25,6 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.StoreDataForDb
-import app.aaps.core.interfaces.pump.VirtualPump
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.interfaces.Preferences
 import kotlinx.coroutines.CoroutineScope
@@ -47,7 +46,6 @@ class StoreDataForDbImpl @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val preferences: Preferences,
     private val config: Config,
-    private val virtualPump: VirtualPump,
     private val nsClientRepository: NSClientRepository,
     @ApplicationScope private val appScope: CoroutineScope
 ) : StoreDataForDb {
@@ -293,7 +291,8 @@ class StoreDataForDbImpl @Inject constructor(
 
         snapshotAndClear(extendedBoluses)?.chunked(chunk)?.forEach { batch ->
             val result = persistenceLayer.syncNsExtendedBoluses(batch.toMutableList(), doLog = !fullSync)
-            if (result.inserted.any { it.isEmulatingTempBasal }) virtualPump.fakeDataDetected = true
+            // (The client no longer derives "pump fakes temps via EB" from synced data — it is mirrored read-only from
+            // the master's RunningConfiguration onto VirtualPump.fakeDataDetected; see RunningConfigurationImpl.)
             inserted.add(EB::class.java.simpleName, result.inserted.size)
             invalidated.add(EB::class.java.simpleName, result.invalidated.size)
             ended.add(EB::class.java.simpleName, result.ended.size)

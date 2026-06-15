@@ -6,13 +6,11 @@ import app.aaps.core.data.model.IDs
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.StoreDataForDb
-import app.aaps.core.interfaces.pump.VirtualPump
 import app.aaps.core.interfaces.source.BgSource
 import app.aaps.core.interfaces.source.NSClientSource
 import app.aaps.core.interfaces.sync.DataSyncSelector
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.LongNonKey
-import app.aaps.plugins.sync.nsclientV3.StoreDataForDbImpl
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientLongKey
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -35,7 +33,6 @@ import org.mockito.kotlin.whenever
 class DataSyncSelectorV3Test : TestBaseWithProfile() {
 
     @Mock lateinit var persistenceLayer: PersistenceLayer
-    @Mock lateinit var virtualPump: VirtualPump
     @Mock lateinit var nsClientRepository: NSClientRepository
     @Mock lateinit var nsClientV3Plugin: NSClientV3Plugin
 
@@ -44,7 +41,7 @@ class DataSyncSelectorV3Test : TestBaseWithProfile() {
 
     @BeforeEach
     fun setUp() {
-        storeDataForDb = StoreDataForDbImpl(aapsLogger, persistenceLayer, preferences, config, virtualPump, nsClientRepository, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        storeDataForDb = StoreDataForDbImpl(aapsLogger, persistenceLayer, preferences, config, nsClientRepository, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         sut = DataSyncSelectorV3(preferences, aapsLogger, dateUtil, profileFunction, activePlugin, profileRepository, persistenceLayer, storeDataForDb, config, nsClientRepository, dagger.Lazy { nsClientV3Plugin })
     }
 

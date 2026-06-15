@@ -27,7 +27,6 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.NSAlarm
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.profile.ProfileFunction
-import app.aaps.core.interfaces.pump.VirtualPump
 import app.aaps.core.interfaces.source.NSClientSource
 import app.aaps.core.interfaces.sync.DataSyncSelector
 import app.aaps.core.interfaces.sync.NsClient
@@ -72,7 +71,6 @@ internal class NSClientV3PluginTest : TestBaseWithProfile() {
     @Mock lateinit var dataSyncSelectorV3: DataSyncSelectorV3
     @Mock lateinit var nsAndroidClient: NSAndroidClient
     @Mock lateinit var nsClientSource: NSClientSource
-    @Mock lateinit var virtualPump: VirtualPump
     @Mock lateinit var mockedProfileFunction: ProfileFunction
     @Mock lateinit var persistenceLayer: PersistenceLayer
     @Mock lateinit var l: L
@@ -92,7 +90,7 @@ internal class NSClientV3PluginTest : TestBaseWithProfile() {
         whenever(persistenceLayer.observeAnyChange()).thenReturn(emptyFlow())
         whenever(receiverDelegate.connectivityStatusFlow).thenReturn(MutableStateFlow(ReceiverDelegate.ConnectivityStatus("", allowed = false, connected = false)))
         whenever(insulin.iCfg).thenReturn(insulinConfiguration)
-        storeDataForDb = StoreDataForDbImpl(aapsLogger, persistenceLayer, preferences, config, virtualPump, nsClientRepository, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        storeDataForDb = StoreDataForDbImpl(aapsLogger, persistenceLayer, preferences, config, nsClientRepository, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         sut =
             NSClientV3Plugin(
                 aapsLogger, rh, preferences, rxBus, context,

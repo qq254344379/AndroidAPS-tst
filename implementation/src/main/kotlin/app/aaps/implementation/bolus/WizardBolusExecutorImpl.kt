@@ -8,6 +8,7 @@ import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
+import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
@@ -34,6 +35,7 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
+import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -114,6 +116,10 @@ class WizardBolusExecutorImpl @Inject constructor(
         val tempTarget: BatchAction.TempTarget? = null,
         val profileSwitch: BatchAction.ProfileSwitch? = null,
         val runningMode: BatchAction.RunningMode? = null,
+        val tempBasal: BatchAction.TempBasal? = null,
+        val extendedBolus: BatchAction.ExtendedBolus? = null,
+        val cancelTempBasal: Boolean = false,
+        val cancelExtendedBolus: Boolean = false,
         val recordOnly: Boolean = false,
         val iCfg: ICfg? = null,
         val bolusTimestamp: Long? = null
@@ -250,6 +256,10 @@ class WizardBolusExecutorImpl @Inject constructor(
         val tt = actions.filterIsInstance<BatchAction.TempTarget>().firstOrNull() // ≤1 by construction
         val ps = actions.filterIsInstance<BatchAction.ProfileSwitch>().firstOrNull() // ≤1 by construction
         val rm = actions.filterIsInstance<BatchAction.RunningMode>().firstOrNull() // ≤1 by construction
+        val tb = actions.filterIsInstance<BatchAction.TempBasal>().firstOrNull() // ≤1 by construction
+        val eb = actions.filterIsInstance<BatchAction.ExtendedBolus>().firstOrNull() // ≤1 by construction
+        val ctb = actions.filterIsInstance<BatchAction.CancelTempBasal>().firstOrNull() // ≤1 by construction
+        val ceb = actions.filterIsInstance<BatchAction.CancelExtendedBolus>().firstOrNull() // ≤1 by construction
         val recordOnly = bolus?.recordOnly == true
         // Gate + pump-init only for an actual INSULIN delivery — carbs-only, a record-only log, and a TT-only batch
         // are always allowed (mirrors executeBolus, which gates only when insulin > 0).
@@ -290,7 +300,48 @@ class WizardBolusExecutorImpl @Inject constructor(
             if ((rm.mode == RM.Mode.SUSPENDED_BY_USER || rm.mode == RM.Mode.DISCONNECTED_PUMP) && rm.durationMinutes <= 0)
                 return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.valueoutofrange, "Duration"))
         }
-        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null && rm == null)
+        // Temp basal (manual): validate against the MASTER's pump, then cap. A client mirrors the master's pump via
+        // RunningConfiguration, so a capability/style mismatch means the client's config is briefly out of sync → reject.
+        var cappedTb: BatchAction.TempBasal? = null
+        if (tb != null) {
+            val pump = activePlugin.activePump
+            if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
+            val masterIsPercent = pump.pumpDescription.tempBasalStyle and PumpDescription.PERCENT == PumpDescription.PERCENT
+            if (!pump.pumpDescription.isTempBasalCapable || tb.isPercent != masterIsPercent)
+                return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_pump_out_of_sync))
+            runningModeGuard.rejectionMessage(if (tb.rate == 0.0) PumpCommandGate.CommandKind.TEMP_BASAL_ZERO else PumpCommandGate.CommandKind.TEMP_BASAL_NONZERO)
+                ?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
+            val profile = profileFunction.getProfile() ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_profile_set))
+            val cappedRate = if (tb.isPercent)
+                constraintChecker.applyBasalPercentConstraints(ConstraintObject(tb.rate.toInt(), aapsLogger), profile).value().toDouble()
+            else
+                constraintChecker.applyBasalConstraints(ConstraintObject(tb.rate, aapsLogger), profile).value()
+            cappedTb = tb.copy(rate = cappedRate)
+        }
+        // Extended bolus (manual): validate + cap like a bolus; a net-zero after caps (e.g. closed loop) is rejected.
+        var cappedEb: BatchAction.ExtendedBolus? = null
+        if (eb != null) {
+            val pump = activePlugin.activePump
+            if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
+            if (!pump.pumpDescription.isExtendedBolusCapable) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_pump_out_of_sync))
+            runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.EXTENDED_BOLUS)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
+            val cappedInsulin = constraintChecker.applyExtendedBolusConstraints(ConstraintObject(eb.insulin, aapsLogger)).value()
+            if (cappedInsulin <= 0.0) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_insulin_required))
+            cappedEb = eb.copy(insulin = cappedInsulin)
+        }
+        // Cancel a running TBR / extended bolus on the MASTER's pump — no cap, no running-mode gate (a stop is always
+        // allowed). Validate only that the master's pump is up + capable (a stale client config → reject).
+        if (ctb != null) {
+            val pump = activePlugin.activePump
+            if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
+            if (!pump.pumpDescription.isTempBasalCapable) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_pump_out_of_sync))
+        }
+        if (ceb != null) {
+            val pump = activePlugin.activePump
+            if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
+            if (!pump.pumpDescription.isExtendedBolusCapable) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_pump_out_of_sync))
+        }
+        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null && rm == null && tb == null && eb == null && ctb == null && ceb == null)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_action_selected))
         val bolusId = dateUtil.now()
         evictStalePending()
@@ -298,14 +349,19 @@ class WizardBolusExecutorImpl @Inject constructor(
             insulin = insulin, carbs = carbs, bcr = null, bolusId = bolusId, entry = null,
             carbTimeMinutes = bolus?.carbsTimeOffsetMinutes ?: 0, notes = bolus?.notes, mode = BolusMode.FIXED,
             eventType = eventType, carbsDurationHours = bolus?.carbsDurationHours ?: 0,
-            tempTarget = tt, profileSwitch = ps, runningMode = rm, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L }
+            tempTarget = tt, profileSwitch = ps, runningMode = rm, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L },
+            tempBasal = cappedTb, extendedBolus = cappedEb, cancelTempBasal = ctb != null, cancelExtendedBolus = ceb != null
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
         val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) +
             (tt?.let { buildTtLine(it) } ?: emptyList()) +
             (ps?.let { buildPsLine(it) } ?: emptyList()) +
-            (rm?.let { buildRmLine(it) } ?: emptyList())
+            (rm?.let { buildRmLine(it) } ?: emptyList()) +
+            (cappedTb?.let { buildTempBasalLine(it, tb) } ?: emptyList()) +
+            (cappedEb?.let { buildExtendedBolusLine(it, eb) } ?: emptyList()) +
+            (ctb?.let { buildCancelLine(R.string.tempbasal_label) } ?: emptyList()) +
+            (ceb?.let { buildCancelLine(R.string.extended_bolus) } ?: emptyList())
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
@@ -365,6 +421,11 @@ class WizardBolusExecutorImpl @Inject constructor(
             p.profileSwitch?.let { applyProfileSwitch(it, source) }
             // A running-mode change is likewise independent of any dose (an RM-only batch no-ops the deliver(0,0)).
             p.runningMode?.let { applyRunningMode(it, source) }
+            // Pump-direct manual actions (relayed from a client, or a master-local dialog) — independent of any dose.
+            p.tempBasal?.let { applyTempBasal(it, source, onError) }
+            p.extendedBolus?.let { applyExtendedBolus(it, source, onError) }
+            if (p.cancelTempBasal) applyCancelTempBasal(source, onError)
+            if (p.cancelExtendedBolus) applyCancelExtendedBolus(source, onError)
             return WizardBolusExecutor.ConfirmResult.Delivered
         }
 
@@ -654,6 +715,63 @@ class WizardBolusExecutorImpl @Inject constructor(
         RM.Mode.RESUME                                                           -> if (loop.runningMode() == RM.Mode.DISCONNECTED_PUMP) rh.gs(R.string.pump_reconnect) else rh.gs(R.string.resumeloop)
         RM.Mode.SUPER_BOLUS, RM.Mode.SUSPENDED_BY_PUMP, RM.Mode.SUSPENDED_BY_DST -> rh.gs(R.string.running_mode)
     }
+
+    /** Apply a batch temp basal on the master's pump (already capped + style-validated in prepareBatch). */
+    private suspend fun applyTempBasal(tb: BatchAction.TempBasal, source: Sources, onError: (String) -> Unit) {
+        val profile = profileFunction.getProfile() ?: return
+        val result = if (tb.isPercent) {
+            uel.log(action = Action.TEMP_BASAL, source = source, listValues = listOf(ValueWithUnit.Percent(tb.rate.toInt()), ValueWithUnit.Minute(tb.durationMinutes)))
+            commandQueue.tempBasalPercent(tb.rate.toInt(), tb.durationMinutes, true, profile, PumpSync.TemporaryBasalType.NORMAL)
+        } else {
+            uel.log(action = Action.TEMP_BASAL, source = source, listValues = listOf(ValueWithUnit.Insulin(tb.rate), ValueWithUnit.Minute(tb.durationMinutes)))
+            commandQueue.tempBasalAbsolute(tb.rate, tb.durationMinutes, true, profile, PumpSync.TemporaryBasalType.NORMAL)
+        }
+        if (!result.success) onError(result.comment)
+    }
+
+    /** The TBR line(s) — rate (percent or absolute) + duration, with a cap warning when reduced. */
+    private fun buildTempBasalLine(capped: BatchAction.TempBasal, original: BatchAction.TempBasal?): List<ConfirmationLine> {
+        val out = mutableListOf<ConfirmationLine>()
+        val rateStr = if (capped.isPercent) rh.gs(R.string.format_percent, capped.rate.toInt()) else rh.gs(R.string.pump_base_basal_rate, capped.rate)
+        out += ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.tempbasal_label), rateStr))
+        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, capped.durationMinutes)))
+        if (original != null && capped.rate != original.rate) out += ConfirmationLine(ConfirmationRole.WARNING, rh.gs(R.string.constraint_applied))
+        return out
+    }
+
+    /** Apply a batch extended bolus on the master's pump (already capped in prepareBatch). */
+    private suspend fun applyExtendedBolus(eb: BatchAction.ExtendedBolus, source: Sources, onError: (String) -> Unit) {
+        uel.log(action = Action.EXTENDED_BOLUS, source = source, listValues = listOf(ValueWithUnit.Insulin(eb.insulin), ValueWithUnit.Minute(eb.durationMinutes)))
+        val result = commandQueue.extendedBolus(eb.insulin, eb.durationMinutes)
+        if (!result.success) onError(result.comment)
+    }
+
+    /** The extended-bolus line(s) — insulin + duration, with a cap warning when reduced. */
+    private fun buildExtendedBolusLine(capped: BatchAction.ExtendedBolus, original: BatchAction.ExtendedBolus?): List<ConfirmationLine> {
+        val out = mutableListOf<ConfirmationLine>()
+        out += ConfirmationLine(ConfirmationRole.BOLUS, rh.gs(R.string.format_insulin_units, capped.insulin))
+        out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, capped.durationMinutes)))
+        if (original != null && abs(capped.insulin - original.insulin) > 0.01) out += ConfirmationLine(ConfirmationRole.WARNING, rh.gs(R.string.constraint_applied))
+        return out
+    }
+
+    /** Cancel a running temp basal on the master's pump. */
+    private suspend fun applyCancelTempBasal(source: Sources, onError: (String) -> Unit) {
+        uel.log(action = Action.CANCEL_TEMP_BASAL, source = source)
+        val result = commandQueue.cancelTempBasal(enforceNew = true)
+        if (!result.success) onError(result.comment)
+    }
+
+    /** Cancel a running extended bolus on the master's pump. */
+    private suspend fun applyCancelExtendedBolus(source: Sources, onError: (String) -> Unit) {
+        uel.log(action = Action.CANCEL_EXTENDED_BOLUS, source = source)
+        val result = commandQueue.cancelExtended()
+        if (!result.success) onError(result.comment)
+    }
+
+    /** The single cancel line — "Cancel: Temp basal" / "Cancel: Extended bolus" ([labelRes] = the cancelled action). */
+    private fun buildCancelLine(labelRes: Int): List<ConfirmationLine> =
+        listOf(ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.cancel), rh.gs(labelRes))))
 
     override suspend fun deliverWizardBolus(
         insulin: Double,

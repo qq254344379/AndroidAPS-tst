@@ -27,8 +27,8 @@ class BatchExecutorImpl @Inject constructor(
             wizardBolusExecutor.prepareBatch(actions)
         }
 
-    override suspend fun commit(id: Long, source: Sources, label: String): ActionProgress =
-        roleBranch.commit(label, ClientControlActionDispatcher.Command.BolusCommit(id)) { onError ->
+    override suspend fun commit(id: Long, source: Sources, label: String, pumpDirect: Boolean): ActionProgress =
+        roleBranch.commit(label, ClientControlActionDispatcher.Command.BolusCommit(id, pumpDirect = pumpDirect)) { onError ->
             // Decision-B bundle order (bolus + TT) lives in the executor's confirm().
             wizardBolusExecutor.confirm(id, source, onError)
         }

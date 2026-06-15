@@ -81,8 +81,12 @@ interface ClientControlActionDispatcher {
         /** Prepare a QuickWizard (WIZARD-mode) bolus on the master ([guid] = the synced entry); master returns the preview. */
         data class BolusPrepare(val guid: String) : Command
 
-        /** Confirm a prepared bolus by [bolusId] (master delivers once); [asAdvisor] = the high-BG correction-only branch. */
-        data class BolusCommit(val bolusId: Long, val asAdvisor: Boolean = false) : Command
+        /**
+         * Confirm a prepared bolus by [bolusId] (master delivers once); [asAdvisor] = the high-BG correction-only branch.
+         * [pumpDirect] = the commit drives a slow pump command on the master (a TBR/extended-bolus set or cancel) whose
+         * ACK can't return within the default round-trip window → the client waits the longer pump TTL instead.
+         */
+        data class BolusCommit(val bolusId: Long, val asAdvisor: Boolean = false, val pumpDirect: Boolean = false) : Command
 
         /** Prepare a MANUAL bolus-wizard bolus on the master from raw [inputs] (master recomputes + returns the preview). */
         data class WizardPrepare(val inputs: WizardBolusExecutor.WizardInputs) : Command

@@ -63,4 +63,28 @@ sealed interface BatchAction {
         val mode: RM.Mode,
         val durationMinutes: Int = 0
     ) : BatchAction
+
+    /**
+     * A manual temp basal. [rate] is a percent (when [isPercent] = true) or an absolute rate in U/h. The dialog
+     * produces it in the pump's native style; on a client the VirtualPump mirrors the master's pump (via
+     * RunningConfiguration), so the style is already the master's. The master re-validates against its CURRENT pump
+     * and rejects on a style mismatch (client config briefly out of sync), then caps + applies it.
+     */
+    data class TempBasal(
+        val rate: Double,
+        val isPercent: Boolean,
+        val durationMinutes: Int
+    ) : BatchAction
+
+    /** A manual extended bolus: [insulin] U over [durationMinutes] (mirrors [Bolus] — the master caps + delivers). */
+    data class ExtendedBolus(
+        val insulin: Double,
+        val durationMinutes: Int
+    ) : BatchAction
+
+    /** Stop the running temp basal on the master's pump (the master cancels its CURRENT TBR — no params to relay). */
+    data object CancelTempBasal : BatchAction
+
+    /** Stop the running extended bolus on the master's pump (the master cancels its CURRENT extended bolus). */
+    data object CancelExtendedBolus : BatchAction
 }

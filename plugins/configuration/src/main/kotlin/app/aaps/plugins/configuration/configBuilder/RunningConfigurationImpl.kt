@@ -12,6 +12,7 @@ import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.pump.PumpSync
+import app.aaps.core.interfaces.pump.VirtualPump
 import app.aaps.core.interfaces.pump.defs.fillFor
 import app.aaps.core.interfaces.scenes.ActiveSceneSnapshot
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
@@ -63,6 +64,9 @@ class RunningConfigurationImpl @Inject constructor(
             // (ActivePlugin* keys + the flat syncedPrefs cold block).
             json.put("syncedPrefs", buildSyncedPrefs())
             json.put("pump", pumpInterface.model().description)
+            // Mirror the master's active-pump faking flag READ-ONLY to clients (so a follower's VirtualPump shows the
+            // right EB capability + interprets emulated-temp EBs correctly) — computed here on the master, never on the client.
+            json.put("isFakingTempsByExtendedBoluses", pumpInterface.isFakingTempsByExtendedBoluses)
             json.put("version", config.VERSION_NAME)
         } catch (e: JSONException) {
             aapsLogger.error("Unhandled exception", e)
@@ -171,6 +175,10 @@ class RunningConfigurationImpl @Inject constructor(
         }
 
         configuration.syncedPrefs?.let { applySyncedPrefs(it) }
+        // Read-only mirror of the master's active-pump faking flag onto this client's VirtualPump. Applied verbatim
+        // (incl. false, so turning it off on the master propagates); null = older master → leave the client flag as-is.
+        // activePumpInternal (the real plugin) — NOT activePump, which is a PumpWithConcentration wrapper that isn't a VirtualPump.
+        configuration.isFakingTempsByExtendedBoluses?.let { (activePlugin.activePumpInternal as? VirtualPump)?.fakeDataDetected = it }
     }
 
     // called in NSClient mode only — apply the hot doc (active scene + computed runtime flags).

@@ -21,19 +21,18 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.nsclient.NSClientRepository
-import app.aaps.core.interfaces.pump.VirtualPump
 import app.aaps.core.keys.BooleanKey
 import app.aaps.shared.tests.TestBaseWithProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -54,7 +53,6 @@ import org.mockito.kotlin.whenever
 class StoreDataForDbImplTest : TestBaseWithProfile() {
 
     @Mock private lateinit var persistenceLayer: PersistenceLayer
-    @Mock private lateinit var virtualPump: VirtualPump
     @Mock private lateinit var nsClientRepository: NSClientRepository
 
     private lateinit var storeDataForDb: StoreDataForDbImpl
@@ -165,7 +163,6 @@ class StoreDataForDbImplTest : TestBaseWithProfile() {
             persistenceLayer = persistenceLayer,
             preferences = preferences,
             config = config,
-            virtualPump = virtualPump,
             nsClientRepository = nsClientRepository,
             appScope = testAppScope
         )

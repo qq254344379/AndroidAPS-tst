@@ -6,7 +6,9 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.PumpSync
+import app.aaps.core.interfaces.pump.VirtualPump
 import app.aaps.core.interfaces.scenes.ActiveSceneSnapshot
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.keys.BooleanNonKey
@@ -22,9 +24,11 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
+import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.isNull
+import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
@@ -123,5 +127,35 @@ internal class RunningConfigurationImplTest {
         whenever(preferences.get(DoubleKey.AutosensMin.key)).thenReturn(DoubleKey.AutosensMin)
         sut.applyCold(NSRunningConfiguration(syncedPrefs = mapOf(DoubleKey.AutosensMin.key to "0.85")))
         verify(preferences).putRemote(DoubleKey.AutosensMin, 0.85, 0L)
+    }
+
+    /**
+     * The master's computed `isFakingTempsByExtendedBoluses` rides the cold doc; the client mirrors it READ-ONLY onto
+     * its VirtualPump.fakeDataDetected. A `true` propagates.
+     */
+    @Test
+    fun applyColdMirrorsFakingTrueOntoVirtualPump() {
+        val pump = mock<Pump>(extraInterfaces = arrayOf(VirtualPump::class))
+        whenever(activePlugin.activePumpInternal).thenReturn(pump)
+        sut.applyCold(NSRunningConfiguration(isFakingTempsByExtendedBoluses = true))
+        verify(pump as VirtualPump).fakeDataDetected = true
+    }
+
+    /** Mirror is verbatim, not one-way: `false` propagates too (the master turning the mode off reaches the client). */
+    @Test
+    fun applyColdMirrorsFakingFalseOntoVirtualPump() {
+        val pump = mock<Pump>(extraInterfaces = arrayOf(VirtualPump::class))
+        whenever(activePlugin.activePumpInternal).thenReturn(pump)
+        sut.applyCold(NSRunningConfiguration(isFakingTempsByExtendedBoluses = false))
+        verify(pump as VirtualPump).fakeDataDetected = false
+    }
+
+    /** Older master omits the field (null) → the client's flag is left untouched (no write). */
+    @Test
+    fun applyColdNullFakingLeavesVirtualPumpUntouched() {
+        val pump = mock<Pump>(extraInterfaces = arrayOf(VirtualPump::class))
+        whenever(activePlugin.activePumpInternal).thenReturn(pump)
+        sut.applyCold(NSRunningConfiguration())
+        verify(pump as VirtualPump, never()).fakeDataDetected = any()
     }
 }

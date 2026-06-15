@@ -23,6 +23,10 @@ interface BatchExecutor {
      * Commit a prepared batch by [id] (the `bolusId` from a prior [prepare]'s [ActionProgress.Prepared]): the
      * master applies the parked bundle (bolus + TT per the ordering rule) EXACTLY once. Client → round-trip; master →
      * local. Returns [ActionProgress.Applied] or a failure ([ActionProgress.Rejected.NoPendingBolus] if already consumed).
+     *
+     * [pumpDirect] = this commit drives a slow pump command on the master (a TBR / extended-bolus SET or CANCEL) that
+     * blocks until the pump enacts it — the client then waits the longer pump round-trip window for the real result
+     * instead of giving up early. Leave false for a bolus/carbs commit (fast queue-ack + progress mirror).
      */
-    suspend fun commit(id: Long, source: Sources, label: String): ActionProgress
+    suspend fun commit(id: Long, source: Sources, label: String, pumpDirect: Boolean = false): ActionProgress
 }

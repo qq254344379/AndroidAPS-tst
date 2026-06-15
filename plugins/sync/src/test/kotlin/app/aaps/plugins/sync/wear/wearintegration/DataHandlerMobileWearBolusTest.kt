@@ -16,7 +16,6 @@ import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.FailureReason
-import app.aaps.core.keys.BooleanKey
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.maintenance.ImportExportPrefs
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
@@ -29,6 +28,7 @@ import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.rx.weardata.EventData.RunningModeList.AvailableRunningMode
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.TrendCalculator
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.shared.tests.TestBaseWithProfile
@@ -217,11 +217,11 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
     @Test fun `bolus confirm relays the parked id through BatchExecutor commit`() {
         // The confirm runs through the async onEvent chain → timeout-verify (mirrors the other wiring tests).
         // (Applied → RemoteDelivered to the watch is onCommitResult logic, gated on AAPSCLIENT; not captured here.)
-        runBlocking { whenever(batchExecutor.commit(any(), any(), any())).thenReturn(ActionProgress.Applied) }
+        runBlocking { whenever(batchExecutor.commit(any(), any(), any(), any())).thenReturn(ActionProgress.Applied) }
 
         rxBus.send(EventData.ActionBolusConfirmed(5L))
 
-        verifyBlocking(batchExecutor, timeout(2000)) { commit(eq(5L), any(), any()) }
+        verifyBlocking(batchExecutor, timeout(2000)) { commit(eq(5L), any(), any(), any()) }
     }
 
     @Test fun `ecarbs precheck maps to a fixed carbs-only bolus carrying offset plus duration with an ECarbs confirm`() = runTest {
@@ -353,12 +353,12 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
 
     @Test fun `running mode confirmed commits the parked bolusId via the relay`() = runTest {
         // The post-confirm tile refresh short-circuits when no profile is valid (no pumpDescription stub needed).
-        whenever(batchExecutor.commit(any(), any(), any())).thenReturn(ActionProgress.Applied)
+        whenever(batchExecutor.commit(any(), any(), any(), any())).thenReturn(ActionProgress.Applied)
         whenever(profileFunction.isProfileValid(any())).thenReturn(false)
 
         sut.handleRunningModeConfirmed(EventData.RunningModeConfirmed(777L))
 
-        verifyBlocking(batchExecutor) { commit(eq(777L), eq(Sources.Wear), any()) }
+        verifyBlocking(batchExecutor) { commit(eq(777L), eq(Sources.Wear), any(), any()) }
     }
 
     // --- Full wizard (unified onto the shared prepareWizard/confirm + master-authored lines) ---------------

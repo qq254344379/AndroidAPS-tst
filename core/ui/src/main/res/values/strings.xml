@@ -413,6 +413,7 @@
     <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <string name="clientcontrol_fail_not_paired">This device isn\'t paired with a master.</string>
     <string name="clientcontrol_fail_not_reachable">The master is offline.</string>
+    <string name="clientcontrol_pump_out_of_sync" comment="Shown when a follower relays a temp basal / extended bolus but its cached pump type no longer matches the master\'s pump">Pump configuration out of sync with the master. Please try again.</string>
     <string name="clientcontrol_fail_no_reply">No reply from the master in time.</string>
     <string name="clientcontrol_fail_expired">The command expired before the master applied it.</string>
     <string name="clientcontrol_fail_busy">Another action is already in progress.</string>

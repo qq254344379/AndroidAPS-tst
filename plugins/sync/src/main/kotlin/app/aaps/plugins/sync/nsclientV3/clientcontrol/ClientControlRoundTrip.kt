@@ -87,6 +87,13 @@ class ClientControlRoundTrip @Inject constructor(
         // is shorter than the client's give-up (8 s + 2 s margin) so the master never applies a command
         // AFTER the client has stopped waiting; the 2 s margin (and pollAck) catch a last-moment ack.
         const val ROUND_TRIP_TTL_MS = 8_000L
+
+        // A pump-direct commit (a TBR / extended-bolus SET or CANCEL) blocks the master's confirm() until the pump
+        // actually enacts it. Unlike a bolus (whose DELIVERY can take minutes — hence its queue-ack + progress mirror),
+        // a TBR/cancel is bounded by the master↔pump CONNECTION time (a BLE reconnect is at most ~1 min), and the real
+        // enacted result (Ok/Failed) is worth waiting for. So these get a 1-min window; the master enforces the matching
+        // validUntil, so it still never applies AFTER the client gives up.
+        const val PUMP_ROUND_TRIP_TTL_MS = 60_000L
         const val PROPAGATION_MARGIN_MS = 2_000L
         const val PING_TTL_MS = 10_000L
     }
@@ -289,7 +296,9 @@ class ClientControlRoundTrip @Inject constructor(
 
                 is ClientControlActionDispatcher.Command.BatchPrepare    -> ClientControlMessage.BatchPrepare(command.actions.map { it.toDto() })
             }
-            val validUntil = dateUtil.now() + ROUND_TRIP_TTL_MS
+            // A pump-direct commit waits the longer window (the master blocks on the pump); everything else is fast-or-never.
+            val ttl = if (command is ClientControlActionDispatcher.Command.BolusCommit && command.pumpDirect) PUMP_ROUND_TRIP_TTL_MS else ROUND_TRIP_TTL_MS
+            val validUntil = dateUtil.now() + ttl
             val tracked = publisher.publishTracked(message, validUntil)
             val counter = when (val r = tracked.result) {
                 is ClientControlSendResult.NotPaired     -> {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.bottomBarSafeArea
@@ -56,37 +58,33 @@ fun TempBasalDialogScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // The master's prepared confirmation (bolusId + its lines), set via the ShowConfirmation side effect.
+    var confirmation by remember { mutableStateOf<Pair<Long, List<ConfirmationLine>>?>(null) }
+    var showNoAction by rememberSaveable { mutableStateOf(false) }
+
     // Observe side effects
     LaunchedEffect(Unit) {
         viewModel.sideEffect.collect { effect ->
             when (effect) {
-                is TempBasalDialogViewModel.SideEffect.ShowDeliveryError -> {
-                    onShowDeliveryError(effect.comment)
-                }
+                is TempBasalDialogViewModel.SideEffect.ShowDeliveryError -> onShowDeliveryError(effect.comment)
+                is TempBasalDialogViewModel.SideEffect.ShowNoActionDialog -> showNoAction = true
+                is TempBasalDialogViewModel.SideEffect.ShowConfirmation -> confirmation = effect.bolusId to effect.lines
             }
         }
     }
 
-    // Dialog states
-    var showConfirmation by rememberSaveable { mutableStateOf(false) }
-    var showNoAction by rememberSaveable { mutableStateOf(false) }
-
-    // Confirmation dialog
-    if (showConfirmation) {
-        if (!viewModel.hasAction()) {
-            showConfirmation = false
-            showNoAction = true
-        } else {
-            ElementConfirmationDialog(
-                elementType = ElementType.TEMP_BASAL,
-                lines = viewModel.buildConfirmationSummary(),
-                onConfirm = {
-                    viewModel.confirmAndSave()
-                    onNavigateBack()
-                },
-                onDismiss = { showConfirmation = false }
-            )
-        }
+    // Confirmation dialog — renders the MASTER's prepared lines (set via ShowConfirmation after prepare()).
+    confirmation?.let { (bolusId, lines) ->
+        ElementConfirmationDialog(
+            elementType = ElementType.TEMP_BASAL,
+            lines = lines,
+            onConfirm = {
+                viewModel.commit(bolusId)
+                confirmation = null
+                onNavigateBack()
+            },
+            onDismiss = { confirmation = null }
+        )
     }
 
     // No action dialog
@@ -105,7 +103,7 @@ fun TempBasalDialogScreen(
         onBasalAbsoluteChange = viewModel::updateBasalAbsolute,
         onDurationChange = viewModel::updateDuration,
         onNavigateBack = onNavigateBack,
-        onConfirmClick = { showConfirmation = true }
+        onConfirmClick = { viewModel.prepareAndConfirm() }
     )
 }
 

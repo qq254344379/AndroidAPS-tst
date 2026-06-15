@@ -15,6 +15,11 @@ import kotlinx.serialization.Serializable
 data class NSRunningConfiguration(
     val pump: String? = null,
     val version: String? = null,
+    // Master-computed flag mirrored READ-ONLY by clients: whether the master's ACTIVE pump fakes temp basals via
+    // extended boluses (e.g. Dana "Use Extended"). Cold-doc pump-config state alongside [pump]; the client applies it
+    // verbatim to its VirtualPump.fakeDataDetected and must NOT derive it itself. Null = an older master that doesn't
+    // publish it → client leaves its own flag untouched.
+    val isFakingTempsByExtendedBoluses: Boolean? = null,
     val insulin: Int? = null,
     val activeScene: NSActiveScene? = null,
     // Flat block of cold-channel synced preference values (key string → value serialized as string),

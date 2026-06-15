@@ -215,7 +215,11 @@ data class BatchActionDto(
     val timeShiftHours: Int = 0,
     val profileName: String? = null,
     // running_mode ([RM.Mode] name; reuses [durationMinutes] for the temporary modes)
-    val runningMode: String? = null
+    val runningMode: String? = null,
+    // temp_basal ([rate] = percent or absolute U/h per [isPercent]; reuses [durationMinutes]).
+    // extended_bolus reuses [insulin] + [durationMinutes].
+    val rate: Double = 0.0,
+    val isPercent: Boolean = false
 ) {
 
     companion object {
@@ -224,5 +228,11 @@ data class BatchActionDto(
         const val TYPE_TEMP_TARGET = "temp_target"
         const val TYPE_PROFILE_SWITCH = "profile_switch"
         const val TYPE_RUNNING_MODE = "running_mode"
+        const val TYPE_TEMP_BASAL = "temp_basal"
+        const val TYPE_EXTENDED_BOLUS = "extended_bolus"
+
+        // cancel_temp_basal / cancel_extended_bolus carry no fields — the master cancels its CURRENT TBR / extended bolus.
+        const val TYPE_CANCEL_TEMP_BASAL = "cancel_temp_basal"
+        const val TYPE_CANCEL_EXTENDED_BOLUS = "cancel_extended_bolus"
     }
 }
