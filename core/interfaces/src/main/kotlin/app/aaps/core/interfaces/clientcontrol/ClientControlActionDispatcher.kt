@@ -69,8 +69,11 @@ interface ClientControlActionDispatcher {
          */
         data class PreferenceEdit(val prefs: Map<String, Pair<String, Long>>) : Command
 
-        /** Activate the scene [sceneId] on the master (null duration → the scene's stored default). */
-        data class SceneStart(val sceneId: String, val durationMinutes: Int?) : Command
+        /** PREPARE activating scene [sceneId] (null duration → the scene's stored default) — TWO-STEP: master authors the confirmation, commit via [SceneCommit]. */
+        data class ScenePrepare(val sceneId: String, val durationMinutes: Int?) : Command
+
+        /** Confirm a prepared scene by [bolusId] (master activates once) — separate id-space from [BolusCommit]. */
+        data class SceneCommit(val bolusId: Long) : Command
 
         /** Deactivate the master's active scene; [triggerChain] = also fire its configured chain target. */
         data class SceneStop(val triggerChain: Boolean) : Command

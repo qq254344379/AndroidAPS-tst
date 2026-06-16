@@ -127,7 +127,8 @@ class ClientControlPublisher @Inject constructor(
         }
         val identifier = when (message) {
             is ClientControlMessage.Hello -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
-            is ClientControlMessage.SceneStart,
+            is ClientControlMessage.ScenePrepare,
+            is ClientControlMessage.SceneCommit,
             is ClientControlMessage.SceneStop,
             ClientControlMessage.Ping,
             ClientControlMessage.DismissAlarm,

@@ -401,17 +401,33 @@ internal class ClientControlReceiverTest {
     }
 
     @Test
-    fun sceneStartDispatchesToAutomationApi() = runTest {
+    fun scenePrepareReturnsPreviewAndDoesNotActivate() = runTest {
         val (clientId, secret) = pair()
         authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
-        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_start_$clientId"
-        val msg = ClientControlMessage.SceneStart(sceneId = "sleep", durationMinutes = 30)
-        whenever(sceneAutomationApi.runScene("sleep", 30)).thenReturn(SceneAutomationResult.Success)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_prepare_$clientId"
+        val msg = ClientControlMessage.ScenePrepare(sceneId = "sleep", durationMinutes = 30)
+        whenever(sceneAutomationApi.prepareScene("sleep", 30))
+            .thenReturn(WizardBolusExecutor.PrepareResult.Preview(0.0, 0, 77L, emptyList(), false, emptyList()))
 
         sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = 5L)))
 
-        verify(sceneAutomationApi).runScene("sleep", 30)
+        // Prepare only authors the confirmation + parks — it must NOT activate the scene.
+        verify(sceneAutomationApi).prepareScene("sleep", 30)
+        verify(sceneAutomationApi, never()).runScene(any(), anyOrNull())
         verify(nsAndroidClient, never()).deleteSettings(identifier)
+    }
+
+    @Test
+    fun sceneCommitActivatesParkedScene() = runTest {
+        val (clientId, secret) = pair()
+        authorizedRepository.markActive(clientId, counterReceived = 1L, now = now - 5_000L)
+        val identifier = "${ClientControlPublisher.IDENTIFIER_CMD_PREFIX}scene_commit_$clientId"
+        val msg = ClientControlMessage.SceneCommit(bolusId = 77L)
+        whenever(sceneAutomationApi.commitScene(eq(77L), any())).thenReturn(WizardBolusExecutor.ConfirmResult.Delivered)
+
+        sut.onSettingsDocChanged(identifier, wrap(envelope(clientId, secret, message = msg, counter = 5L)))
+
+        verify(sceneAutomationApi).commitScene(eq(77L), any())
     }
 
     @Test

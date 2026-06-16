@@ -285,7 +285,8 @@ class ClientControlRoundTrip @Inject constructor(
                 is ClientControlActionDispatcher.Command.PreferenceEdit ->
                     ClientControlMessage.PreferencesUpdate(command.prefs.mapValues { (_, v) -> PrefEntry(value = v.first, lastModified = v.second) })
 
-                is ClientControlActionDispatcher.Command.SceneStart     -> ClientControlMessage.SceneStart(command.sceneId, command.durationMinutes)
+                is ClientControlActionDispatcher.Command.ScenePrepare   -> ClientControlMessage.ScenePrepare(command.sceneId, command.durationMinutes)
+                is ClientControlActionDispatcher.Command.SceneCommit    -> ClientControlMessage.SceneCommit(command.bolusId)
                 is ClientControlActionDispatcher.Command.SceneStop      -> ClientControlMessage.SceneStop(command.triggerChain)
                 is ClientControlActionDispatcher.Command.BolusPrepare   -> ClientControlMessage.BolusPrepare(command.guid)
                 is ClientControlActionDispatcher.Command.BolusCommit    -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)

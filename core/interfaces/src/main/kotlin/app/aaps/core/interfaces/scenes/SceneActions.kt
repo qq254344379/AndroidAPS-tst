@@ -16,8 +16,16 @@ import app.aaps.core.interfaces.clientcontrol.ActionProgress
  */
 interface SceneActions {
 
-    /** Activate scene [sceneId]; null [durationMinutes] uses the scene's stored default. */
-    suspend fun start(sceneId: String, durationMinutes: Int? = null): ActionProgress
+    /**
+     * Two-step PREPARE activating scene [sceneId] (null [durationMinutes] = the scene's stored default): the MASTER
+     * authors the confirmation and returns [ActionProgress.Prepared] (its `id` + `lines`) for the UI to render, or a
+     * [ActionProgress.Rejected]. Nothing is activated — the user confirms the master's lines and [commitStart] applies it.
+     * Client → signed round-trip; master → local.
+     */
+    suspend fun prepareStart(sceneId: String, durationMinutes: Int? = null): ActionProgress
+
+    /** Confirm a prepared scene by [id] (the `id` from a prior [prepareStart]'s [ActionProgress.Prepared]): activate it exactly once. */
+    suspend fun commitStart(id: Long): ActionProgress
 
     /** End the active scene; [triggerChain] = also fire its configured chain target (master derives it). */
     suspend fun stop(triggerChain: Boolean = false): ActionProgress

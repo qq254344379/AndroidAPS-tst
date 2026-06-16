@@ -277,7 +277,8 @@ class ClientControlReceiver @Inject constructor(
             }
 
             ClientControlMessage.Ping                 -> onVerifiedPing(entry, envelope, now)
-            is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
+            is ClientControlMessage.ScenePrepare      -> onVerifiedScenePrepare(entry, envelope, message, now)
+            is ClientControlMessage.SceneCommit       -> onVerifiedSceneCommit(entry, envelope, message, now)
             is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
             is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
             is ClientControlMessage.BolusPrepare      -> onVerifiedBolusPrepare(entry, envelope, message, now)
@@ -343,13 +344,47 @@ class ClientControlReceiver @Inject constructor(
         return AckOutcome(AckStatus.Ok, null)
     }
 
-    private suspend fun onVerifiedSceneStart(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStart, now: Long): AckOutcome {
+    /**
+     * Client asked to PREPARE a scene activation: the master resolves it against ITS state, gates it, AUTHORS the
+     * confirmation lines from the scene's actions, parks it, and returns the preview in the SIGNED payload so the
+     * client renders the master's exact confirmation. Nothing is activated yet (a [ClientControlMessage.SceneCommit] follows).
+     */
+    private suspend fun onVerifiedScenePrepare(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.ScenePrepare, now: Long): AckOutcome {
         authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        val result = sceneAutomationApi.runScene(message.sceneId, message.durationMinutes)
-        nsClientRepository.addLog("◄ CLIENTCTL", "scene.start sceneId=${message.sceneId} from ${entry.name}: ${result.tag()}")
-        if (result !is SceneAutomationResult.Success)
-            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: scene.start failed for ${entry.name} sceneId=${message.sceneId}: ${result.tag()}")
-        return if (result is SceneAutomationResult.Success) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, result.failureReason().name)
+        return when (val result = sceneAutomationApi.prepareScene(message.sceneId, message.durationMinutes)) {
+            is WizardBolusExecutor.PrepareResult.Error   -> {
+                nsClientRepository.addLog("◄ CLIENTCTL", "scene.prepare sceneId=${message.sceneId} from ${entry.name}: ${result.message}")
+                AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name, result.message)
+            }
+
+            is WizardBolusExecutor.PrepareResult.Preview -> {
+                val preview = BolusPreview(
+                    bolusId = result.bolusId,
+                    lines = result.lines.map { ConfirmationLineDto(it.role.name, it.text) },
+                    advisorApplies = false,
+                    advisorLines = emptyList()
+                )
+                nsClientRepository.addLog("◄ CLIENTCTL", "scene.prepare sceneId=${message.sceneId} from ${entry.name}")
+                AckOutcome(AckStatus.Ok, null, json.encodeToString(BolusPreview.serializer(), preview))
+            }
+        }
+    }
+
+    /**
+     * Client confirmed a prepared scene: activate the parked scene matching [message.bolusId] EXACTLY once. A re-sent
+     * commit finds the slot drained → NoPending (no double-activate). An activation failure rides back via onError → Failed.
+     */
+    private suspend fun onVerifiedSceneCommit(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneCommit, now: Long): AckOutcome {
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
+        var err: String? = null
+        val result = sceneAutomationApi.commitScene(message.bolusId) { err = it }
+        val activated = result is WizardBolusExecutor.ConfirmResult.Delivered
+        nsClientRepository.addLog("◄ CLIENTCTL", "scene.commit id=${message.bolusId} from ${entry.name}: ${if (activated) "activated" else "no-pending"}")
+        return when {
+            result is WizardBolusExecutor.ConfirmResult.NoPending -> AckOutcome(AckStatus.Failed, FailureReason.NoPendingBolus.name)
+            err != null                                           -> AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name, err)
+            else                                                  -> AckOutcome(AckStatus.Ok, null)
+        }
     }
 
     private suspend fun onVerifiedSceneStop(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.SceneStop, now: Long): AckOutcome {

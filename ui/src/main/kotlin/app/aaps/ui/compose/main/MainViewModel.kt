@@ -37,7 +37,6 @@ import app.aaps.core.interfaces.overview.graph.TempTargetState
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
-import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
 import app.aaps.core.interfaces.pump.Pump
@@ -48,7 +47,6 @@ import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
-import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.ui.IconsProvider
 import app.aaps.core.interfaces.utils.DateUtil
@@ -110,7 +108,6 @@ class MainViewModel @Inject constructor(
     private val overviewDataCache: OverviewDataCache,
     private val iobCobCalculator: IobCobCalculator,
     private val profileFunction: ProfileFunction,
-    private val profileUtil: ProfileUtil,
     private val constraintChecker: ConstraintsChecker,
     private val quickWizard: QuickWizard,
     private val automation: Automation,
@@ -122,7 +119,6 @@ class MainViewModel @Inject constructor(
     private val uel: UserEntryLogger,
     private val loop: Loop,
     private val protectionCheck: ProtectionCheck,
-    private val sceneRepository: SceneStore,
     private val sceneActions: SceneActions,
     private val sceneChainTargetResolver: SceneChainResolver,
     private val activeSceneManager: ActiveSceneSync,
@@ -727,35 +723,24 @@ class MainViewModel @Inject constructor(
     /** Format milliseconds to a localized "time remaining" string (e.g., "1h 30m remaining"). */
     fun formatDuration(ms: Long): String = dateUtil.timeRemainingString(ms, rh)
 
+    /** QuickLaunch scene → ask the MASTER to PREPARE it, render the master's authored confirmation lines, commit on OK (role-transparent). */
     fun requestSceneConfirmation(sceneId: String) {
-        val scene = sceneRepository.getScene(sceneId) ?: return
-        val actionSummary = scene.actions.joinToString("\n") { action ->
-            when (action) {
-                is app.aaps.core.data.model.SceneAction.TempTarget      ->
-                    rh.gs(app.aaps.core.ui.R.string.scene_action_tt, profileUtil.fromMgdlToStringWithUnits(action.targetMgdl))
+        val title = rh.gs(app.aaps.core.ui.R.string.scene)
+        viewModelScope.launch {
+            when (val prepared = sceneActions.prepareStart(sceneId)) {
+                is ActionProgress.Prepared ->
+                    rxBus.send(
+                        EventShowDialog.OkCancel(
+                            title = title, message = "", confirmationLines = prepared.lines, icon = IcAction,
+                            onOk = { appScope.launch { sceneActions.commitStart(prepared.id) } })
+                    )
 
-                is app.aaps.core.data.model.SceneAction.ProfileSwitch   ->
-                    rh.gs(app.aaps.core.ui.R.string.scene_action_profile, action.profileName, action.percentage)
+                is ActionProgress.Rejected ->
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
+                        rxBus.send(EventShowDialog.Ok(title = title, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
 
-                is app.aaps.core.data.model.SceneAction.SmbToggle       ->
-                    if (action.enabled) rh.gs(app.aaps.core.ui.R.string.scene_action_smb_on)
-                    else rh.gs(app.aaps.core.ui.R.string.scene_action_smb_off)
-
-                is app.aaps.core.data.model.SceneAction.LoopModeChange  ->
-                    rh.gs(app.aaps.core.ui.R.string.scene_action_running_mode, action.mode.name)
-
-                is app.aaps.core.data.model.SceneAction.CarePortalEvent ->
-                    rh.gs(app.aaps.core.ui.R.string.scene_action_careportal, action.type.text)
+                else                       -> Unit
             }
-        }
-        val message = "${scene.name}\n${scene.defaultDurationMinutes} min\n\n$actionSummary"
-        _actionConfirmation.update {
-            ActionConfirmation(
-                title = rh.gs(app.aaps.core.ui.R.string.scene),
-                message = message,
-                icon = IcAction,
-                onConfirmAction = ConfirmableAction.ActivateScene(sceneId, scene.defaultDurationMinutes)
-            )
         }
     }
 
@@ -800,10 +785,6 @@ class MainViewModel @Inject constructor(
                 val event = automation.findEventById(action.automationId) ?: return@launch
                 viewModelScope.launch { automation.processEvent(event) }
             }
-
-            is ConfirmableAction.ActivateScene           ->
-                // One path for both roles. Master honours the passed duration; client round-trips.
-                sceneActions.start(action.sceneId, action.durationMinutes)
 
             is ConfirmableAction.DeactivateScene         ->
                 sceneActions.stop(triggerChain = false)

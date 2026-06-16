@@ -2,6 +2,7 @@ package app.aaps.implementation.scenes
 
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -60,6 +61,15 @@ class SceneAutomationApiImpl @Inject constructor(
         return if (result.success) SceneAutomationResult.Success
         else SceneAutomationResult.Failed(result.errorMessage)
     }
+
+    override suspend fun prepareScene(id: String, durationMinutes: Int?): WizardBolusExecutor.PrepareResult {
+        val scene = sceneRepository.getScene(id) ?: return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_fail_scene_not_found))
+        if (!scene.isEnabled) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_fail_scene_disabled))
+        return sceneExecutor.prepareScene(scene, durationMinutes)
+    }
+
+    override suspend fun commitScene(bolusId: Long, onError: (String) -> Unit): WizardBolusExecutor.ConfirmResult =
+        sceneExecutor.commitScene(bolusId, onError)
 
     override suspend fun stopActiveSceneAndStartScene(targetSceneId: String): SceneAutomationResult {
         // TOCTOU re-check: caller (dialog or wire command) captured the target id at some earlier

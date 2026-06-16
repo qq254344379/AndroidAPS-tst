@@ -1,6 +1,7 @@
 package app.aaps.core.interfaces.scenes
 
 import app.aaps.core.data.model.Scene
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -25,6 +26,16 @@ interface SceneAutomationApi {
      * @param durationMinutes override duration; null uses the scene's default.
      */
     suspend fun runScene(id: String, durationMinutes: Int? = null): SceneAutomationResult
+
+    /**
+     * Two-step PREPARE: resolve scene [id], gate it, and author the master's confirmation lines + park it consume-once.
+     * Returns the preview ([WizardBolusExecutor.PrepareResult.Preview] = bolusId + lines) or an Error; nothing is
+     * activated. Commit via [commitScene] with the returned bolusId. The master is the SSOT for the confirmation.
+     */
+    suspend fun prepareScene(id: String, durationMinutes: Int? = null): WizardBolusExecutor.PrepareResult
+
+    /** Two-step COMMIT: activate the parked scene matching [bolusId] EXACTLY once; an activation failure rides [onError]. */
+    suspend fun commitScene(bolusId: Long, onError: (String) -> Unit): WizardBolusExecutor.ConfirmResult
 
     /** Set the enabled flag on a scene by id. Fails only if the scene is missing. */
     fun setEnabled(id: String, enabled: Boolean): SceneAutomationResult

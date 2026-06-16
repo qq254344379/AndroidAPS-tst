@@ -16,7 +16,10 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.aps.Loop
+import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -25,14 +28,17 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileRepository
+import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventProfileChangeRequested
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.profileNames
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -57,8 +63,17 @@ class SceneExecutor @Inject constructor(
     private val rh: ResourceHelper,
     private val rxBus: RxBus,
     private val loop: Loop,
-    private val activePlugin: ActivePlugin
+    private val activePlugin: ActivePlugin,
+    private val profileUtil: ProfileUtil,
+    private val translator: Translator
 ) {
+
+    /** A parked scene activation awaiting [commitScene] — the two-step master-authoritative path. */
+    private data class ParkedScene(val scene: Scene, val durationMinutes: Int, val parkedAt: Long)
+
+    // Consume-once parked scenes keyed by bolusId (its OWN id-space, separate from the bolus executor's `pending`,
+    // so a scene commit and a bolus commit can never drain each other). remove() is atomic → no double-activate.
+    private val pendingScenes = ConcurrentHashMap<Long, ParkedScene>()
 
     /**
      * Single source of truth for "can this scene activate right now?".
@@ -84,6 +99,52 @@ class SceneExecutor @Inject constructor(
             ) return rh.gs(CoreUiR.string.scene_profile_not_found, action.profileName)
         }
         return null
+    }
+
+    /**
+     * Two-step PREPARE (master side): gate the scene, AUTHOR the confirmation lines from its actions (so the client
+     * renders the master's exact confirmation, not a client-built one), and park it consume-once. Nothing is
+     * activated — a [commitScene] with the returned bolusId does that. Mirrors [WizardBolusExecutor.prepareBatch].
+     */
+    suspend fun prepareScene(scene: Scene, durationMinutes: Int?): WizardBolusExecutor.PrepareResult {
+        validateActivation(scene)?.let { return WizardBolusExecutor.PrepareResult.Error(it) }
+        val effective = durationMinutes ?: scene.defaultDurationMinutes
+        val bolusId = dateUtil.now()
+        // Trim abandoned parks (user cancelled / app killed) so a stale prepare can't be committed minutes later.
+        pendingScenes.entries.removeAll { bolusId - it.value.parkedAt > PARK_TTL_MS }
+        pendingScenes[bolusId] = ParkedScene(scene, effective, bolusId)
+        return WizardBolusExecutor.PrepareResult.Preview(
+            insulin = 0.0, carbs = 0, bolusId = bolusId,
+            lines = buildSceneLines(scene, effective), advisorApplies = false, advisorLines = emptyList()
+        )
+    }
+
+    /**
+     * Two-step COMMIT (master side): drain the parked scene matching [bolusId] EXACTLY once and activate it. A re-sent
+     * commit finds the slot drained → [WizardBolusExecutor.ConfirmResult.NoPending] (no double-activate). An activation
+     * failure rides back through [onError]. Mirrors [WizardBolusExecutor.confirm].
+     */
+    suspend fun commitScene(bolusId: Long, onError: (String) -> Unit): WizardBolusExecutor.ConfirmResult {
+        val parked = pendingScenes.remove(bolusId) ?: return WizardBolusExecutor.ConfirmResult.NoPending
+        val result = activate(parked.scene, parked.durationMinutes)
+        if (!result.success) onError(result.errorMessage ?: rh.gs(CoreUiR.string.scene_some_actions_failed))
+        return WizardBolusExecutor.ConfirmResult.Delivered
+    }
+
+    /** The master-authored confirmation lines for a scene — name + duration + one line per action (authored ONCE here). */
+    private fun buildSceneLines(scene: Scene, durationMinutes: Int): List<ConfirmationLine> = buildList {
+        add(ConfirmationLine(ConfirmationRole.PRIMARY, scene.name))
+        if (durationMinutes > 0)
+            add(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(CoreUiR.string.confirmation_line, rh.gs(CoreUiR.string.duration), rh.gs(CoreUiR.string.format_mins, durationMinutes))))
+        scene.actions.forEach { add(ConfirmationLine(ConfirmationRole.NORMAL, sceneActionLine(it))) }
+    }
+
+    private fun sceneActionLine(action: SceneAction): String = when (action) {
+        is SceneAction.TempTarget      -> rh.gs(CoreUiR.string.scene_action_tt, profileUtil.fromMgdlToStringWithUnits(action.targetMgdl))
+        is SceneAction.ProfileSwitch   -> rh.gs(CoreUiR.string.scene_action_profile, action.profileName, action.percentage)
+        is SceneAction.SmbToggle       -> if (action.enabled) rh.gs(CoreUiR.string.scene_action_smb_on) else rh.gs(CoreUiR.string.scene_action_smb_off)
+        is SceneAction.LoopModeChange  -> rh.gs(CoreUiR.string.scene_action_running_mode, translator.translate(action.mode))
+        is SceneAction.CarePortalEvent -> rh.gs(CoreUiR.string.scene_action_careportal, translator.translate(action.type))
     }
 
     /**
@@ -533,5 +594,9 @@ class SceneExecutor @Inject constructor(
     companion object {
 
         private const val WORK_NAME_SCENE_EXPIRY = "SceneExpiry"
+
+        // A parked (prepared-but-not-committed) scene older than this is discarded on the next prepare — an
+        // abandoned confirmation can't be committed long after the fact. Comfortably covers the round-trip window.
+        private const val PARK_TTL_MS = 2L * 60L * 1000L
     }
 }

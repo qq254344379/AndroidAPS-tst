@@ -45,14 +45,27 @@ sealed class ClientControlMessage {
     data object Ping : ClientControlMessage()
 
     /**
-     * Tells the master to activate the named scene. `durationMinutes = null` means use
-     * the scene's stored default; an explicit value (including 0 for indefinite) overrides.
+     * Client asks the master to PREPARE activating the named scene: the master resolves the scene against ITS OWN
+     * state, gates it (validateActivation), authors the confirmation lines from the scene's actions, parks it, and
+     * returns the preview in the signed ack. TWO-STEP — a [SceneCommit] follows and actually activates it. Nothing
+     * runs until commit. `durationMinutes = null` → the scene's stored default; an explicit value overrides.
      */
     @Serializable
-    @SerialName("scene_start")
-    data class SceneStart(
+    @SerialName("scene_prepare")
+    data class ScenePrepare(
         val sceneId: String,
         val durationMinutes: Int? = null
+    ) : ClientControlMessage()
+
+    /**
+     * Client confirms a prepared scene: the master activates the parked scene matching [bolusId] EXACTLY once
+     * (a re-sent commit finds the slot drained → no double-activate). Separate from [BolusCommit] so the scene and
+     * bolus consume-once id-spaces never collide.
+     */
+    @Serializable
+    @SerialName("scene_commit")
+    data class SceneCommit(
+        val bolusId: Long
     ) : ClientControlMessage()
 
     /**

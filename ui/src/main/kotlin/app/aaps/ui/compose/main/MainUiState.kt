@@ -87,7 +87,6 @@ sealed class ConfirmableAction {
 
     data class ExecuteAutomation(val automationId: String) : ConfirmableAction()
 
-    data class ActivateScene(val sceneId: String, val durationMinutes: Int) : ConfirmableAction()
     data object DeactivateScene : ConfirmableAction()
     data class DeactivateAndChainScene(val targetSceneId: String) : ConfirmableAction()
 }

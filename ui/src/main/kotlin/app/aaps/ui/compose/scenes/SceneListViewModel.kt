@@ -8,10 +8,10 @@ import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneAction
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.profile.ProfileRepository
-import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventInitializationChanged
@@ -24,7 +24,6 @@ import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.utils.DateUtil
-import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.objects.extensions.toScenes
 import app.aaps.core.ui.R
@@ -48,12 +47,10 @@ class SceneListViewModel @Inject constructor(
     private val sceneRepository: SceneStore,
     private val activeSceneManager: ActiveSceneSync,
     private val persistenceLayer: PersistenceLayer,
-    private val profileUtil: ProfileUtil,
     private val profileRepository: ProfileRepository,
     private val rh: ResourceHelper,
     private val rxBus: RxBus,
     private val dateUtil: DateUtil,
-    private val translator: Translator,
     private val config: Config,
     private val sceneActions: SceneActions,
     private val sceneChainTargetResolver: SceneChainResolver,
@@ -170,7 +167,9 @@ class SceneListViewModel @Inject constructor(
         data class ConfirmActivation(
             val scene: Scene,
             val actionSummaries: List<String>,
-            val conflicts: List<String>
+            val conflicts: List<String>,
+            /** The master's parked-scene id (from prepareStart) — committed on confirm. */
+            val bolusId: Long
         ) : DialogState()
 
         data class ConfirmDeactivation(
@@ -197,26 +196,32 @@ class SceneListViewModel @Inject constructor(
             // Scene disabled: ignore — UI already disables the play button.
             if (!scene.isEnabled) return@launch
 
-            // Shared validator — single source of truth for pump/loop/profile/actions.
+            // Fast local gate (instant feedback). The MASTER re-validates + AUTHORS the confirmation at prepare.
             sceneActions.validateActivation(scene)?.let { reason ->
                 _dialogState.value = DialogState.ValidationError(reason)
                 return@launch
             }
 
-            // Build action summaries + detect conflicts.
-            val summaries = scene.actions.map { buildActionSummary(it) }
+            // Client-side conflict warnings (extra UX); the action summary itself now comes from the MASTER's lines.
             val conflicts = detectConflicts(scene)
 
-            _dialogState.value = DialogState.ConfirmActivation(scene, summaries, conflicts)
+            when (val prepared = sceneActions.prepareStart(scene.id)) {
+                is ActionProgress.Prepared -> _dialogState.value =
+                    DialogState.ConfirmActivation(scene, prepared.lines.map { it.text }, conflicts, prepared.id)
+
+                is ActionProgress.Rejected ->
+                    _dialogState.value = DialogState.ValidationError(prepared.detail ?: rh.gs(R.string.clientcontrol_fail_not_reachable))
+
+                else                       -> Unit // Unconfirmed → the round-trip's app-level modal already showed it
+            }
         }
     }
 
     fun confirmActivation() {
         val state = _dialogState.value as? DialogState.ConfirmActivation ?: return
         _dialogState.value = null
-        // One call for both roles: master executes locally, client round-trips (driving the app-level
-        // modal). Null duration → the master honours the scene's stored default.
-        viewModelScope.launch { sceneActions.start(state.scene.id) }
+        // Confirm the MASTER's prepared scene: activate it exactly once (master local / client round-trip).
+        viewModelScope.launch { sceneActions.commitStart(state.bolusId) }
     }
 
     fun requestDeactivation() {
@@ -266,31 +271,6 @@ class SceneListViewModel @Inject constructor(
     }
 
     // --- Summary builders ---
-
-    private fun buildActionSummary(action: SceneAction): String {
-        return when (action) {
-            is SceneAction.TempTarget      -> {
-                rh.gs(R.string.scene_action_tt, profileUtil.fromMgdlToStringWithUnits(action.targetMgdl))
-            }
-
-            is SceneAction.ProfileSwitch   -> {
-                rh.gs(R.string.scene_action_profile, action.profileName, action.percentage)
-            }
-
-            is SceneAction.SmbToggle       -> {
-                if (action.enabled) rh.gs(R.string.scene_action_smb_on)
-                else rh.gs(R.string.scene_action_smb_off)
-            }
-
-            is SceneAction.LoopModeChange  -> {
-                rh.gs(R.string.scene_action_running_mode, translator.translate(action.mode))
-            }
-
-            is SceneAction.CarePortalEvent -> {
-                rh.gs(R.string.scene_action_careportal, translator.translate(action.type))
-            }
-        }
-    }
 
     private suspend fun detectConflicts(scene: Scene): List<String> {
         val conflicts = mutableListOf<String>()
