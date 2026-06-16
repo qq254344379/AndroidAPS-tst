@@ -13,13 +13,15 @@ import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.data.ui.ConfirmationLine
 import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.data.ui.confirmationLines
+import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
-import app.aaps.core.interfaces.insulin.InsulinActions
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -51,6 +53,7 @@ import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 import javax.inject.Inject
 import kotlin.math.abs
+import app.aaps.core.ui.R as CoreUiR
 
 @HiltViewModel
 @Stable
@@ -70,7 +73,7 @@ class FillDialogViewModel @Inject constructor(
     insulinManager: InsulinManager,
     private val profileFunction: ProfileFunction,
     private val wizardBolusExecutor: WizardBolusExecutor,
-    private val insulinActions: InsulinActions,
+    private val batchExecutor: BatchExecutor,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -245,12 +248,12 @@ class FillDialogViewModel @Inject constructor(
                         ch.bolusWithVolume(state.insulinAfterConstraints)
                     else
                         decimalFormatter.toPumpSupportedBolusWithUnits(state.insulinAfterConstraints, bolusStep)
-                line(ConfirmationRole.BOLUS, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.fill_prime_amount), bolusValue))
+                line(ConfirmationRole.BOLUS, rh.gs(R.string.confirmation_line, rh.gs(R.string.fill_prime_amount), bolusValue))
                 if (state.constraintApplied) {
                     line(
                         ConfirmationRole.WARNING,
                         rh.gs(
-                            app.aaps.core.ui.R.string.bolus_constraint_applied_warn,
+                            R.string.bolus_constraint_applied_warn,
                             state.insulin,
                             state.insulinAfterConstraints
                         )
@@ -277,15 +280,15 @@ class FillDialogViewModel @Inject constructor(
             }
 
             if (state.notes.isNotEmpty()) {
-                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.notes_label), state.notes))
+                line(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.notes_label), state.notes))
             }
 
             if (state.eventTimeChanged) {
-                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.time), dateUtil.dateAndTimeString(state.eventTime)))
+                line(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.time), dateUtil.dateAndTimeString(state.eventTime)))
             }
 
             if (state.siteRotationEnabled && state.siteLocation != TE.Location.NONE) {
-                line(ConfirmationRole.NORMAL, rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.site_location), translator.translate(state.siteLocation)))
+                line(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.site_location), translator.translate(state.siteLocation)))
             }
         }
     }
@@ -320,7 +323,7 @@ class FillDialogViewModel @Inject constructor(
                         // After successful prime, do profile switch if insulin changed
                         if (doProfileSwitch) {
                             appScope.launch {
-                                insulinActions.activate(state.selectedInsulin!!)
+                                activateInsulin(state.selectedInsulin!!)
                             }
                         }
                     }
@@ -330,7 +333,7 @@ class FillDialogViewModel @Inject constructor(
             // No prime — do profile switch immediately if insulin changed
             if (doProfileSwitch) {
                 appScope.launch {
-                    insulinActions.activate(state.selectedInsulin!!)
+                    activateInsulin(state.selectedInsulin!!)
                 }
             }
         }
@@ -389,6 +392,18 @@ class FillDialogViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Non-interactive insulin activation for the fill flow (a chained profile switch after a prime) — relays through
+     * the master-controlled [BatchExecutor] like everything else, but with NO confirmation UI: prepare then commit
+     * back-to-back. Master → local; client → signed round-trip. Failures are surfaced by the round-trip's app-level
+     * modal (client) / are silent here (master local), matching the prior fire-and-forget semantics.
+     */
+    private suspend fun activateInsulin(iCfg: ICfg) {
+        val label = rh.gs(CoreUiR.string.activate_insulin)
+        val prepared = batchExecutor.prepare(listOf(BatchAction.InsulinActivate(iCfg)), Sources.FillDialog, label)
+        if (prepared is ActionProgress.Prepared) batchExecutor.commit(prepared.id, Sources.FillDialog, label)
     }
 
     fun decimalFormat(): DecimalFormat =

@@ -71,19 +71,6 @@ sealed class ClientControlMessage {
     ) : ClientControlMessage()
 
     /**
-     * Client asks the master to activate an insulin — i.e. create a profile switch that re-applies
-     * the master's CURRENT profile (name/%/timeshift/duration) with this insulin's [iCfgJson] config.
-     * The master uses its own live profile (the client's view may be stale), so only the insulin
-     * config travels; the resulting profile switch syncs back normally. `iCfgJson` is the same JSON
-     * shape `ICfg` serializes to, opaque to the nssdk module.
-     */
-    @Serializable
-    @SerialName("insulin_activate")
-    data class InsulinActivate(
-        val iCfgJson: String
-    ) : ClientControlMessage()
-
-    /**
      * Generic client→master push of plain, bidirectionally-synced preference values (keys carrying a
      * `SyncSpec(direction = Bidirectional)`). One message batches every locally-changed synced key, so
      * new synced settings need no new wire type — they just appear as another entry in [prefs].
@@ -234,5 +221,8 @@ data class BatchActionDto(
         // cancel_temp_basal / cancel_extended_bolus carry no fields — the master cancels its CURRENT TBR / extended bolus.
         const val TYPE_CANCEL_TEMP_BASAL = "cancel_temp_basal"
         const val TYPE_CANCEL_EXTENDED_BOLUS = "cancel_extended_bolus"
+
+        // insulin_activate reuses [iCfgJson] — the master re-applies its active profile with this insulin config.
+        const val TYPE_INSULIN_ACTIVATE = "insulin_activate"
     }
 }

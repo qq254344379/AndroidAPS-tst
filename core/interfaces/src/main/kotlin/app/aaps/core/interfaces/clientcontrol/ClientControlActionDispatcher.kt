@@ -63,9 +63,6 @@ interface ClientControlActionDispatcher {
     /** The closed set of actions dispatchable through the round-trip channel. */
     sealed interface Command {
 
-        /** Activate the insulin described by [iCfgJson] (the JSON `ICfg` serializes to). */
-        data class InsulinActivate(val iCfgJson: String) : Command
-
         /**
          * Push bidirectionally-synced preference edits (keyString → serialized value + lastModified).
          * The master applies LWW and republishes; the ACK resolves the round-trip.

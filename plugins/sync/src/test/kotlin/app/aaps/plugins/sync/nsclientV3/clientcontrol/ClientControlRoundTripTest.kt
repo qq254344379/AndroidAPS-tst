@@ -79,7 +79,8 @@ internal class ClientControlRoundTripTest {
     private val notifications = MutableStateFlow<List<AapsNotification>>(emptyList())
     private lateinit var sut: ClientControlRoundTrip
 
-    private val cmd = ClientControlActionDispatcher.Command.InsulinActivate("""{"insulinLabel":"x"}""")
+    // Any command exercises the round-trip mechanics; SceneStop is a simple parameterized survivor.
+    private val cmd = ClientControlActionDispatcher.Command.SceneStop(triggerChain = false)
 
     @BeforeEach
     fun setUp() {

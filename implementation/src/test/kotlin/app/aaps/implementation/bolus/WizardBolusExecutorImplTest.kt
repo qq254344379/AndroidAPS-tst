@@ -3,6 +3,7 @@ package app.aaps.implementation.bolus
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.GlucoseUnit
+import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
@@ -27,6 +28,7 @@ import app.aaps.core.interfaces.profile.ProfileStore
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.CommandQueue
+import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
@@ -41,6 +43,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.argThat
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
@@ -326,6 +329,37 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
         assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
         verify(profileFunction, never()).createProfileSwitch(any(), any(), any(), any(), any(), anyOrNull(), any())
+    }
+
+    @Test
+    fun prepareBatch_insulinActivate_parksAndConfirmAppliesViaCreateProfileSwitchWithNewInsulin() = runTest {
+        stubPassthroughConstraints()
+        // An active EPS profile is required to re-apply the new insulin onto.
+        whenever(profileFunction.getProfile()).thenReturn(mock<ProfileSealed.EPS>())
+        whenever(profileFunction.createProfileSwitchWithNewInsulin(any(), any())).thenReturn(true)
+        val executor = create()
+        val iCfg = ICfg(insulinLabel = "Rapid", insulinEndTime = 360, insulinPeakTime = 75, concentration = 1.0)
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.InsulinActivate(iCfg))) as WizardBolusExecutor.PrepareResult.Preview
+        val result = executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        // InsulinActivate-only batch: no pump bolus — only the master re-applies its active profile with the new insulin.
+        verify(commandQueue, never()).bolus(anyOrNull())
+        verify(profileFunction).createProfileSwitchWithNewInsulin(argThat { insulinLabel == "Rapid" }, eq(Sources.NSClient))
+    }
+
+    @Test
+    fun prepareBatch_insulinActivate_noActiveEpsProfile_returnsErrorAndAppliesNothing() = runTest {
+        stubPassthroughConstraints()
+        whenever(profileFunction.getProfile()).thenReturn(null) // no active EPS profile to re-apply onto → reject at prepare
+        val executor = create()
+        val iCfg = ICfg(insulinLabel = "Rapid", insulinEndTime = 360, insulinPeakTime = 75, concentration = 1.0)
+
+        val result = executor.prepareBatch(listOf(BatchAction.InsulinActivate(iCfg)))
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(profileFunction, never()).createProfileSwitchWithNewInsulin(any(), any())
     }
 
     @Test

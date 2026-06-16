@@ -8,7 +8,6 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.notifications.AapsNotification
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
-import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.protection.SecureEncrypt
 import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.BolusProgressState
@@ -103,7 +102,6 @@ class ClientControlUplinkIntegrationTest {
     @Mock private lateinit var masterPrefs: Preferences
     @Mock private lateinit var sceneAutomationApi: SceneAutomationApi
     @Mock private lateinit var activeSceneSync: ActiveSceneSync
-    @Mock private lateinit var profileFunction: ProfileFunction
     @Mock private lateinit var offerPublisher: PairingOfferPublisher
     @Mock private lateinit var runningConfigurationPublisher: RunningConfigurationPublisher
     @Mock private lateinit var persistenceLayer: PersistenceLayer
@@ -193,7 +191,7 @@ class ClientControlUplinkIntegrationTest {
         masterAuthorizedRepository = AuthorizedClientsRepository(masterPrefs, secureEncrypt, aapsLogger)
         masterReceiver = ClientControlReceiver(
             masterAuthorizedRepository, Provider { nsClientV3Plugin }, nsClientRepository, sceneAutomationApi,
-            profileFunction, offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, notificationManager, masterConfig, bolusProgressData, commandQueue, aapsLogger,
+            offerPublisher, masterPrefs, dateUtil, uel, runningConfigurationPublisher, persistenceLayer, wizardBolusExecutor, notificationManager, masterConfig, bolusProgressData, commandQueue, aapsLogger,
             CoroutineScope(Dispatchers.Unconfined)
         )
 

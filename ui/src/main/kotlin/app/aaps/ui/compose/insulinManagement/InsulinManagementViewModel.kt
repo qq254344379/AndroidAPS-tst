@@ -4,17 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.model.EPS
 import app.aaps.core.data.model.ICfg
-import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.compensateForClockSkew
 import app.aaps.core.interfaces.db.observeChanges
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.ConcentrationType
-import app.aaps.core.interfaces.insulin.InsulinActions
 import app.aaps.core.interfaces.insulin.InsulinManager
 import app.aaps.core.interfaces.insulin.InsulinType
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -29,11 +32,10 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.observeChange
-import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.ui.R
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,11 +64,9 @@ class InsulinManagementViewModel @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val profileRepository: ProfileRepository,
     private val config: Config,
-    private val insulinActions: InsulinActions
+    private val batchExecutor: BatchExecutor,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
-
-    // Tracks the in-flight client→master activation round-trip so the "stop waiting" action can cancel it.
-    private var clientControlJob: Job? = null
 
     private val _uiState = MutableStateFlow(InsulinManagementUiState())
     val uiState: StateFlow<InsulinManagementUiState> = _uiState.asStateFlow()
@@ -74,6 +74,9 @@ class InsulinManagementViewModel @Inject constructor(
     sealed class SideEffect {
         data class ScrollToInsulin(val index: Int) : SideEffect()
         data object NavigateBack : SideEffect()
+
+        /** The MASTER prepared the activation and returned its confirmation [lines]; show them, then [commit] [bolusId]. */
+        data class ShowConfirmation(val bolusId: Long, val lines: List<ConfirmationLine>) : SideEffect()
     }
 
     private val _sideEffect = MutableSharedFlow<SideEffect>(
@@ -176,10 +179,10 @@ class InsulinManagementViewModel @Inject constructor(
         // pref via the synchronized loadSettings(). lastAppliedConfig keeps the re-store from looping.
         when {
             // Client defers to the master: adopt the new definitions silently (discards unsaved edits).
-            config.AAPSCLIENT -> loadData(reload = true)
+            config.AAPSCLIENT   -> loadData(reload = true)
             // Master is the conflict authority: ask before discarding an in-progress edit.
             hasUnsavedChanges() -> _uiState.update { it.copy(externalUpdatePending = true) }
-            else -> loadData(reload = true)
+            else                -> loadData(reload = true)
         }
     }
 
@@ -445,57 +448,41 @@ class InsulinManagementViewModel @Inject constructor(
         return true
     }
 
+    /**
+     * Ask the MASTER to PREPARE the insulin activation (validate it has an active profile to re-apply, author the
+     * confirmation). Client = signed round-trip; master = local. The user confirms the master's exact lines and
+     * [commit] applies it. appScope: the round-trip can outlive the screen.
+     */
     fun prepareActivation() {
-        viewModelScope.launch {
+        appScope.launch {
             val state = uiState.value
             val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return@launch
-            val profile = profileFunction.getProfile()
-            if (profile == null) {
-                showSnackbar(rh.gs(R.string.activate_insulin_no_profile))
-                return@launch
+            val label = rh.gs(CoreUiR.string.activate_insulin)
+            when (val prepared = batchExecutor.prepare(listOf(BatchAction.InsulinActivate(iCfg)), Sources.Insulin, label)) {
+                is ActionProgress.Prepared -> _sideEffect.emit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
+                // Offline block (and a master-local failure, e.g. no active profile) surface here; a client round-trip
+                // failure already showed on the app-level modal.
+                is ActionProgress.Rejected ->
+                    if (prepared.reason == FailureReason.NotReachable) showSnackbar(rh.gs(CoreUiR.string.clientcontrol_fail_not_reachable))
+                    else prepared.detail?.let { showSnackbar(it) }
+
+                else                       -> Unit // Unconfirmed → app-level modal
             }
-
-            val eps = (profile as? ProfileSealed.EPS)?.value
-            val profileName = eps?.originalProfileName ?: return@launch
-            val percentage = eps.originalPercentage
-            val timeshiftHours = T.msecs(eps.originalTimeshift).hours().toInt()
-            val durationMs = eps.originalDuration
-
-            val details = mutableListOf<String>()
-            details.add(profileName)
-            if (percentage != 100) details.add(rh.gs(CoreUiR.string.format_percent, percentage))
-            if (timeshiftHours != 0) details.add(rh.gs(CoreUiR.string.format_hours, timeshiftHours.toDouble()))
-            if (durationMs > 0) {
-                val remaining = ((durationMs - (dateUtil.now() - eps.timestamp)) / 60_000L).coerceAtLeast(0)
-                if (remaining > 0)
-                    details.add(rh.gs(R.string.activate_insulin_remaining, remaining.toInt()))
-            }
-
-            val message = rh.gs(R.string.activate_insulin_new_insulin, iCfg.insulinLabel) +
-                "\n\n" + rh.gs(R.string.activate_insulin_profile_switch, details.joinToString(", "))
-
-            _uiState.update { it.copy(activationMessage = message) }
         }
     }
 
-    fun dismissActivation() {
-        _uiState.update { it.copy(activationMessage = null) }
-    }
+    /** Confirm the master's prepared activation: apply it exactly once. On Applied: confirm + refresh (client chip follows sync-back). */
+    fun commit(bolusId: Long) {
+        appScope.launch {
+            val result = batchExecutor.commit(bolusId, Sources.Insulin, rh.gs(CoreUiR.string.activate_insulin))
+            when {
+                result is ActionProgress.Applied                                                 -> {
+                    showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
+                    refreshData()
+                }
 
-    fun executeActivation() {
-        _uiState.update { it.copy(activationMessage = null) }
-        val state = uiState.value
-        val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return
-        // One call for both roles (master = local profile switch, client = confirmed round-trip driving
-        // the app-level modal). We only handle the feature-specific follow-up: on Applied confirm +
-        // refresh (on a client the chip follows on sync-back); Rejected/Unconfirmed are surfaced by the
-        // central modal.
-        clientControlJob?.cancel()
-        clientControlJob = viewModelScope.launch {
-            val result = insulinActions.activate(iCfg)
-            if (result is ActionProgress.Applied) {
-                showSnackbar(rh.gs(R.string.insulin_activation_applied), EventShowSnackbar.Type.Info)
-                refreshData()
+                result is ActionProgress.Rejected && result.reason == FailureReason.NotReachable -> showSnackbar(rh.gs(CoreUiR.string.clientcontrol_fail_not_reachable))
+                result is ActionProgress.Rejected                                                -> result.detail?.let { showSnackbar(it) }
             }
         }
     }

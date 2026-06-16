@@ -1,6 +1,5 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
-import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
@@ -14,7 +13,6 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSClientRepository
-import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.BolusProgressState
 import app.aaps.core.interfaces.queue.CommandQueue
@@ -42,7 +40,6 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressPhase
 import app.aaps.core.nssdk.localmodel.clientcontrol.SignedEnvelope
 import app.aaps.core.nssdk.utils.ClientControlCrypto
-import app.aaps.core.objects.extensions.fromJsonObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher
 import kotlinx.coroutines.CoroutineScope
@@ -50,7 +47,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -95,7 +91,6 @@ class ClientControlReceiver @Inject constructor(
     private val nsClientV3Plugin: Provider<NSClientV3Plugin>,
     private val nsClientRepository: NSClientRepository,
     private val sceneAutomationApi: SceneAutomationApi,
-    private val profileFunction: ProfileFunction,
     private val offerPublisher: PairingOfferPublisher,
     private val preferences: Preferences,
     private val dateUtil: DateUtil,
@@ -284,7 +279,6 @@ class ClientControlReceiver @Inject constructor(
             ClientControlMessage.Ping                 -> onVerifiedPing(entry, envelope, now)
             is ClientControlMessage.SceneStart        -> onVerifiedSceneStart(entry, envelope, message, now)
             is ClientControlMessage.SceneStop         -> onVerifiedSceneStop(entry, envelope, message, now)
-            is ClientControlMessage.InsulinActivate   -> onVerifiedInsulinActivate(entry, envelope, message, now)
             is ClientControlMessage.PreferencesUpdate -> onVerifiedPreferencesUpdate(entry, envelope, message, now)
             is ClientControlMessage.BolusPrepare      -> onVerifiedBolusPrepare(entry, envelope, message, now)
             is ClientControlMessage.BolusCommit       -> onVerifiedBolusCommit(entry, envelope, message, now)
@@ -386,31 +380,6 @@ class ClientControlReceiver @Inject constructor(
         is SceneAutomationResult.ChainCompleted -> FailureReason.PartialFailure
         is SceneAutomationResult.Failed,
         SceneAutomationResult.Success           -> FailureReason.ExecutionFailed
-    }
-
-    /**
-     * Activate an insulin requested by a client: create a profile switch over the master's CURRENT
-     * profile with the pushed insulin config. The master is authoritative for the profile (the
-     * client's view may be stale), so only the iCfg travels; the resulting EPS syncs back normally.
-     * No-op (logged) if the master has no active profile switch to re-apply.
-     */
-    private suspend fun onVerifiedInsulinActivate(entry: AuthorizedClient, envelope: SignedEnvelope, message: ClientControlMessage.InsulinActivate, now: Long): AckOutcome {
-        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
-        val iCfg = runCatching {
-            (Json.parseToJsonElement(message.iCfgJson) as? JsonObject)?.let { ICfg.fromJsonObject(it) }
-        }.getOrNull()
-        if (iCfg == null) {
-            aapsLogger.warn(LTag.NSCLIENT, "ClientControl: insulin.activate from ${entry.name} has invalid iCfg JSON, ignoring")
-            nsClientRepository.addLog("◄ CLIENTCTL", "insulin.activate from ${entry.name}: invalid JSON")
-            return AckOutcome(AckStatus.Failed, FailureReason.ExecutionFailed.name)
-        }
-        val applied = profileFunction.createProfileSwitchWithNewInsulin(iCfg, Sources.Insulin)
-        nsClientRepository.addLog(
-            "◄ CLIENTCTL",
-            "insulin.activate from ${entry.name}: " + if (applied) "applied ${iCfg.insulinLabel}" else "no active profile"
-        )
-        // ack.reason carries the FailureReason code NAME so the client can localize it.
-        return if (applied) AckOutcome(AckStatus.Ok, null) else AckOutcome(AckStatus.Failed, FailureReason.NoActiveProfile.name)
     }
 
     /**

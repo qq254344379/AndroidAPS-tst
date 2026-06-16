@@ -47,6 +47,8 @@ internal fun BatchAction.toDto(): BatchActionDto = when (this) {
 
     is BatchAction.CancelTempBasal     -> BatchActionDto(type = BatchActionDto.TYPE_CANCEL_TEMP_BASAL)
     is BatchAction.CancelExtendedBolus -> BatchActionDto(type = BatchActionDto.TYPE_CANCEL_EXTENDED_BOLUS)
+
+    is BatchAction.InsulinActivate     -> BatchActionDto(type = BatchActionDto.TYPE_INSULIN_ACTIVATE, iCfgJson = iCfg.toJsonObject().toString())
 }
 
 /** Wire [BatchActionDto] → domain [BatchAction] (master receive side); null if the type is unknown. */
@@ -64,5 +66,7 @@ internal fun BatchActionDto.toDomain(): BatchAction? = when (type) {
     BatchActionDto.TYPE_EXTENDED_BOLUS        -> BatchAction.ExtendedBolus(insulin, durationMinutes)
     BatchActionDto.TYPE_CANCEL_TEMP_BASAL     -> BatchAction.CancelTempBasal
     BatchActionDto.TYPE_CANCEL_EXTENDED_BOLUS -> BatchAction.CancelExtendedBolus
+    // null (unparseable iCfg) drops the action — prepareBatch's no-action guard then rejects an insulin-only batch.
+    BatchActionDto.TYPE_INSULIN_ACTIVATE      -> iCfgJson?.let { j -> runCatching { (Json.parseToJsonElement(j) as? JsonObject)?.let { ICfg.fromJsonObject(it) } }.getOrNull() }?.let { BatchAction.InsulinActivate(it) }
     else                                      -> null
 }

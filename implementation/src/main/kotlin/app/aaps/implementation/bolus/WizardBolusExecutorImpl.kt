@@ -120,6 +120,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         val extendedBolus: BatchAction.ExtendedBolus? = null,
         val cancelTempBasal: Boolean = false,
         val cancelExtendedBolus: Boolean = false,
+        val insulinActivate: BatchAction.InsulinActivate? = null,
         val recordOnly: Boolean = false,
         val iCfg: ICfg? = null,
         val bolusTimestamp: Long? = null
@@ -260,6 +261,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         val eb = actions.filterIsInstance<BatchAction.ExtendedBolus>().firstOrNull() // ≤1 by construction
         val ctb = actions.filterIsInstance<BatchAction.CancelTempBasal>().firstOrNull() // ≤1 by construction
         val ceb = actions.filterIsInstance<BatchAction.CancelExtendedBolus>().firstOrNull() // ≤1 by construction
+        val ia = actions.filterIsInstance<BatchAction.InsulinActivate>().firstOrNull() // ≤1 by construction
         val recordOnly = bolus?.recordOnly == true
         // Gate + pump-init only for an actual INSULIN delivery — carbs-only, a record-only log, and a TT-only batch
         // are always allowed (mirrors executeBolus, which gates only when insulin > 0).
@@ -341,7 +343,12 @@ class WizardBolusExecutorImpl @Inject constructor(
             if (!pump.isInitialized()) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
             if (!pump.pumpDescription.isExtendedBolusCapable) return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.clientcontrol_pump_out_of_sync))
         }
-        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null && rm == null && tb == null && eb == null && ctb == null && ceb == null)
+        // Insulin activation: the master re-applies its CURRENT active profile with this insulin
+        // (createProfileSwitchWithNewInsulin), which needs an active EPS profile — validate up-front so a no-profile
+        // client gets an error instead of a silent no-op at confirm (the batch confirm path has no per-action failure channel).
+        if (ia != null && profileFunction.getProfile() !is ProfileSealed.EPS)
+            return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_profile_set))
+        if (insulin <= 0.0 && carbs <= 0 && tt == null && ps == null && rm == null && tb == null && eb == null && ctb == null && ceb == null && ia == null)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_action_selected))
         val bolusId = dateUtil.now()
         evictStalePending()
@@ -350,7 +357,8 @@ class WizardBolusExecutorImpl @Inject constructor(
             carbTimeMinutes = bolus?.carbsTimeOffsetMinutes ?: 0, notes = bolus?.notes, mode = BolusMode.FIXED,
             eventType = eventType, carbsDurationHours = bolus?.carbsDurationHours ?: 0,
             tempTarget = tt, profileSwitch = ps, runningMode = rm, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L },
-            tempBasal = cappedTb, extendedBolus = cappedEb, cancelTempBasal = ctb != null, cancelExtendedBolus = ceb != null
+            tempBasal = cappedTb, extendedBolus = cappedEb, cancelTempBasal = ctb != null, cancelExtendedBolus = ceb != null,
+            insulinActivate = ia
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
@@ -361,7 +369,8 @@ class WizardBolusExecutorImpl @Inject constructor(
             (cappedTb?.let { buildTempBasalLine(it, tb) } ?: emptyList()) +
             (cappedEb?.let { buildExtendedBolusLine(it, eb) } ?: emptyList()) +
             (ctb?.let { buildCancelLine(R.string.tempbasal_label) } ?: emptyList()) +
-            (ceb?.let { buildCancelLine(R.string.extended_bolus) } ?: emptyList())
+            (ceb?.let { buildCancelLine(R.string.extended_bolus) } ?: emptyList()) +
+            (ia?.let { buildInsulinActivateLine(it) } ?: emptyList())
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
@@ -417,6 +426,9 @@ class WizardBolusExecutorImpl @Inject constructor(
                 }
             }
             if (tt != null && !raising && accepted) applyTempTarget(tt, source)
+            // Insulin activation re-applies the active profile with the new insulin — run BEFORE any explicit PS
+            // (insulin set first), independent of any dose (an InsulinActivate-only batch no-ops the deliver(0,0)).
+            p.insulinActivate?.let { applyInsulinActivate(it, source) }
             // A profile switch isn't gated on a dose (a PS-only batch funnels through here with a no-op deliver(0,0)).
             p.profileSwitch?.let { applyProfileSwitch(it, source) }
             // A running-mode change is likewise independent of any dose (an RM-only batch no-ops the deliver(0,0)).
@@ -772,6 +784,15 @@ class WizardBolusExecutorImpl @Inject constructor(
     /** The single cancel line — "Cancel: Temp basal" / "Cancel: Extended bolus" ([labelRes] = the cancelled action). */
     private fun buildCancelLine(labelRes: Int): List<ConfirmationLine> =
         listOf(ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.cancel), rh.gs(labelRes))))
+
+    /** The insulin-activate line — "Activate insulin: <label>" (PRIMARY: changing insulin materially affects IOB). */
+    private fun buildInsulinActivateLine(ia: BatchAction.InsulinActivate): List<ConfirmationLine> =
+        listOf(ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.activate_insulin), ia.iCfg.insulinLabel)))
+
+    /** Apply an insulin activation: re-apply the master's CURRENT active profile with this insulin (active-EPS precondition checked at prepare). */
+    private suspend fun applyInsulinActivate(ia: BatchAction.InsulinActivate, source: Sources) {
+        profileFunction.createProfileSwitchWithNewInsulin(ia.iCfg, source)
+    }
 
     override suspend fun deliverWizardBolus(
         insulin: Double,

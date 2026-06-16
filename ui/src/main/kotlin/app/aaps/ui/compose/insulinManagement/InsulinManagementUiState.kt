@@ -29,9 +29,6 @@ data class InsulinManagementUiState(
     // Unsaved changes dialog
     val pendingNavigation: PendingNavigation? = null,
 
-    // Activation dialog
-    val activationMessage: String? = null,
-
     // External (client→master sync) update arrived while the user has unsaved edits — master asks
     val externalUpdatePending: Boolean = false,
 

@@ -87,4 +87,11 @@ sealed interface BatchAction {
 
     /** Stop the running extended bolus on the master's pump (the master cancels its CURRENT extended bolus). */
     data object CancelExtendedBolus : BatchAction
+
+    /**
+     * Activate the insulin config [iCfg]: the master re-applies its CURRENT active profile with this insulin
+     * (`ProfileFunction.createProfileSwitchWithNewInsulin`). Only the insulin config travels — the master is
+     * authoritative for the profile it re-applies. ≤1 per batch. Mirrors [ProfileSwitch] (a config activation).
+     */
+    data class InsulinActivate(val iCfg: ICfg) : BatchAction
 }

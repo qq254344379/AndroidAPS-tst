@@ -1,6 +1,5 @@
 package app.aaps.plugins.sync.nsclientV3.clientcontrol
 
-import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.NSClientRepository
@@ -41,7 +40,7 @@ class ClientControlPublisher @Inject constructor(
     private val nsClientRepository: NSClientRepository,
     private val dateUtil: DateUtil,
     private val aapsLogger: AAPSLogger
-) : ClientControlInsulinSender {
+) {
 
     companion object {
 
@@ -130,7 +129,6 @@ class ClientControlPublisher @Inject constructor(
             is ClientControlMessage.Hello -> "$IDENTIFIER_HELLO_PREFIX${pairing.clientId}"
             is ClientControlMessage.SceneStart,
             is ClientControlMessage.SceneStop,
-            is ClientControlMessage.InsulinActivate,
             ClientControlMessage.Ping,
             ClientControlMessage.DismissAlarm,
             ClientControlMessage.StopBolus,
@@ -146,9 +144,6 @@ class ClientControlPublisher @Inject constructor(
 
     /** Result of [publishTracked]: the send outcome plus the correlation counter (non-null only on Success). */
     data class TrackedPublish(val result: ClientControlSendResult, val counter: Long?)
-
-    override suspend fun sendInsulinActivate(iCfgJson: String): ClientControlSendResult =
-        publish(ClientControlMessage.InsulinActivate(iCfgJson))
 
     private suspend fun uploadEnvelope(identifier: String, envelope: SignedEnvelope): ClientControlSendResult {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: run {

@@ -3,7 +3,6 @@ package app.aaps.plugins.sync.di
 import android.content.Context
 import androidx.work.WorkManager
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
-import app.aaps.core.interfaces.insulin.ClientControlInsulinSender
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
@@ -16,7 +15,6 @@ import app.aaps.plugins.sync.garmin.LoopHub
 import app.aaps.plugins.sync.garmin.LoopHubImpl
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.nsclientV3.StoreDataForDbImpl
-import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
 import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlRoundTrip
 import app.aaps.plugins.sync.nsclientV3.compose.NSClientRepositoryImpl
 import app.aaps.plugins.sync.nsclientV3.data.NSSettingsStatusImpl
@@ -77,8 +75,6 @@ abstract class SyncModule {
         @Binds fun bindNsClient(nsClientV3Plugin: NSClientV3Plugin): NsClient
 
         @Binds fun bindNSClientRepository(nsClientRepositoryImpl: NSClientRepositoryImpl): NSClientRepository
-
-        @Binds fun bindClientControlInsulinSender(publisher: ClientControlPublisher): ClientControlInsulinSender
 
         @Binds fun bindClientControlActionDispatcher(roundTrip: ClientControlRoundTrip): ClientControlActionDispatcher
     }
