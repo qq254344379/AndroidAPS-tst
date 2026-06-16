@@ -42,6 +42,12 @@ import javax.inject.Singleton
  * on a client were eliminated — see MainApp migrations — so the modal only ever shows for real edits).
  *
  * Adding a new bidirectional setting requires no change here — it just shows up as another key.
+ *
+ * UnitDouble values are transmitted RAW (mg/dL) via [Preferences.getRaw], not in the user's display
+ * unit: the persisted/canonical form is always mg/dL and the display-unit conversion is a presentation
+ * concern. Shipping raw keeps client and master unit-agnostic over the wire — the master stores exactly
+ * what it receives and each side renders in its own unit, so a unit mismatch between the two devices can
+ * never corrupt the stored value.
  */
 @OptIn(FlowPreview::class)
 @Singleton
@@ -53,7 +59,9 @@ class PreferencesClientPublisher @Inject constructor(
     private val aapsLogger: AAPSLogger
 ) {
 
-    private var job: Job? = null
+    // @Volatile: start()/stop() may be called from different threads (lifecycle vs UI); the read in
+    // start()'s `if (job != null)` guard must see a write from stop() on another thread.
+    @Volatile private var job: Job? = null
 
     // Keys changed since the last round-trip, drained on each debounced trigger.
     private val pending = mutableSetOf<NonPreferenceKey>()
@@ -85,7 +93,15 @@ class PreferencesClientPublisher @Inject constructor(
         job = null
     }
 
-    /** (serialized value, lastModified) for a synced key, or null for an unsupported type. */
+    /**
+     * (serialized value, lastModified) for a synced key, or null for an unsupported type.
+     *
+     * Known-benign read race: the value and its SyncedPrefModified timestamp are read in two separate
+     * `preferences.get` calls, so a concurrent edit between them could pair a new value with an old
+     * timestamp (or vice-versa). Not guarded — the master applies per-key last-writer-wins keyed on the
+     * timestamp, and the very next edit re-emits the key with a consistent (value, timestamp), so any
+     * transient mismatch self-corrects on the master without a lost write.
+     */
     private fun serialize(key: NonPreferenceKey): Pair<String, Long>? {
         val value = when (key) {
             is BooleanNonPreferenceKey -> preferences.get(key).toString()

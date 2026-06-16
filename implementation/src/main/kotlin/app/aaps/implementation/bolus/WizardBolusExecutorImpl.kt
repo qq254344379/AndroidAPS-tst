@@ -271,6 +271,9 @@ class WizardBolusExecutorImpl @Inject constructor(
                 return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_pump_not_available))
         }
         // Cap a delivery (caps only reduce = safe); a record-only is persisted as given (a record must not be altered).
+        // SECURITY NOTE: record-only is DELIBERATELY uncapped (a legitimate pen bolus may exceed the soft max). A
+        // recorded bolus still counts toward IOB/TDD, so a relayed value from a compromised paired client could skew
+        // IOB. No absolute sanity ceiling is applied here yet — a bound needs a chosen value (review finding, pending).
         val (insulin, carbs, eventType) = when {
             bolus == null -> Triple(0.0, 0, TE.Type.CORRECTION_BOLUS)
             recordOnly    -> Triple(bolus.insulin, bolus.carbs, TE.Type.CORRECTION_BOLUS)
@@ -386,10 +389,16 @@ class WizardBolusExecutorImpl @Inject constructor(
         // the shared core — no wizard recompute, no super-bolus/eCarbs/advisor (all wizard-only).
         if (p.mode == BolusMode.FIXED) {
             // A FIXED entry may carry a batch TempTarget. Decision-B order: a target-RAISING TT (hypo/activity) is
-            // applied FIRST + unconditional; a target-LOWERING (eating-soon) TT applies only if the bolus was accepted.
+            // applied FIRST + unconditional; a target-LOWERING (eating-soon) TT applies only if the bolus passed the
+            // SYNCHRONOUS gate (see `accepted` below).
             val tt = p.tempTarget
             val raising = tt != null && (tt.reason == TT.Reason.HYPOGLYCEMIA.text || tt.reason == TT.Reason.ACTIVITY.text)
             if (tt != null && raising) applyTempTarget(tt, source)
+            // CAUTION: `accepted` flips false ONLY on a SYNCHRONOUS rejection (the running-mode gate, or a record-only
+            // persist error). The actual pump delivery is asynchronous (`commandQueue.bolus` on appScope in executeBolus),
+            // so a real PUMP failure fires AFTER confirm() has already returned — it is surfaced by the executor's URGENT
+            // BOLUS_DELIVERY_FAILED alarm, NOT by reverting the steps below. Consequence: a target-LOWERING TT / PS / RM
+            // can still apply when the bolus was queued but later failed on the pump (the alarm is the mitigation).
             var accepted = true
             val wrapped: (String) -> Unit = { accepted = false; onError(it) }
             when {

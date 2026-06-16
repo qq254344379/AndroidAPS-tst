@@ -270,6 +270,11 @@ class ClientControlReceiver @Inject constructor(
         // result. Fire-and-forget commands (scenes, pref sync) skip it — no client is waiting, so the
         // ACK doc would be pure write amplification.
         if (envelope.wantsAck) writeAck(client, lookup.secretBytes, envelope.clientId, envelope.counter, AckPhase.Executing, AckStatus.Pending, null, null, now)
+        // Advance the replay counter ONCE here — post-gate, pre-dispatch — so a command can never be re-executed even
+        // if a handler throws or early-returns before its own bump. The whole pipeline is inside commandMutex, so this
+        // just makes the protection order explicit; the per-handler bumpLastSeen calls become idempotent no-ops (same
+        // counter). (Hello is handled above via markActive; the expiry branch bumps + returns before reaching here.)
+        authorizedRepository.bumpLastSeen(entry.clientId, envelope.counter, now)
         val outcome = when (message) {
             null                                      -> {
                 onVerifiedUndecodablePayload(entry, envelope, now)
@@ -461,8 +466,12 @@ class ClientControlReceiver @Inject constructor(
         // client turns into its own alarm. (The master itself already alarms via the executor — phase 1a.)
         // Arm the progress mirror to THIS client BEFORE delivery starts (the executor only sees Sources.NSClient,
         // not the clientId). Disarmed below if nothing was parked, and on the terminal frame by the observer.
-        progressClientId.set(entry.clientId)
+        // Order matters: write progressArmedAt (plain @Volatile) BEFORE progressClientId.set() (AtomicReference). The
+        // collector reads progressClientId.get() (acquire) then progressArmedAt; the release fence on .set() publishes
+        // the prior armedAt write, so the collector can never observe the new clientId with a stale armedAt(0) and
+        // wrongly drop the first progress frames (armedFresh=false).
         progressArmedAt = now
+        progressClientId.set(entry.clientId)
         val syncDone = AtomicBoolean(false)
         val result = wizardBolusExecutor.confirm(message.bolusId, Sources.NSClient, { comment ->
             if (syncDone.get()) appScope.launch { writeDeliveryFailureAck(entry, envelope.counter, comment) }

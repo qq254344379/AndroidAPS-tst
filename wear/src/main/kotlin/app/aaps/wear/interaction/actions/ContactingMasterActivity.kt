@@ -42,7 +42,15 @@ class ContactingMasterActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Race guard: a dismiss() that arrived between show()'s startActivity and this onCreate cleared `pending`.
+        // In that case the terminal already resolved → finish immediately instead of spinning until the timeout.
+        if (!pending) {
+            finish()
+            return
+        }
         current = this
+        // The activity now exists; the `current != null` guard takes over from `pending` for re-entry protection.
+        pending = false
 
         setContent {
             MaterialTheme {
@@ -88,7 +96,11 @@ class ContactingMasterActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (current === this) current = null
+        if (current === this) {
+            current = null
+            // Covers a self-timeout finish (which does not go through dismiss()) so a later show() is not blocked.
+            pending = false
+        }
     }
 
     companion object {
@@ -98,14 +110,20 @@ class ContactingMasterActivity : ComponentActivity() {
         // Same-process single-instance handle so the Data-Layer terminal handlers can dismiss the spinner.
         @Volatile private var current: ContactingMasterActivity? = null
 
+        // Set by show() before the activity actually launches, cleared by dismiss(). Closes the RemoteDelivered race
+        // where a terminal (dismiss) arrives before the spinner's onCreate runs: onCreate reads this and self-finishes.
+        @Volatile private var pending = false
+
         /** Show the spinner (no-op if one is already up — the prepare spinner stays through to the lines screen). */
         fun show(context: Context) {
-            if (current != null) return
+            if (current != null || pending) return
+            pending = true
             context.startActivity(Intent(context, ContactingMasterActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
         }
 
-        /** Dismiss the spinner when a terminal arrives (or never showed → no-op). */
+        /** Dismiss the spinner when a terminal arrives (cancels a still-pending show, or no-ops if never shown). */
         fun dismiss() {
+            pending = false
             current?.finish()
             current = null
         }

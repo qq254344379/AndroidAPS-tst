@@ -398,12 +398,21 @@ class FillDialogViewModel @Inject constructor(
      * Non-interactive insulin activation for the fill flow (a chained profile switch after a prime) — relays through
      * the master-controlled [BatchExecutor] like everything else, but with NO confirmation UI: prepare then commit
      * back-to-back. Master → local; client → signed round-trip. Failures are surfaced by the round-trip's app-level
-     * modal (client) / are silent here (master local), matching the prior fire-and-forget semantics.
+     * modal (client); on the master-local path they have no UI here, so a [ActionProgress.Rejected] prepare/commit is
+     * logged (no longer silently swallowed), matching the prior fire-and-forget semantics otherwise.
      */
     private suspend fun activateInsulin(iCfg: ICfg) {
         val label = rh.gs(CoreUiR.string.activate_insulin)
-        val prepared = batchExecutor.prepare(listOf(BatchAction.InsulinActivate(iCfg)), Sources.FillDialog, label)
-        if (prepared is ActionProgress.Prepared) batchExecutor.commit(prepared.id, Sources.FillDialog, label)
+        when (val prepared = batchExecutor.prepare(listOf(BatchAction.InsulinActivate(iCfg)), Sources.FillDialog, label)) {
+            is ActionProgress.Prepared -> {
+                val committed = batchExecutor.commit(prepared.id, Sources.FillDialog, label)
+                if (committed is ActionProgress.Rejected)
+                    aapsLogger.warn(LTag.UI, "Fill insulin activation commit rejected: ${committed.reason} ${committed.detail}")
+            }
+
+            is ActionProgress.Rejected -> aapsLogger.warn(LTag.UI, "Fill insulin activation prepare rejected: ${prepared.reason} ${prepared.detail}")
+            else                       -> Unit
+        }
     }
 
     fun decimalFormat(): DecimalFormat =

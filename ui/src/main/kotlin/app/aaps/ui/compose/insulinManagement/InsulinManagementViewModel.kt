@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import app.aaps.core.ui.R as CoreUiR
 
@@ -89,6 +90,10 @@ class InsulinManagementViewModel @Inject constructor(
     // Last InsulinConfiguration value this VM has accounted for. Lets [onExternalConfigChange] tell
     // our own saves (which also write the pref) apart from external client→master sync pushes.
     private var lastAppliedConfig: String = ""
+
+    // Guards [prepareActivation] against re-taps while a prepare round-trip is still in flight, so a
+    // double-tap on Activate can't launch two concurrent prepares.
+    private val activating = AtomicBoolean(false)
 
     init {
         lastAppliedConfig = preferences.get(StringNonKey.InsulinConfiguration)
@@ -454,19 +459,25 @@ class InsulinManagementViewModel @Inject constructor(
      * [commit] applies it. appScope: the round-trip can outlive the screen.
      */
     fun prepareActivation() {
+        // Ignore re-taps while a prepare is already in flight (the round-trip can take a moment on a client).
+        if (!activating.compareAndSet(false, true)) return
         appScope.launch {
-            val state = uiState.value
-            val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return@launch
-            val label = rh.gs(CoreUiR.string.activate_insulin)
-            when (val prepared = batchExecutor.prepare(listOf(BatchAction.InsulinActivate(iCfg)), Sources.Insulin, label)) {
-                is ActionProgress.Prepared -> _sideEffect.emit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
-                // Offline block (and a master-local failure, e.g. no active profile) surface here; a client round-trip
-                // failure already showed on the app-level modal.
-                is ActionProgress.Rejected ->
-                    if (prepared.reason == FailureReason.NotReachable) showSnackbar(rh.gs(CoreUiR.string.clientcontrol_fail_not_reachable))
-                    else prepared.detail?.let { showSnackbar(it) }
+            try {
+                val state = uiState.value
+                val iCfg = state.insulins.getOrNull(state.currentCardIndex) ?: return@launch
+                val label = rh.gs(CoreUiR.string.activate_insulin)
+                when (val prepared = batchExecutor.prepare(listOf(BatchAction.InsulinActivate(iCfg)), Sources.Insulin, label)) {
+                    is ActionProgress.Prepared -> _sideEffect.emit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
+                    // Offline block (and a master-local failure, e.g. no active profile) surface here; a client round-trip
+                    // failure already showed on the app-level modal.
+                    is ActionProgress.Rejected ->
+                        if (prepared.reason == FailureReason.NotReachable) showSnackbar(rh.gs(CoreUiR.string.clientcontrol_fail_not_reachable))
+                        else prepared.detail?.let { showSnackbar(it) }
 
-                else                       -> Unit // Unconfirmed → app-level modal
+                    else                       -> Unit // Unconfirmed → app-level modal
+                }
+            } finally {
+                activating.set(false)
             }
         }
     }

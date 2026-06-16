@@ -40,6 +40,11 @@ class AuthorizedClientsViewModel @Inject constructor(
 
     companion object {
 
+        /**
+         * PIN-entry window: how long a freshly-shown pairing PIN stays redeemable (2 min). This is the
+         * human-facing "type the code before it expires" deadline — NOT the signed-command round-trip
+         * TTL (`validUntil`) that bounds an individual control message's request/response lifetime.
+         */
         const val PAIR_TTL_MS = 2L * 60L * 1000L
     }
 
@@ -68,7 +73,11 @@ class AuthorizedClientsViewModel @Inject constructor(
      * Outstanding publishOffer job for the live pairing. dismissPairing awaits it before
      * deleteOffer fires, so a fast "Add then immediately Done" cannot let the delete arrive
      * before the publish — which would leave the offer doc orphaned on NS for the full TTL.
+     *
+     * `@Volatile`: written from viewModelScope launches (confirmAdd/retryPublish/dismissPairing)
+     * and from the init collector, so publish the latest reference across threads.
      */
+    @Volatile
     private var publishJob: Job? = null
 
     init {
@@ -133,6 +142,12 @@ class AuthorizedClientsViewModel @Inject constructor(
         val offer = _pairingOffer.value ?: return
         if (offer.publishStatus != PublishStatus.Failed) return
         val entry = repository.findRaw(offer.clientId) ?: return
+        // Don't re-publish an offer whose PIN window has already closed — surface Failed instead so
+        // the user re-adds for a fresh PIN rather than uploading a doc no client could ever redeem.
+        if (dateUtil.now() >= entry.pairExpiresAt) {
+            _pairingOffer.update { it?.copy(publishStatus = PublishStatus.Failed) }
+            return
+        }
         val secretHex = repository.secretLookup(entry.clientId)?.secretBytes
             ?.let { ClientControlCrypto.bytesToHex(it) } ?: return
         val payload = PairingPayload(
@@ -190,6 +205,10 @@ class AuthorizedClientsViewModel @Inject constructor(
      * Drop pending entries past their pairExpiresAt and delete the matching offer docs from NS.
      * Drives delete off the actual repository-prune result instead of a `clients.value` snapshot
      * (which can lag the prefs due to `WhileSubscribed(5_000)` collector pauses).
+     *
+     * Intentionally driven from the screen's 1 Hz poll loop (only while a Pending entry is shown),
+     * not a background ticker — pruning has no value when nobody is watching the list, so this
+     * avoids a battery-wasting always-on timer for a purely cosmetic countdown.
      */
     fun pruneExpired() {
         val droppedIds = repository.pruneExpired(dateUtil.now())

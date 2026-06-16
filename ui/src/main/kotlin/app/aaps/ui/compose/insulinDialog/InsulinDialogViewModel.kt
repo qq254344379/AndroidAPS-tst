@@ -210,7 +210,7 @@ class InsulinDialogViewModel @Inject constructor(
         }
     }
 
-    private var confirmedState: InsulinDialogUiState? = null
+    @Volatile private var confirmedState: InsulinDialogUiState? = null
 
     /**
      * Tap-confirm → ask the MASTER to PREPARE the batch (cap + build the merged confirmation). Client = signed
@@ -248,8 +248,13 @@ class InsulinDialogViewModel @Inject constructor(
             // Non-record: remove the bolus reminder on success. Record-only: only when not back/forward-dated.
             if (result is ActionProgress.Applied && (state == null || !state.recordOnlyChecked || state.timeOffsetMinutes == 0))
                 automation.removeAutomationEventBolusReminder()
-            if (result is ActionProgress.Rejected && result.reason == FailureReason.NotReachable)
-                _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+            // Surface a failed commit. NotReachable → the offline message; any other Rejected (ExecutionFailed,
+            // NoPendingBolus, …) → the master's detail. Unconfirmed (state unknown) rides the round-trip's app-level modal.
+            if (result is ActionProgress.Rejected) {
+                if (result.reason == FailureReason.NotReachable)
+                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                else result.detail?.let { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) }
+            }
         }
     }
 

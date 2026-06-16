@@ -191,6 +191,12 @@ class SceneListViewModel @Inject constructor(
 
     // --- Activation flow ---
 
+    /**
+     * Prepare step: ask the MASTER to PREPARE the scene and stash its authored confirmation in the
+     * dialog. The `bolusId` returned in [ActionProgress.Prepared] is the master's **consume-once
+     * commit token** (parked-scene id) — [confirmActivation] commits exactly that token, so the
+     * master can ignore any duplicate commit for an already-consumed id.
+     */
     fun requestActivation(scene: Scene) {
         viewModelScope.launch {
             // Scene disabled: ignore — UI already disables the play button.
@@ -217,6 +223,11 @@ class SceneListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Commit step: clear the dialog FIRST (so a fast double-tap can't enqueue two commits) then
+     * commit the master's prepared scene via its consume-once `bolusId` token — the master activates
+     * exactly once (master local / client round-trip) and discards any duplicate for that id.
+     */
     fun confirmActivation() {
         val state = _dialogState.value as? DialogState.ConfirmActivation ?: return
         _dialogState.value = null
@@ -224,6 +235,12 @@ class SceneListViewModel @Inject constructor(
         viewModelScope.launch { sceneActions.commitStart(state.bolusId) }
     }
 
+    /**
+     * Prepare step for ending the active scene: builds the revert summary + chain-target dialog.
+     * Deactivation carries no consume-once `bolusId` (unlike activation) — the master derives the
+     * target purely from its own active scene, so [confirmDeactivation] just clears the dialog and
+     * calls stop; idempotence comes from there being a single active scene to end.
+     */
     fun requestDeactivation() {
         val activeState = activeSceneManager.getActiveState() ?: return
         viewModelScope.launch {
@@ -243,6 +260,11 @@ class SceneListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Commit step: clear the dialog FIRST (so a fast double-tap can't enqueue two stops) then end the
+     * active scene. No `bolusId` token is needed — the master ends whatever scene is currently active,
+     * so a duplicate stop after the scene is gone is a no-op.
+     */
     fun confirmDeactivation() {
         _dialogState.value = null
         viewModelScope.launch { sceneActions.stop(triggerChain = false) }

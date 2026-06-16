@@ -22,6 +22,7 @@ data class PairingPayload(
     val v: Int = 1,
     val masterInstallId: String,
     val clientId: String,
+    /** SENSITIVE — the raw shared HMAC secret (hex). Never log this field. */
     val secretHex: String,
     val expiresAt: Long
 )

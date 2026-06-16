@@ -27,6 +27,13 @@ data class AuthorizedClient(
     val state: ClientState,
     val createdAt: Long,
     val lastSeenAt: Long = 0L,
+    /**
+     * Highest command counter already accepted from this client. Defaults to `0L` for a freshly
+     * paired (or legacy) entry, so the very first command — which carries counter ≥ 1 — passes the
+     * strictly-greater replay gate. The receiver accepts a command only when its counter is
+     * STRICTLY greater than this, then advances this to it; a replayed command (counter ≤ this) is
+     * rejected.
+     */
     val counterReceived: Long = 0L,
 
     @SerialName("pairExpiresAt")
@@ -36,5 +43,6 @@ data class AuthorizedClient(
 @Serializable
 enum class ClientState {
 
-    Pending, Active
+    @SerialName("Pending") Pending,
+    @SerialName("Active") Active
 }

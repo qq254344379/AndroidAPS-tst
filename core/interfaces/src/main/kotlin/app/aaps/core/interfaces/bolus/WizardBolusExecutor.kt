@@ -56,9 +56,13 @@ interface WizardBolusExecutor {
     suspend fun prepareBatch(actions: List<BatchAction>): PrepareResult
 
     /**
-     * Drain the slot, verify [bolusId] matches the parked bolus, and deliver. Idempotent: a second
-     * confirm finds the slot empty → [ConfirmResult.NoPending], never a second bolus. [asAdvisor] delivers the
-     * correction-only advisor bolus (high-BG "eat later" branch) instead of the carb wizard bolus.
+     * Drain the slot, verify [bolusId] matches the parked bolus, and deliver. Idempotent (consume-once): a second
+     * confirm finds the slot empty → [ConfirmResult.NoPending], never a second bolus. For a batch the steps run in
+     * Decision-B order: target-RAISING TT (unconditional) → bolus/carbs → target-LOWERING TT (only if the bolus passed
+     * the synchronous gate) → ProfileSwitch / RunningMode / InsulinActivate. [onError] reports only SYNCHRONOUS failures
+     * (the running-mode gate or a record-only persist error); an async pump-delivery failure is surfaced by the
+     * executor's URGENT alarm, NOT via [onError]. [asAdvisor] delivers the correction-only advisor bolus (high-BG "eat
+     * later" branch) instead of the carb wizard bolus.
      */
     suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean = false): ConfirmResult
 

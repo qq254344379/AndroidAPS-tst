@@ -22,11 +22,16 @@ import javax.inject.Singleton
  * [SecureEncrypt] (AndroidKeyStore-backed AES/GCM) before persistence and
  * unwrapped only on demand.
  *
- * All mutations and the prune-on-read path go through a single intrinsic lock
- * so the UI thread (delete/add) cannot race the WS handler thread (markActive
- * / bumpLastSeen). Without this, a bump racing a delete could re-write the
- * deleted entry and silently re-admit a revoked client — a safety concern on
- * a pump-control surface.
+ * All mutations and the prune-on-read path go through a single intrinsic lock.
+ * The lock does NOT, by itself, stop a bump from resurrecting a deleted entry —
+ * every mutation re-decodes the current prefs and maps over that fresh snapshot,
+ * so an entry already removed simply isn't in the list a concurrent bump maps
+ * over (it can't re-add what it never read). What the lock actually buys is
+ * atomicity of the read-modify-write: concurrent bumpLastSeen / markActive /
+ * delete calls each do decode → transform → write, and without serialization
+ * two such cycles could interleave and have one overwrite the other's update
+ * (lost counter / lost deletion). Serializing them keeps every committed write
+ * built on the latest persisted state — relevant on a pump-control surface.
  */
 @Singleton
 class AuthorizedClientsRepository @Inject constructor(
@@ -88,7 +93,13 @@ class AuthorizedClientsRepository @Inject constructor(
         write(decode().filterNot { it.clientId == clientId })
     }
 
-    /** Promote a pending entry to active on first verified hello. No-op if not present or already active. */
+    /**
+     * Promote a pending entry to active on first verified hello. No-op if not present or already active.
+     *
+     * Callers must first resolve the entry via [current] (now) — which prunes expired pending entries —
+     * so a hello arriving after the pairing window has lapsed does not promote a stale entry that
+     * [current] would otherwise have dropped.
+     */
     fun markActive(clientId: String, counterReceived: Long, now: Long): Unit = synchronized(lock) {
         val list = decode()
         val updated = list.map {

@@ -68,13 +68,24 @@ class PairingOfferPublisher @Inject constructor(
         }
     }
 
+    /**
+     * Removes the published `aaps_clientcontrol_offer_<clientId>` doc from NS.
+     *
+     * Called on dialog dismiss / pair-complete / expiry to close the PIN brute-force window —
+     * while the offer doc lives on NS, anyone with read access can keep trying PINs against the
+     * wrapped payload, so prompt deletion is a security-relevant operation.
+     *
+     * A delete failure is logged (ERROR) but never thrown: a left-over offer is bounded anyway
+     * by its own `expiresAt`, so failing the caller would be worse than retrying on the next
+     * cleanup pass. Non-throwing is intentional — do not change the signature/return type.
+     */
     suspend fun deleteOffer(clientId: String) {
         val client = nsClientV3Plugin.get().nsAndroidClient ?: return
         val identifier = "${ClientControlPublisher.IDENTIFIER_OFFER_PREFIX}$clientId"
         try {
             client.deleteSettings(identifier)
         } catch (e: IOException) {
-            aapsLogger.warn(LTag.NSCLIENT, "PairingOffer delete failed for $identifier: ${e.message}")
+            aapsLogger.error(LTag.NSCLIENT, "PairingOffer delete failed for $identifier: ${e.message}")
         }
     }
 

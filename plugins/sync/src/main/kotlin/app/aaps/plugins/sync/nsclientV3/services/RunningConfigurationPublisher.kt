@@ -21,6 +21,7 @@ import app.aaps.plugins.sync.nsclientV3.services.RunningConfigurationPublisher.C
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -73,7 +74,16 @@ class RunningConfigurationPublisher @Inject constructor(
     // client converge a superseded edit instead of being stuck on its optimistic value.
     private val forceColdRepublish = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
-    /** Master-side: republish the cold doc now (debounced with the other cold triggers). */
+    /**
+     * Master-side: republish the cold doc now (debounced with the other cold triggers).
+     *
+     * Why an explicit, unconditional republish is needed (rather than relying on the observeChange
+     * trigger): when an inbound client pref command carries a value that loses last-write-wins — or
+     * even ties it with the SAME `SyncedPrefModified` stamp — there is no winner, so the stored key
+     * does not change and observeChange never fires. The client would then stay stuck on its
+     * optimistic value. Forcing a republish here pushes the authoritative value back so the client
+     * converges its superseded edit.
+     */
     fun requestColdRepublish() {
         forceColdRepublish.tryEmit(Unit)
     }
@@ -88,8 +98,16 @@ class RunningConfigurationPublisher @Inject constructor(
             // connected). In poll mode there is no WS connect event to hook, so fall back to a start-time
             // publish there.
             if (!preferences.get(BooleanKey.NsClient3UseWs)) {
-                publishCold()
+                val coldPublished = publishCold()
                 publishHot()
+                // Poll-mode race: the pump may not be initialized yet at start, so the initial cold publish
+                // emits an empty payload and is skipped — leaving a poll-mode client config-less (no WS-connect
+                // event to retry on). Schedule one delayed retry via the existing cold collector so it picks up
+                // once the pump is ready.
+                if (!coldPublished) launch {
+                    delay(POLL_INITIAL_RETRY_MS)
+                    requestColdRepublish()
+                }
             }
 
             val switchTrigger: Flow<Unit> = rxBus.toFlow(EventConfigBuilderChange::class.java).map { }
@@ -136,9 +154,10 @@ class RunningConfigurationPublisher @Inject constructor(
     }
 
     // Cold doc: full plugin/overview/definition config + the authorized-clients roster.
-    private suspend fun publishCold() {
+    // Returns true if a doc was published, false if skipped because the pump is not initialized yet.
+    private suspend fun publishCold(): Boolean {
         val payload = runningConfiguration.configuration()
-        if (payload.length() == 0) return // pump not initialized yet
+        if (payload.length() == 0) return false // pump not initialized yet
         // Append the authorized-clients roster directly on the runningConfig JSONObject — the
         // canonical RunningConfiguration plugin (in :plugins:configuration) cannot reach
         // AuthorizedClientsRepository without a new inter-module dependency, so we attach
@@ -148,6 +167,7 @@ class RunningConfigurationPublisher @Inject constructor(
             .map { it.clientId }
         payload.put("authorizedClients", JSONObject().put("clientIds", JSONArray(activeClientIds)))
         putSettings(SettingsIdentifiers.COLD, payload)
+        return true
     }
 
     // Hot doc: active scene + computed runtime flags. Small and frequently republished.
@@ -189,6 +209,10 @@ class RunningConfigurationPublisher @Inject constructor(
         private const val COLD_DEBOUNCE_MS = 5_000L
         private const val HOT_DEBOUNCE_MS = 1_000L
         private const val WS_RECONNECT_DEBOUNCE_MS = 3_000L
+
+        // Poll-mode only: delay before retrying the initial cold publish when the pump was not yet
+        // initialized at start. One shot, fed through the debounced cold collector via requestColdRepublish().
+        private const val POLL_INITIAL_RETRY_MS = 10_000L
 
         // 1 ms past NS APIv3 MIN_TIMESTAMP (946684800000 = 2000-01-01 UTC). Required by
         // validateCommon and immutable after create — kept constant so every update matches.

@@ -30,14 +30,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.aaps.core.nssdk.localmodel.clientcontrol.PairingPayload
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTopAppBar
+import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.plugins.sync.R
 
 private const val PIN_LENGTH = 8
@@ -95,7 +96,7 @@ fun PairWithMasterScreen(
                 PairWithMasterViewModel.UiState.Fetching         -> FetchingContent()
 
                 is PairWithMasterViewModel.UiState.Confirming    -> ConfirmPairingDialog(
-                    payload = s.payload,
+                    masterInstallId = s.payload.masterInstallId,
                     onConfirm = viewModel::confirmPair,
                     onCancel = viewModel::cancelConfirmation
                 )
@@ -118,9 +119,11 @@ fun PairWithMasterScreen(
 private fun PinEntryContent(onSubmit: (String) -> Unit) {
     var pin by remember { mutableStateOf("") }
     val complete = pin.length == PIN_LENGTH
+    val focusManager = LocalFocusManager.current
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .clearFocusOnTap(focusManager)
             .padding(AapsSpacing.xxLarge),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -200,7 +203,7 @@ private fun SendingContent() {
 
 @Composable
 private fun ConfirmPairingDialog(
-    payload: PairingPayload,
+    masterInstallId: String,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -210,7 +213,7 @@ private fun ConfirmPairingDialog(
         text = {
             Column {
                 Text(
-                    text = stringResource(R.string.pair_with_master_confirm_master, payload.masterInstallId),
+                    text = stringResource(R.string.pair_with_master_confirm_master, masterInstallId),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(

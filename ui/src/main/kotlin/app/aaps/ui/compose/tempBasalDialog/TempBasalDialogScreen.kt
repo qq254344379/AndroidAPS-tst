@@ -139,7 +139,7 @@ private fun TempBasalDialogContent(
                     focusManager.clearFocus()
                     onConfirmClick()
                 },
-                enabled = hasAction || uiState.durationMinutes > 0.0,
+                enabled = (hasAction || uiState.durationMinutes > 0.0) && !uiState.isPreparing,
                 modifier = Modifier
                     .fillMaxWidth()
                     .bottomBarSafeArea()

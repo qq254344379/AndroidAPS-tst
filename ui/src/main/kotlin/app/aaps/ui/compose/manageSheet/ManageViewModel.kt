@@ -36,6 +36,7 @@ import app.aaps.core.objects.extensions.toStringMedium
 import app.aaps.core.objects.extensions.toStringShort
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.ui.R as UiR
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -132,8 +133,7 @@ class ManageViewModel @Inject constructor(
                 if (activeExtendedBolus != null) {
                     showExtendedBolus = false
                     showCancelExtendedBolus = true // cancel relays to the master via batchExecutor → shown on a client too
-                    cancelExtendedBolusText = rh.gs(R.string.cancel) + " " +
-                        activeExtendedBolus.toStringMedium(dateUtil, rh)
+                    cancelExtendedBolusText = rh.gs(UiR.string.cancel_action_with_details, rh.gs(R.string.cancel), activeExtendedBolus.toStringMedium(dateUtil, rh))
                 } else {
                     showExtendedBolus = true
                     showCancelExtendedBolus = false
@@ -159,8 +159,7 @@ class ManageViewModel @Inject constructor(
                 if (activeTemp != null) {
                     showTempBasal = false
                     showCancelTempBasal = true // cancel relays to the master via batchExecutor → shown on a client too
-                    cancelTempBasalText = rh.gs(R.string.cancel) + " " +
-                        activeTemp.toStringShort(rh)
+                    cancelTempBasalText = rh.gs(UiR.string.cancel_action_with_details, rh.gs(R.string.cancel), activeTemp.toStringShort(rh))
                 } else {
                     showTempBasal = true
                     showCancelTempBasal = false

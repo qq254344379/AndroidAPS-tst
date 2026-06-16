@@ -147,7 +147,7 @@ private fun ExtendedBolusDialogContent(
                     focusManager.clearFocus()
                     onConfirmClick()
                 },
-                enabled = uiState.insulin > 0.0,
+                enabled = uiState.insulin > 0.0 && !uiState.isPreparing,
                 modifier = Modifier
                     .fillMaxWidth()
                     .bottomBarSafeArea()

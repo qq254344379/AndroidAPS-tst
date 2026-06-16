@@ -102,23 +102,30 @@ class TempBasalDialogViewModel @Inject constructor(
      * screen may navigate away (cancelling viewModelScope) while the round-trip is in flight.
      */
     fun prepareAndConfirm() {
+        // Ignore re-taps while a prepare is already in flight; the screen also disables Confirm via isPreparing.
+        if (uiState.value.isPreparing) return
         appScope.launch {
             val state = uiState.value
             if (state.durationMinutes <= 0.0) {
                 _sideEffect.tryEmit(SideEffect.ShowNoActionDialog)
                 return@launch
             }
-            val rate = if (state.isPercentPump) state.basalPercent else state.basalAbsolute
-            val action = BatchAction.TempBasal(rate = rate, isPercent = state.isPercentPump, durationMinutes = state.durationMinutes.toInt())
-            val label = rh.gs(app.aaps.core.ui.R.string.tempbasal_label)
-            when (val prepared = batchExecutor.prepare(listOf(action), Sources.TempBasalDialog, label)) {
-                is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
-                // Offline block (and a master-local failure) surface here; a client round-trip failure already showed on the modal.
-                is ActionProgress.Rejected ->
-                    if (prepared.reason == FailureReason.NotReachable) _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
-                    else prepared.detail?.let { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) }
+            _uiState.update { it.copy(isPreparing = true) }
+            try {
+                val rate = if (state.isPercentPump) state.basalPercent else state.basalAbsolute
+                val action = BatchAction.TempBasal(rate = rate, isPercent = state.isPercentPump, durationMinutes = state.durationMinutes.toInt())
+                val label = rh.gs(app.aaps.core.ui.R.string.tempbasal_label)
+                when (val prepared = batchExecutor.prepare(listOf(action), Sources.TempBasalDialog, label)) {
+                    is ActionProgress.Prepared -> _sideEffect.tryEmit(SideEffect.ShowConfirmation(prepared.id, prepared.lines))
+                    // Offline block (and a master-local failure) surface here; a client round-trip failure already showed on the modal.
+                    is ActionProgress.Rejected ->
+                        if (prepared.reason == FailureReason.NotReachable) _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                        else prepared.detail?.let { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) }
 
-                else                       -> Unit // Unconfirmed → app-level modal
+                    else                       -> Unit // Unconfirmed → app-level modal
+                }
+            } finally {
+                _uiState.update { it.copy(isPreparing = false) }
             }
         }
     }

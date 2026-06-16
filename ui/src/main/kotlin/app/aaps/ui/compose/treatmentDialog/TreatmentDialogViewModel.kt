@@ -109,7 +109,7 @@ class TreatmentDialogViewModel @Inject constructor(
         _uiState.update { it.copy(carbs = value) }
     }
 
-    private var confirmedState: TreatmentDialogUiState? = null
+    @Volatile private var confirmedState: TreatmentDialogUiState? = null
 
     /**
      * Tap-confirm → ask the MASTER to PREPARE the treatment (cap + build the merged confirmation). Client = signed
@@ -140,8 +140,13 @@ class TreatmentDialogViewModel @Inject constructor(
     fun commit(bolusId: Long) {
         appScope.launch {
             val result = batchExecutor.commit(bolusId, Sources.TreatmentDialog, rh.gs(app.aaps.core.ui.R.string.bolus))
-            if (result is ActionProgress.Rejected && result.reason == FailureReason.NotReachable)
-                _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+            // Surface a failed commit. NotReachable → the offline message; any other Rejected (ExecutionFailed,
+            // NoPendingBolus, …) → the master's detail. Unconfirmed (state unknown) rides the round-trip's app-level modal.
+            if (result is ActionProgress.Rejected) {
+                if (result.reason == FailureReason.NotReachable)
+                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                else result.detail?.let { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) }
+            }
         }
     }
 

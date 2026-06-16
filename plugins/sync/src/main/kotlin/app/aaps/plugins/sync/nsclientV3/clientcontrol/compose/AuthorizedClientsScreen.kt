@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -52,6 +53,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.AuthorizedClient
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientState
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTopAppBar
+import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.plugins.sync.R
 import kotlinx.coroutines.delay
 
@@ -135,9 +137,15 @@ fun AuthorizedClientsScreen(
                     verticalArrangement = Arrangement.spacedBy(AapsSpacing.medium)
                 ) {
                     items(clients, key = { it.clientId }) { client ->
+                        // Compute the time label here (viewModel in scope) and pass it down as a plain
+                        // string — the card/badge stay state-down, events-up with no viewModel handle.
+                        val timeLabel = when (client.state) {
+                            ClientState.Active  -> viewModel.lastSeenLabel(client)
+                            ClientState.Pending -> viewModel.pendingExpiresLabel(client)
+                        }
                         AuthorizedClientCard(
                             client = client,
-                            viewModel = viewModel,
+                            timeLabel = timeLabel,
                             onDelete = { viewModel.requestDelete(client) }
                         )
                     }
@@ -150,7 +158,7 @@ fun AuthorizedClientsScreen(
 @Composable
 private fun AuthorizedClientCard(
     client: AuthorizedClient,
-    viewModel: AuthorizedClientsViewModel,
+    timeLabel: String,
     onDelete: () -> Unit
 ) {
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -176,7 +184,7 @@ private fun AuthorizedClientCard(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                StateBadgeAndTimeRow(client = client, viewModel = viewModel)
+                StateBadgeAndTimeRow(client = client, timeLabel = timeLabel)
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(app.aaps.core.ui.R.string.delete))
@@ -188,12 +196,8 @@ private fun AuthorizedClientCard(
 @Composable
 private fun StateBadgeAndTimeRow(
     client: AuthorizedClient,
-    viewModel: AuthorizedClientsViewModel
+    timeLabel: String
 ) {
-    val timeText = when (client.state) {
-        ClientState.Active  -> viewModel.lastSeenLabel(client)
-        ClientState.Pending -> viewModel.pendingExpiresLabel(client)
-    }
     val stateLabel = when (client.state) {
         ClientState.Active  -> stringResource(R.string.authorized_clients_state_active)
         ClientState.Pending -> stringResource(R.string.authorized_clients_state_pending)
@@ -205,7 +209,7 @@ private fun StateBadgeAndTimeRow(
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AapsSpacing.small)) {
         Text(text = stateLabel, style = MaterialTheme.typography.labelSmall, color = stateColor)
         Text(text = "•", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(text = timeText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text = timeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -263,16 +267,19 @@ private fun EnterNameDialog(
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.authorized_clients_name_dialog_title)) },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it.take(48) },
-                singleLine = true,
-                placeholder = { Text(stringResource(R.string.authorized_clients_name_placeholder)) }
-            )
+            Column(modifier = Modifier.clearFocusOnTap(focusManager)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(48) },
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.authorized_clients_name_placeholder)) }
+                )
+            }
         },
         confirmButton = {
             TextButton(

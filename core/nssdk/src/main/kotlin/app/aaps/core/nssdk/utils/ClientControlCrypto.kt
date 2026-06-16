@@ -44,9 +44,15 @@ object ClientControlCrypto {
 
     fun newClientId(): String = UUID.randomUUID().toString()
 
+    /** Lower-case, zero-padded hex encoding of [bytes] (two chars per byte). Inverse of [hexToBytes]. */
     fun bytesToHex(bytes: ByteArray): String =
         bytes.joinToString(separator = "") { "%02x".format(it) }
 
+    /**
+     * Decode a hex string back to bytes. Inverse of [bytesToHex].
+     *
+     * @throws IllegalArgumentException if [hex] has an odd length or contains any non-hex character.
+     */
     fun hexToBytes(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "Odd-length hex string" }
         val out = ByteArray(hex.length / 2)

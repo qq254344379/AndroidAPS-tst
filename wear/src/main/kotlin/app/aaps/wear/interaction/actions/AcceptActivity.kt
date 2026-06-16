@@ -48,6 +48,23 @@ import app.aaps.wear.comm.IntentWearToMobile
 import dagger.android.support.DaggerAppCompatActivity
 import kotlinx.coroutines.delay
 
+/**
+ * Two-page confirmation screen for an action authored on (or relayed by) the master.
+ *
+ * Page 0 shows either the master-authored [ConfirmationLine] rows (role + already-localized text, rendered
+ * verbatim) under an optional curved [title], or — for errors / non-migrated activities — a plain text
+ * message. Page 1 is the confirm page: a single ✓ that fires [confirm] once. An error with no lines collapses
+ * to a single (message-only) page.
+ *
+ * deferConfirm → spinner contract: when [deferConfirm] is set the commit is a CLIENT→master round-trip, so ✓
+ * must NOT flash a local success animation. Instead it shows the [ContactingMasterActivity] spinner and waits
+ * for the real terminal (a [app.aaps.core.interfaces.rx.weardata.EventData.RemoteDelivered] success or an error
+ * [app.aaps.core.interfaces.rx.weardata.EventData.ConfirmAction]), both of which dismiss the spinner.
+ *
+ * A 60s [LaunchedEffect] auto-dismisses the screen if the user never acts. It is also cancelled implicitly by
+ * [onPause] (which finishes the activity), so backgrounding the screen tears it down rather than leaving a stale
+ * confirmation alive in the background.
+ */
 class AcceptActivity : DaggerAppCompatActivity() {
 
     private var actionKey = ""
@@ -77,7 +94,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
         // Curved header for the lines screen (e.g. "Treatment" / "Temporary target" / "Running mode"), authored by the master.
         val title = extras?.getString(DataLayerListenerServiceWear.KEY_TITLE, "") ?: ""
 
-        if (message.isEmpty() && lines.isEmpty()) {
+        if (message.isEmpty() && lines.isEmpty() && !isError) {
             finish()
             return
         }
@@ -89,7 +106,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
 
         setContent {
             MaterialTheme {
-                val pagerState = rememberPagerState(pageCount = { if (isError && !hasLines) 1 else 2 })
+                val pagerState = rememberPagerState(pageCount = { if (isError) 1 else 2 })
+                // Hoisted above the pager pages so a page recomposition (e.g. swiping back to page 0) can never
+                // reset it and re-enable a second ✓ tap after the first already fired.
+                var confirmationSent by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
                     delay(60_000)
@@ -115,22 +135,29 @@ class AcceptActivity : DaggerAppCompatActivity() {
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.Center,
                                         ) {
-                                            Text(
-                                                text = stringResource(R.string.confirm),
-                                                color = Color.White,
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Bold,
-                                            )
-                                            Spacer(Modifier.height(8.dp))
+                                            // Only show the flat "Confirm" header when there is no curved title; the
+                                            // curved title already heads this page (and the confirm page keeps its own).
+                                            if (curvedTitle == null) {
+                                                Text(
+                                                    text = stringResource(R.string.confirm),
+                                                    color = Color.White,
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                            }
                                             lines.forEach { (role, text) ->
                                                 Text(
                                                     text = text,
+                                                    // Aligned with master ConfirmationRole (core.data.ui.ConfirmationRole):
+                                                    // NORMAL/PRIMARY have no dedicated wear color → white.
                                                     color = when (role) {
-                                                        "BOLUS" -> InsulinBlue
-                                                        "CARBS", "COB" -> CarbsOrange
-                                                        "WARNING" -> Color(0xFFFFB300)
-                                                        "INFO" -> WearSecondaryText
-                                                        else -> Color.White
+                                                        "BOLUS"          -> InsulinBlue
+                                                        "CARBS", "COB"   -> CarbsOrange
+                                                        "WARNING"        -> WearWarningAmber
+                                                        "INFO"           -> WearSecondaryText
+                                                        "NORMAL", "PRIMARY" -> Color.White
+                                                        else             -> Color.White
                                                     },
                                                     fontSize = 16.sp,
                                                     fontWeight = FontWeight.Bold,
@@ -170,8 +197,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                             }
 
                             else -> {
-                                // Confirm page
-                                var confirmationSent by remember { mutableStateOf(false) }
+                                // Confirm page (confirmationSent is hoisted to the setContent scope above).
                                 val haptic = LocalHapticFeedback.current
                                 Column(
                                     modifier = Modifier

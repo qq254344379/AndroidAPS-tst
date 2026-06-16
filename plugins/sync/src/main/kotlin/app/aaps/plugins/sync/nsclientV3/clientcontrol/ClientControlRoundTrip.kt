@@ -49,6 +49,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -105,7 +106,10 @@ class ClientControlRoundTrip @Inject constructor(
     // (including cancellation / "stop waiting").
     private val inFlight = AtomicBoolean(false)
 
-    private val ackEvents = MutableSharedFlow<AckEnvelope>(replay = 16, extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    // replay = 2 covers the only race that needs it (the Executing + Done acks for the SINGLE in-flight command can
+    // land between publish and collect). The per-counter filter in dispatch() is the real guard; a small replay keeps
+    // stale acks from a prior command from lingering in the buffer.
+    private val ackEvents = MutableSharedFlow<AckEnvelope>(replay = 2, extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     // Drops a late/out-of-order progress frame (NS can re-deliver or reorder).
     @Volatile private var lastProgressTs = 0L
@@ -219,12 +223,13 @@ class ClientControlRoundTrip @Inject constructor(
     private val _pending = MutableStateFlow<PendingAction?>(null)
     override val pendingAction: StateFlow<PendingAction?> = _pending.asStateFlow()
 
-    // The currently running run()'s job, so dismissActionProgress() can "stop waiting" on it.
-    @Volatile private var currentRun: Job? = null
+    // The currently running run()'s job, so dismissActionProgress() can "stop waiting" on it. AtomicReference so a
+    // dismiss tap can't race the assignment in run(): getAndSet atomically takes the job and cancels it exactly once.
+    private val currentRun = AtomicReference<Job?>(null)
 
     override fun dismissActionProgress() {
         _pending.value = null
-        currentRun?.cancel()
+        currentRun.getAndSet(null)?.cancel()
     }
 
     override suspend fun execute(command: ClientControlActionDispatcher.Command, label: String, localExecute: suspend () -> ActionProgress): ActionProgress =
@@ -247,7 +252,7 @@ class ClientControlRoundTrip @Inject constructor(
         var terminal: ActionProgress = ActionProgress.Unconfirmed(FailureReason.NoReply)
         try {
             coroutineScope {
-                currentRun = coroutineContext[Job]
+                currentRun.set(coroutineContext[Job])
                 dispatch(command).collect { p ->
                     terminal = p
                     // Applied is cleared after the loop (with the min-visible hold); show the rest live.
@@ -265,7 +270,7 @@ class ClientControlRoundTrip @Inject constructor(
                 _pending.value = null
             }
         } finally {
-            currentRun = null
+            currentRun.set(null)
             // Cancelled mid-wait (dismiss / scope teardown) — don't leave a stuck spinner.
             val current = _pending.value?.progress
             if (current is ActionProgress.Sending || current is ActionProgress.MasterExecuting)

@@ -1,5 +1,6 @@
 package app.aaps.core.nssdk.localmodel.clientcontrol
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -36,4 +37,10 @@ data class ProgressEnvelope(
         "$clientId|$phase|$insulin|$percent|$status|$delivered|$stopDeliveryEnabled|$timestamp"
 }
 
-enum class ProgressPhase { Active, Complete, Cleared }
+@Serializable
+enum class ProgressPhase {
+
+    @SerialName("Active") Active,
+    @SerialName("Complete") Complete,
+    @SerialName("Cleared") Cleared
+}

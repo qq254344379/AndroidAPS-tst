@@ -248,28 +248,34 @@ class DataHandlerMobile @Inject constructor(
         onEvent<EventData.ActionProfileSwitchConfirmed> {
             // Commit the parked profile switch through the role-transparent relay (MASTER → local applyProfileSwitch;
             // CLIENT → signed BolusCommit so the MASTER applies it, not the follower locally).
+            contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
             onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.careportal_profileswitch)))
         }
         onEvent<EventData.ActionTempTargetPreCheck> { handleTempTargetPreCheck(it) }
         onEvent<EventData.ActionTempTargetConfirmed> {
             // Commit the parked TT through the relay (MASTER → local applyTempTarget set/cancel; CLIENT → master applies).
+            contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
             onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.temporary_target)))
         }
         onEvent<EventData.ActionBolusPreCheck> { handleBolusPreCheck(it) }
         onEvent<EventData.ActionBolusConfirmed> {
             // Commit the parked dose by id through the role-transparent relay (MASTER → local deliver; CLIENT →
             // signed BolusCommit). Consume-once = no double bolus; a failure surfaces to the watch.
+            contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
             onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)))
         }
         onEvent<EventData.ActionECarbsPreCheck> { handleECarbsPreCheck(it) }
         onEvent<EventData.ActionECarbsConfirmed> {
             // Commit the parked eCarbs through the relay (MASTER → local deliverECarbs; CLIENT → master records them).
+            contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
             onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)))
         }
         onEvent<EventData.ActionFillPresetPreCheck> { handleFillPresetPreCheck(it) }
         onEvent<EventData.ActionFillPreCheck> { handleFillPreCheck(it) }
         onEvent<EventData.ActionFillConfirmed> {
             if (!config.appInitialized) return@onEvent
+            // Defense-in-depth: Fill is off-relay and delivered locally only — a client must never reach here.
+            if (rejectIfAapsClient()) return@onEvent
             if (constraintChecker.applyBolusConstraints(ConstraintObject(it.insulin, aapsLogger)).value() - it.insulin != 0.0) {
                 rxBus.send(EventShowSnackbar("aborting: previously applied constraint changed", EventShowSnackbar.Type.Warning))
                 sendError("aborting: previously applied constraint changed")
@@ -282,6 +288,9 @@ class DataHandlerMobile @Inject constructor(
             // Commit the parked wizard/quick-wizard dose by id through the role-transparent relay (MASTER → local
             // deliver; CLIENT → signed BolusCommit; wear has no advisor fork → asAdvisor=false). Refresh the watch's
             // quick-wizard list (lastUsed) only when something was actually delivered; a failure surfaces to the watch.
+            // NOTE: `it.timeStamp` is NOT a timestamp here — the legacy field name carries the master-assigned
+            // consume-once bolusId of the parked prepare. Do not rename the field (wire-compat with older watches).
+            contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
             onCommitResult(wizardExecutor.commit(it.timeStamp, asAdvisor = false, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.boluswizard))) {
                 sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
             }
@@ -974,6 +983,7 @@ class DataHandlerMobile @Inject constructor(
     internal suspend fun handleRunningModeConfirmed(action: EventData.RunningModeConfirmed) {
         // Commit the parked mode change through the relay (MASTER → local applyRunningMode; CLIENT → master applies),
         // then refresh the wear tiles so the next negotiation reflects the new mode (and issues a fresh nonce).
+        contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
         onCommitResult(batchExecutor.commit(action.bolusId, Sources.Wear, rh.gs(R.string.wear_action_running_mode_title)))
         handleAvailableRunningModes()
     }

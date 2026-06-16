@@ -110,6 +110,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -491,7 +492,9 @@ class NSClientV3Plugin @Inject constructor(
     // [heartbeatAt] is the master's devicestatus created_at (publish time), not receipt time. Monotonic —
     // keep the newest known heartbeat; a batch may deliver an older record after a newer one.
     internal fun bumpDevicestatusHeartbeat(heartbeatAt: Long) {
-        if (heartbeatAt > _lastDevicestatusReceivedAt.value) _lastDevicestatusReceivedAt.value = heartbeatAt
+        // Atomic CAS: a heartbeat and a pong can bump concurrently from different WS threads; a two-step
+        // read-compare-write would lose the later timestamp. update {} retries until the max wins.
+        _lastDevicestatusReceivedAt.update { maxOf(it, heartbeatAt) }
         bumpMasterSignal(heartbeatAt)
     }
 
@@ -503,7 +506,8 @@ class NSClientV3Plugin @Inject constructor(
 
     /** Bump the liveness clock from a real-time master signal (pong / live republish / heartbeat). Monotonic. */
     internal fun bumpMasterSignal(at: Long) {
-        if (at > _lastMasterSignalAt.value) _lastMasterSignalAt.value = at
+        // Atomic CAS (see bumpDevicestatusHeartbeat): concurrent bumps from WS threads must not lose the later one.
+        _lastMasterSignalAt.update { maxOf(it, at) }
     }
 
     /**

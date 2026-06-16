@@ -66,6 +66,8 @@ class RunningConfigurationImpl @Inject constructor(
             json.put("pump", pumpInterface.model().description)
             // Mirror the master's active-pump faking flag READ-ONLY to clients (so a follower's VirtualPump shows the
             // right EB capability + interprets emulated-temp EBs correctly) — computed here on the master, never on the client.
+            // Reads activePump (the wrapper, which delegates to the real pump on the master); applyCold instead casts
+            // activePumpInternal because a client only has VirtualPump (not the PumpWithConcentration wrapper).
             json.put("isFakingTempsByExtendedBoluses", pumpInterface.isFakingTempsByExtendedBoluses)
             json.put("version", config.VERSION_NAME)
         } catch (e: JSONException) {
@@ -136,6 +138,11 @@ class RunningConfigurationImpl @Inject constructor(
     // Apply master-published synced prefs on the client. "Master wins": adopt verbatim via putRemote
     // (which suppresses the client→master echo and floors the modified stamp; the wire carries no
     // per-key lastModified yet). A later client edit out-stamps it via max(stored+1, now()).
+    /**
+     * `putRemote(key, value, 0L)`: the trailing `0L` is the lastModified stamp. Passing `0L` floors
+     * the stamp to the minimum so any later user edit (stamped with `max(stored+1, now())`) always
+     * out-wins this remotely-adopted value under last-write-wins.
+     */
     private fun applySyncedPrefs(prefs: Map<String, String>) {
         prefs.forEach { (keyString, valueString) ->
             val key = preferences.get(keyString) ?: return@forEach
@@ -155,10 +162,13 @@ class RunningConfigurationImpl @Inject constructor(
 
     // called in NSClient mode only — apply the cold config doc (everything except the active scene).
     override fun applyCold(configuration: NSRunningConfiguration) {
-        assert(config.AAPSCLIENT)
+        if (!config.AAPSCLIENT) {
+            aapsLogger.error(LTag.CORE, "applyCold called on non-client build — ignored")
+            return
+        }
 
         configuration.version?.let {
-            nsClientRepository.addLog("◄ VERSION", "Received AAPS version  $it")
+            nsClientRepository.addLog("◄ VERSION", "Received AAPS version $it")
             if (config.VERSION_NAME.startsWith(it).not())
                 notificationManager.post(NotificationId.NSCLIENT_VERSION_DOES_NOT_MATCH, R.string.nsclient_version_does_not_match)
         }
@@ -185,7 +195,10 @@ class RunningConfigurationImpl @Inject constructor(
     // Kept separate from [applyCold] so a cold-doc apply (which carries no activeScene) never
     // clears a running scene.
     override fun applyHot(configuration: NSRunningConfiguration) {
-        assert(config.AAPSCLIENT)
+        if (!config.AAPSCLIENT) {
+            aapsLogger.error(LTag.CORE, "applyHot called on non-client build — ignored")
+            return
+        }
         // activeScene: null on the wire means "no scene active" — clear locally.
         // Always pass through (even null) so master-side dismissal propagates.
         activeSceneSync.applyActiveScene(configuration.activeScene?.toSnapshot())
@@ -198,6 +211,8 @@ class RunningConfigurationImpl @Inject constructor(
             activatedAt = activatedAt,
             durationMs = durationMs,
             // null on the wire = pre-lifecycle master, treat as ACTIVE.
+            // Forward-compat: an unknown lifecycle string (newer master adds a value this build doesn't
+            // know) → valueOf returns null via runCatching → falls through to ACTIVE as well.
             lifecycle = lifecycle?.let { runCatching { SceneLifecycle.valueOf(it) }.getOrNull() }
                 ?: SceneLifecycle.ACTIVE,
             ttNsId = ttNsId,

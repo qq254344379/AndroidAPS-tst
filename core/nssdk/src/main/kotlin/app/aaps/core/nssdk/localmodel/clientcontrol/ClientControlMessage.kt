@@ -191,6 +191,11 @@ data class PrefEntry(
  * One action on the wire for [ClientControlMessage.BatchPrepare] — a flat, type-tagged union (avoids polymorphic
  * serializer setup). [type] selects which fields are meaningful (`bolus` vs `temp_target` vs `profile_switch` vs
  * `running_mode`). [durationMinutes] is shared by `temp_target`, `profile_switch`, and `running_mode`.
+ *
+ * Because every field carries a default, ANY field combination deserializes; this DTO does NOT self-validate. The
+ * MASTER is the single authority: per [type] it validates that the required fields for that action are present/sane
+ * and REJECTS an unknown [type] value (the `TYPE_*` constants below are the closed set). A client cannot smuggle an
+ * action by setting the wrong fields — the master only reads the fields its `when(type)` branch consumes.
  */
 @Serializable
 data class BatchActionDto(

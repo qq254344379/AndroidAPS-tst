@@ -30,6 +30,12 @@ import javax.crypto.spec.SecretKeySpec
 object ClientControlPairingCrypto {
 
     private const val KDF_ALGO = "PBKDF2WithHmacSHA256"
+
+    /**
+     * PBKDF2 round count. It is part of the implicit offer format: changing it makes existing offer
+     * docs underivable, surfacing to the user as a (misleading) "wrong PIN". If this is ever changed,
+     * bump the offer `schemaVersion` so old offers are rejected cleanly instead of failing as bad PINs.
+     */
     private const val KDF_ITERATIONS = 200_000
     private const val KEY_BITS = 256
     private const val SALT_BYTES = 16
@@ -42,6 +48,8 @@ object ClientControlPairingCrypto {
 
     /** Random 8-digit PIN as a zero-padded decimal string ("00000000" .. "99999999"). */
     fun newPin(): String {
+        // nextInt(100_000_000) is uniform over [0, 10^8): SecureRandom.nextInt(bound) rejection-samples
+        // so the result is unbiased even though 2^31 is not an exact multiple of 10^8.
         val n = secureRandom.nextInt(100_000_000)
         return "%0${PIN_DIGITS}d".format(n)
     }

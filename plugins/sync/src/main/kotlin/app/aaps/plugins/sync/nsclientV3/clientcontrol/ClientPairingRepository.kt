@@ -45,12 +45,19 @@ class ClientPairingRepository @Inject constructor(
     fun isPaired(): Boolean = preferences.get(StringNonKey.NsClientControlClientId).isNotEmpty()
 
     /** Returns the assembled pairing snapshot or null if not paired / corrupt. */
-    fun currentPairing(): MasterPairing? = synchronized(lock) {
+    fun currentPairing(): MasterPairing? = synchronized(lock) { currentPairingLocked() }
+
+    /**
+     * Assembles the pairing snapshot WITHOUT taking [lock]. Call only from a context that already
+     * holds [lock] (e.g. [nextSignedEnvelope], [secretBytesOrNull]); the public [currentPairing]
+     * is the locked entry point. Avoids a re-entrant `synchronized(lock)` on the same thread.
+     */
+    private fun currentPairingLocked(): MasterPairing? {
         val masterInstallId = preferences.get(StringNonKey.NsClientControlMasterInstallId)
         val clientId = preferences.get(StringNonKey.NsClientControlClientId)
         val secretEnc = preferences.get(StringNonKey.NsClientControlMasterSecretEnc)
-        if (masterInstallId.isEmpty() || clientId.isEmpty() || secretEnc.isEmpty()) return@synchronized null
-        MasterPairing(
+        if (masterInstallId.isEmpty() || clientId.isEmpty() || secretEnc.isEmpty()) return null
+        return MasterPairing(
             masterInstallId = masterInstallId,
             clientId = clientId,
             masterSecretEnc = secretEnc
@@ -95,7 +102,7 @@ class ClientPairingRepository @Inject constructor(
      * instead of silent send drops.
      */
     fun nextSignedEnvelope(type: String, payloadJson: String, timestamp: Long, validUntil: Long = Long.MAX_VALUE, wantsAck: Boolean = false): SignedEnvelope? = synchronized(lock) {
-        val pairing = currentPairing() ?: run {
+        val pairing = currentPairingLocked() ?: run {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: nextSignedEnvelope called while unpaired")
             return@synchronized null
         }
@@ -134,7 +141,7 @@ class ClientPairingRepository @Inject constructor(
      * authentic. Logs each null path so a backup-restore failure is diagnosable rather than silent.
      */
     fun secretBytesOrNull(): ByteArray? = synchronized(lock) {
-        val pairing = currentPairing() ?: return@synchronized null
+        val pairing = currentPairingLocked() ?: return@synchronized null
         if (!secureEncrypt.isValidDataString(pairing.masterSecretEnc)) {
             aapsLogger.error(LTag.NSCLIENT, "ClientControl: stored secret blob is corrupted (re-pair required)")
             return@synchronized null

@@ -242,7 +242,7 @@ class CarbsDialogViewModel @Inject constructor(
         }
     }
 
-    private var confirmedState: CarbsDialogUiState? = null
+    @Volatile private var confirmedState: CarbsDialogUiState? = null
 
     /**
      * Tap-confirm → ask the MASTER to PREPARE the batch (cap + COB-clamp + build the merged confirmation). Client =
@@ -277,8 +277,13 @@ class CarbsDialogViewModel @Inject constructor(
             // Opt-in post-carbs bolus reminder (device-local) on success.
             if (result is ActionProgress.Applied && preferences.get(BooleanKey.OverviewUseBolusReminder) && state?.bolusReminderChecked == true)
                 automation.scheduleAutomationEventBolusReminder()
-            if (result is ActionProgress.Rejected && result.reason == FailureReason.NotReachable)
-                _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+            // Surface a failed commit. NotReachable → the offline message; any other Rejected (ExecutionFailed,
+            // NoPendingBolus, …) → the master's detail. Unconfirmed (state unknown) rides the round-trip's app-level modal.
+            if (result is ActionProgress.Rejected) {
+                if (result.reason == FailureReason.NotReachable)
+                    _sideEffect.tryEmit(SideEffect.ShowDeliveryError(rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                else result.detail?.let { _sideEffect.tryEmit(SideEffect.ShowDeliveryError(it)) }
+            }
             automation.removeAutomationEventEatReminder()
             // Device-local "time to eat" alarm — on confirm, when configured.
             if (state != null && state.alarmChecked && state.carbs > 0 && state.timeOffsetMinutes > 0)

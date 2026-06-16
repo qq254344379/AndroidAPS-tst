@@ -731,6 +731,9 @@ class MainViewModel @Inject constructor(
                 is ActionProgress.Prepared ->
                     rxBus.send(
                         EventShowDialog.OkCancel(
+                            // commitStart uses the executor's consume-once prepared.id token, so a double
+                            // onOk (fast double-tap) is idempotent — the second commit hits an already-
+                            // consumed id and is discarded.
                             title = title, message = "", confirmationLines = prepared.lines, icon = IcAction,
                             onOk = { appScope.launch { sceneActions.commitStart(prepared.id) } })
                     )

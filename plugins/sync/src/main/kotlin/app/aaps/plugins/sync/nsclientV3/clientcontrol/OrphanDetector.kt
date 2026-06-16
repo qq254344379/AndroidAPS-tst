@@ -75,6 +75,9 @@ class OrphanDetector @Inject constructor(
      * Flips to `false` only once a settings doc is seen that excludes this clientId past the race
      * guard. Folded into [app.aaps.core.interfaces.sync.NsClient.masterReachable] so a revoked
      * client's edits are gated, not just notified. Optimistic default keeps first-ever pairing usable.
+     *
+     * @see app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin.masterReachable for where this term is
+     *   combined (ws && fresh && paired && authorized) into the overall master-reachable gate.
      */
     val authorized: StateFlow<Boolean> = _authorized.asStateFlow()
 
@@ -94,7 +97,10 @@ class OrphanDetector @Inject constructor(
             return
         }
         val pairedAt = preferences.get(LongNonKey.NsClientControlPairedAt)
-        if (pairedAt > 0L && docSrvModified > 0L && pairedAt > docSrvModified - POST_PAIRING_GRACE_MS) {
+        // Intent-first: defer the orphan verdict while this doc was modified before pairing + the grace
+        // window. Equivalent to the original pairedAt > docSrvModified - POST_PAIRING_GRACE_MS, but reads
+        // as "doc predates pairing + grace".
+        if (pairedAt > 0L && docSrvModified > 0L && docSrvModified < pairedAt + POST_PAIRING_GRACE_MS) {
             aapsLogger.debug(
                 LTag.NSCLIENT,
                 "ClientControl: missing from authorizedClients but doc predates pairing (pairedAt=$pairedAt srvModified=$docSrvModified); deferring orphan signal"
@@ -108,7 +114,12 @@ class OrphanDetector @Inject constructor(
 
     companion object {
 
-        /** Slack to absorb master's 5s debounce + HTTP propagation between pair and roster republish. */
+        /**
+         * Slack between pair and the master's roster republish landing on this client. Sized well
+         * above the master's 5s debounce on purpose: it must also absorb HTTP/WS propagation delay,
+         * publish retries, and clock skew between the two devices — any of which can push the roster
+         * doc's srvModified later than a naive 5s estimate would allow.
+         */
         const val POST_PAIRING_GRACE_MS = 60_000L
     }
 }

@@ -67,9 +67,11 @@ class PairWithMasterViewModel @Inject constructor(
      * to NS in [UiState.Sending] (holds the screen alive — `viewModelScope` cancels
      * on pop, so the HTTP call must finish before we advance to Success).
      *
-     * On hello upload failure we still advance to Success: the local pairing is valid,
-     * the master will simply stay in Pending until a future retry. Surfacing a hard
-     * error here would block the user even though they have a working pairing.
+     * **Design decision — advance to Success even if the Hello upload fails:** the local
+     * pairing has already been persisted and is fully valid; the only consequence of a
+     * failed Hello is that the *master* stays in Pending until a future retry republishes
+     * it. Surfacing a hard error here would block the user despite them holding a working
+     * pairing, so we deliberately swallow the upload outcome and move on to Success.
      */
     fun confirmPair() {
         val payload = (_state.value as? UiState.Confirming)?.payload ?: return

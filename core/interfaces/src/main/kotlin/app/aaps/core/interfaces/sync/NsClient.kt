@@ -37,8 +37,11 @@ interface NsClient : Sync {
     /**
      * Derived "master is reachable for remote control / config edits" signal. On a client it requires
      * ALL of: [wsConnectedFlow] (with a short falling-edge grace so brief WS flaps don't lock the UI),
-     * [lastDevicestatusReceivedAt] freshness (master heartbeat), a current Client-Control pairing, and
-     * not being orphaned (master still authorizes this device). It is short-circuited to always-`true`
+     * a fresh UNIFIED liveness signal, a current Client-Control pairing, and not being orphaned (master
+     * still authorizes this device). The freshness term is the LATEST of any master-alive evidence —
+     * the [lastDevicestatusReceivedAt] devicestatus heartbeat, an authenticated Client-Control pong, or
+     * a live running-config republish — so an active channel keeps the UI unlocked even when one source
+     * (e.g. devicestatus) momentarily goes quiet. It is short-circuited to always-`true`
      * on a master device. The pairing + authorization terms matter because client→master edits/commands
      * ride the signed Client-Control channel: an unpaired client's writes are silently dropped and a
      * revoked client's are rejected, so neither must look reachable. Consumers — scene gating and

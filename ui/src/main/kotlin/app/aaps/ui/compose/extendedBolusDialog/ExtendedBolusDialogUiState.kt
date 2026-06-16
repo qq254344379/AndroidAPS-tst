@@ -14,4 +14,6 @@ data class ExtendedBolusDialogUiState(
     val extendedMaxDuration: Double = 720.0,
     val showLoopStopWarning: Boolean = false,
     val loopStopWarningAccepted: Boolean = false,
+    // True while a prepare round-trip is in flight; disables the Confirm button to prevent a double prepare.
+    val isPreparing: Boolean = false,
 )

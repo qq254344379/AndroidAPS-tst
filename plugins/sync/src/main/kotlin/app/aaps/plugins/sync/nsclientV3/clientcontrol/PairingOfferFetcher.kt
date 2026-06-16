@@ -90,7 +90,7 @@ class PairingOfferFetcher @Inject constructor(
                 // Skip server-side stale offers up-front so we don't burn PBKDF2 on a hopeless candidate.
                 if (offer.expiresAt > 0L && offer.expiresAt < now) continue
                 candidates++
-                val payload = tryUnwrap(offer, pin) ?: continue
+                val payload = tryUnwrap(offer, pin, now) ?: continue
                 matches += payload
             }
             aapsLogger.debug(LTag.NSCLIENT, "PairingOfferFetcher: scanned=$scanned live=$candidates matched=${matches.size}")
@@ -102,7 +102,7 @@ class PairingOfferFetcher @Inject constructor(
         }
     }
 
-    private fun tryUnwrap(offer: PairingOffer, pin: String): PairingPayload? {
+    private fun tryUnwrap(offer: PairingOffer, pin: String, now: Long): PairingPayload? {
         val salt = decodeB64(offer.kdfSaltB64) ?: return null
         val iv = decodeB64(offer.ivB64) ?: return null
         val wrapped = decodeB64(offer.wrappedB64) ?: return null
@@ -114,6 +114,10 @@ class PairingOfferFetcher @Inject constructor(
             return null
         }
         if (payload.masterInstallId.isBlank() || payload.clientId.isBlank() || payload.secretHex.isBlank()) return null
+        // Defense-in-depth: the wrapped payload carries its own hard expiry independent of the outer
+        // offer.expiresAt checked above. Reject an expired payload even if the (forgeable) outer field
+        // claims otherwise — the master refuses a `hello` past expiresAt anyway.
+        if (payload.expiresAt > 0L && payload.expiresAt < now) return null
         return payload
     }
 
