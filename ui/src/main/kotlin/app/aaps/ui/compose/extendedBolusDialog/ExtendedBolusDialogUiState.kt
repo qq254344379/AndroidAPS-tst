@@ -9,6 +9,7 @@ data class ExtendedBolusDialogUiState(
     val durationMinutes: Double = 0.0,
     // Config (set once during init)
     val maxInsulin: Double = 0.0,
+    val minInsulin: Double = 0.1,
     val extendedStep: Double = 0.1,
     val extendedDurationStep: Double = 30.0,
     val extendedMaxDuration: Double = 720.0,

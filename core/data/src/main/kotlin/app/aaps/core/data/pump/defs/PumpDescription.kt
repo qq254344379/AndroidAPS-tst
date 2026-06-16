@@ -101,6 +101,7 @@ class PumpDescription {
             it.isPatchPump = this.isPatchPump
             it.maxReservoirReading = this.maxReservoirReading
             it.useHardwareLink = this.useHardwareLink
+            it.extendedBolusMinAmount = this.extendedBolusMinAmount
         }
 
     companion object {
