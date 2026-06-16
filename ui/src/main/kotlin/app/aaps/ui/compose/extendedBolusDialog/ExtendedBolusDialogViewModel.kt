@@ -63,9 +63,10 @@ class ExtendedBolusDialogViewModel @Inject constructor(
         // can't briefly see the form and start typing before the warning gate appears.
         _uiState.update {
             ExtendedBolusDialogUiState(
-                insulin = pumpDescription.extendedBolusStep,
+                insulin = pumpDescription.extendedBolusMinAmount,
                 durationMinutes = pumpDescription.extendedBolusDurationStep,
                 maxInsulin = maxInsulin,
+                minInsulin = pumpDescription.extendedBolusMinAmount,
                 extendedStep = pumpDescription.extendedBolusStep,
                 extendedDurationStep = pumpDescription.extendedBolusDurationStep,
                 extendedMaxDuration = pumpDescription.extendedBolusMaxDuration,
