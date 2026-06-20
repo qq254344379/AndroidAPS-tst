@@ -317,11 +317,11 @@ fun AutotuneScreen(
                             icsRows = buildIcRows(profile1, profile2, dateUtil),
                             icUnits = rh.gs(app.aaps.core.ui.R.string.profile_carbs_per_unit),
                             isfsRows = buildIsfRows(profile1, profile2, profileUtil, dateUtil),
-                            isfUnits = "${profileFunction.getUnits().asText} ${rh.gs(app.aaps.core.ui.R.string.profile_per_unit)}",
+                            isfUnits = "${profileFunction.getUnits().displayLabel} ${rh.gs(app.aaps.core.ui.R.string.profile_per_unit)}",
                             basalsRows = buildBasalRows(profile1, profile2, dateUtil),
                             basalUnits = rh.gs(app.aaps.core.ui.R.string.profile_ins_units_per_hour),
                             targetsRows = buildTargetRows(profile1, profile2, dateUtil, profileUtil),
-                            targetUnits = profileFunction.getUnits().asText,
+                            targetUnits = profileFunction.getUnits().displayLabel,
                             profileName1 = dialog.data.profileName ?: "",
                             profileName2 = dialog.data.profileName2 ?: ""
                         )

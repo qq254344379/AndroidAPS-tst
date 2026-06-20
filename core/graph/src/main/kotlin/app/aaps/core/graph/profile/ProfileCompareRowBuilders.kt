@@ -55,9 +55,9 @@ fun buildProfileCompareData(
         effectiveName = profileName2,
         shortHourUnit = rh.gs(app.aaps.core.interfaces.R.string.shorthour),
         icUnits = rh.gs(R.string.profile_carbs_per_unit),
-        isfUnits = "${units.asText} ${rh.gs(R.string.profile_per_unit)}",
+        isfUnits = "${units.displayLabel} ${rh.gs(R.string.profile_per_unit)}",
         basalUnits = rh.gs(R.string.profile_ins_units_per_hour),
-        targetUnits = units.asText
+        targetUnits = units.displayLabel
     )
 }
 

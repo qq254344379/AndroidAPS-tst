@@ -170,11 +170,11 @@ fun ProfileHelperScreen(
                     icsRows = buildIcRows(sealed1, sealed2, viewModel.dateUtil),
                     icUnits = viewModel.rh.gs(app.aaps.core.ui.R.string.profile_carbs_per_unit),
                     isfsRows = buildIsfRows(sealed1, sealed2, viewModel.profileUtil, viewModel.dateUtil),
-                    isfUnits = "${viewModel.getUnits().asText} ${viewModel.rh.gs(app.aaps.core.ui.R.string.profile_per_unit)}",
+                    isfUnits = "${viewModel.getUnits().displayLabel} ${viewModel.rh.gs(app.aaps.core.ui.R.string.profile_per_unit)}",
                     basalsRows = buildBasalRows(sealed1, sealed2, viewModel.dateUtil),
                     basalUnits = viewModel.rh.gs(app.aaps.core.ui.R.string.profile_ins_units_per_hour),
                     targetsRows = buildTargetRows(sealed1, sealed2, viewModel.dateUtil, viewModel.profileUtil),
-                    targetUnits = viewModel.getUnits().asText,
+                    targetUnits = viewModel.getUnits().displayLabel,
                     profileName1 = name0,
                     profileName2 = name1
                 )
