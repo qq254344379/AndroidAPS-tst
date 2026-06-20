@@ -49,6 +49,7 @@ import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.ui.R
+import app.aaps.core.ui.compose.formatMinutesAsDuration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -367,8 +368,9 @@ class WizardBolusExecutorImpl @Inject constructor(
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
+        val isTtOnly = bolus == null && ps == null && rm == null && cappedTb == null && cappedEb == null && ctb == null && ceb == null && ia == null
         val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) +
-            (tt?.let { buildTtLine(it) } ?: emptyList()) +
+            (tt?.let { buildTtLine(it, isTtOnly) } ?: emptyList()) +
             (ps?.let { buildPsLine(it) } ?: emptyList()) +
             (rm?.let { buildRmLine(it) } ?: emptyList()) +
             (cappedTb?.let { buildTempBasalLine(it, tb) } ?: emptyList()) +
@@ -601,7 +603,7 @@ class WizardBolusExecutorImpl @Inject constructor(
      * reason line, or a "cancel" line when [durationMinutes] is 0. [lowMgdl]/[highMgdl] in mg/dL; [reasonDisplay]
      * already localized (or "").
      */
-    private fun buildTempTargetLines(reasonDisplay: String, lowMgdl: Double, highMgdl: Double, durationMinutes: Int): List<ConfirmationLine> {
+    private fun buildTempTargetLines(reasonDisplay: String, lowMgdl: Double, highMgdl: Double, durationMinutes: Int, standalone: Boolean = false): List<ConfirmationLine> {
         val out = mutableListOf<ConfirmationLine>()
         if (durationMinutes == 0) {
             out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.cancel)))
@@ -610,9 +612,15 @@ class WizardBolusExecutorImpl @Inject constructor(
             val unitLabel = if (units == GlucoseUnit.MMOL) rh.gs(R.string.mmol) else rh.gs(R.string.mgdl)
             val low = decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(lowMgdl, units))
             val target = if (lowMgdl == highMgdl) low else low + " – " + decimalFormatter.to1Decimal(profileUtil.fromMgdlToUnits(highMgdl, units))
+            val durationText = formatMinutesAsDuration(durationMinutes, rh)
+            val targetLabel = if (standalone) rh.gs(R.string.target_label) else rh.gs(R.string.temporary_target)
+            out += ConfirmationLine(
+                ConfirmationRole.TEMP_TARGET,
+                rh.gs(R.string.confirmation_line, targetLabel, rh.gs(R.string.value_with_unit, target, unitLabel))
+            )
             out += ConfirmationLine(
                 ConfirmationRole.NORMAL,
-                rh.gs(R.string.confirmation_line, rh.gs(R.string.temporary_target), rh.gs(R.string.value_with_unit, target, unitLabel) + " (" + rh.gs(R.string.format_mins, durationMinutes) + ")")
+                rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), durationText)
             )
             if (reasonDisplay.isNotEmpty())
                 out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.reason), reasonDisplay))
@@ -621,8 +629,8 @@ class WizardBolusExecutorImpl @Inject constructor(
     }
 
     /** The TT line(s) for any batch (wear / client / phone) — range + duration + a localized reason, or a cancel line. */
-    private fun buildTtLine(tt: BatchAction.TempTarget): List<ConfirmationLine> =
-        buildTempTargetLines(localizeTtReason(tt.reason), tt.lowMgdl, tt.highMgdl, tt.durationMinutes)
+    private fun buildTtLine(tt: BatchAction.TempTarget, standalone: Boolean = false): List<ConfirmationLine> =
+        buildTempTargetLines(localizeTtReason(tt.reason), tt.lowMgdl, tt.highMgdl, tt.durationMinutes, standalone)
 
     /**
      * Apply a batch ProfileSwitch via the dialog-free domain path. [profileName] non-null → switch to that named
