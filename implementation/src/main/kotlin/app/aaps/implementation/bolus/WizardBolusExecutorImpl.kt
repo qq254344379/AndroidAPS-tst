@@ -246,7 +246,15 @@ class WizardBolusExecutorImpl @Inject constructor(
             insulin = wizard.calculatedTotalInsulin,
             carbs = wizard.carbs,
             bolusId = wizard.timeStamp,
-            lines = wizard.buildConfirmationLines(advisor = false),
+            // Pass the eCarbs split (food type → extended carbs) so the delivery confirmation shows the eCarbs line too —
+            // the record-only path already does this via getConfirmationSummary(). Advisor = correction-only ("eat later"),
+            // so eCarbs don't apply there.
+            lines = wizard.buildConfirmationLines(
+                advisor = false,
+                eCarbsGrams = inputs.eCarbsGrams,
+                eCarbsDelayMinutes = inputs.eCarbsDelayMinutes,
+                eCarbsDurationHours = inputs.eCarbsDurationHours
+            ),
             advisorApplies = advisorApplies,
             advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true) else emptyList()
         )
