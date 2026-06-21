@@ -579,7 +579,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 out += ConfirmationLine(ConfirmationRole.WARNING, rh.gs(R.string.bolus_constraint_applied_warn, bolus.insulin, insulin))
             }
         }
-        if (carbs > 0) {
+        if (carbs != 0) {
             out += ConfirmationLine(ConfirmationRole.CARBS, rh.gs(R.string.confirmation_line, rh.gs(R.string.carbs), rh.gs(R.string.format_carbs, carbs)))
             if (!recordOnly && carbs != bolus.carbs)
                 out += ConfirmationLine(ConfirmationRole.WARNING, rh.gs(R.string.constraint_applied))
