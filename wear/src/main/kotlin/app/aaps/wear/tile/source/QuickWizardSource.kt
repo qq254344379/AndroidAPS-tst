@@ -18,8 +18,6 @@ import javax.inject.Singleton
 class QuickWizardSource @Inject constructor(private val context: Context, private val sp: SP, private val aapsLogger: AAPSLogger) : TileSource {
 
     companion object {
-        const val COOLDOWN_MILLIS = 3_600_000L // 1 hour
-
         // Mirrors QuickWizardMode in :core:objects (not a wear dependency): WIZARD(0), INSULIN(1), CARBS(2).
         // An INSULIN button shows its fixed dose in U; WIZARD/CARBS show carbs in g (the wizard's carb input).
         private const val MODE_INSULIN = 1
@@ -29,11 +27,9 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
         val quickList = mutableListOf<Action>()
         val quickMap = getQuickWizardData(sp)
         val sfm = secondsFromMidnight()
-        val now = System.currentTimeMillis()
 
         for (quick in quickMap.entries) {
-            val isActive = sfm in quick.validFrom..quick.validTo && now - quick.lastUsed > COOLDOWN_MILLIS
-            if (isActive && quick.guid.isNotEmpty()) {
+            if (sfm in quick.validFrom..quick.validTo && quick.guid.isNotEmpty()) {
                 val icon = when (quick.mode) {
                     1    -> R.drawable.ic_bolus         // INSULIN mode
                     2    -> R.drawable.ic_carbs_orange  // CARBS mode
@@ -65,21 +61,12 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
         if (quickMap.entries.isEmpty()) return null
 
         val sfm = secondsFromMidnight()
-        val now = System.currentTimeMillis()
         var validTill = 24 * 60 * 60
 
         for (quick in quickMap.entries) {
-            val onCooldown = now - quick.lastUsed <= COOLDOWN_MILLIS
-            val isActive = sfm in quick.validFrom..quick.validTo && !onCooldown
             if (quick.guid.isNotEmpty()) {
-                if (isActive && validTill > quick.validTo) validTill = quick.validTo
+                if (sfm in quick.validFrom..quick.validTo && validTill > quick.validTo) validTill = quick.validTo
                 if (quick.validFrom in (sfm + 1) until validTill) validTill = quick.validFrom
-                // If entry is on cooldown but within time window, refresh when cooldown expires
-                if (onCooldown && sfm in quick.validFrom..quick.validTo) {
-                    val cooldownRemainingSecs = ((quick.lastUsed + COOLDOWN_MILLIS - now) / 1000).toInt()
-                    val cooldownExpirySfm = sfm + cooldownRemainingSecs
-                    if (cooldownExpirySfm in (sfm + 1) until validTill) validTill = cooldownExpirySfm
-                }
             }
         }
 
