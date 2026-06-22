@@ -6,6 +6,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import app.aaps.core.data.model.ActiveSceneState
+import app.aaps.core.ui.compose.formatMinutesAsDuration
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.Scene
@@ -133,9 +134,9 @@ class SceneExecutor @Inject constructor(
 
     /** The master-authored confirmation lines for a scene — name + duration + one line per action (authored ONCE here). */
     private fun buildSceneLines(scene: Scene, durationMinutes: Int): List<ConfirmationLine> = buildList {
-        add(ConfirmationLine(ConfirmationRole.PRIMARY, scene.name))
+        add(ConfirmationLine(ConfirmationRole.SCENE, scene.name))
         if (durationMinutes > 0)
-            add(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(CoreUiR.string.confirmation_line, rh.gs(CoreUiR.string.duration), rh.gs(CoreUiR.string.format_mins, durationMinutes))))
+            add(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(CoreUiR.string.confirmation_line, rh.gs(CoreUiR.string.duration), formatMinutesAsDuration(durationMinutes, rh))))
         scene.actions.forEach { add(ConfirmationLine(ConfirmationRole.NORMAL, sceneActionLine(it))) }
     }
 

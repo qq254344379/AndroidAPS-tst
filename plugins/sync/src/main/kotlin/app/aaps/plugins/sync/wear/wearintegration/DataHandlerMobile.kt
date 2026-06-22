@@ -315,6 +315,10 @@ class DataHandlerMobile @Inject constructor(
             if (!config.appInitialized) return@onEvent
             scenes.stopActiveScene()
         }
+        onEvent<EventData.ActionSceneStopPreCheck> {
+            if (!config.appInitialized) return@onEvent
+            handleSceneStopPreCheck()
+        }
         onEventSync<EventData.SnoozeAlert> { uiInteraction.stopAlarm("Muted from wear") }
         onEventSync<EventData.WearException> { fabricPrivacy.logWearException(it) }
         // Coalesce Wear reconnect-flush bursts (Data Layer replays queued events back-to-back).
@@ -645,36 +649,47 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleScenePreCheck(command: EventData.ActionScenePreCheck) {
-        val pump = activePlugin.activePump
-        val profile = profileFunction.getProfile()
-        if (loop.runningMode().isLoopRunning() && pump.isInitialized() && profile != null) {
-            val scene = scenes.getScene(command.id)
-            if (scene != null && scene.isEnabled) {
-                sendToWear(
-                    EventData.ConfirmAction(
-                        rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
-                        returnCommand = EventData.ActionSceneConfirmed(command.id, command.title)
-                    )
+        when (val result = scenes.prepareScene(command.id)) {
+            is WizardBolusExecutor.PrepareResult.Preview -> sendToWear(
+                EventData.ConfirmAction(
+                    title = rh.gs(app.aaps.core.ui.R.string.scenes),
+                    message = "",
+                    returnCommand = EventData.ActionSceneConfirmed(command.id, command.title, result.bolusId),
+                    lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) },
+                    deferConfirm = config.AAPSCLIENT
                 )
-            } else {
-                sendError(rh.gs(R.string.scene_not_available, command.title))
-            }
-        } else {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
+            )
+            is WizardBolusExecutor.PrepareResult.Error    -> sendError(result.message)
+            is WizardBolusExecutor.PrepareResult.NoAction -> sendError(rh.gs(R.string.scene_not_available, command.title))
         }
     }
 
     private suspend fun handleSceneConfirmed(command: EventData.ActionSceneConfirmed) {
-        when (val result = scenes.runScene(command.id)) {
-            is SceneAutomationResult.Success        -> Unit
-            is SceneAutomationResult.SceneNotFound,
-            is SceneAutomationResult.SceneDisabled  -> sendError(rh.gs(R.string.scene_not_available, command.title))
-
-            is SceneAutomationResult.Failed         -> sendError(result.message ?: rh.gs(R.string.scene_not_available, command.title))
-            // runScene never returns ChainCompleted (only stopActiveSceneAndStartScene does), but the
-            // sealed interface forces exhaustiveness here.
-            is SceneAutomationResult.ChainCompleted -> Unit
+        if (command.bolusId != null) {
+            scenes.commitScene(command.bolusId!!) { sendError(it) }
+        } else {
+            // Fallback for watch builds that pre-date the two-step flow (no bolusId).
+            when (val result = scenes.runScene(command.id)) {
+                is SceneAutomationResult.Success        -> Unit
+                is SceneAutomationResult.SceneNotFound,
+                is SceneAutomationResult.SceneDisabled  -> sendError(rh.gs(R.string.scene_not_available, command.title))
+                is SceneAutomationResult.Failed         -> sendError(result.message ?: rh.gs(R.string.scene_not_available, command.title))
+                is SceneAutomationResult.ChainCompleted -> Unit
+            }
         }
+    }
+
+    private suspend fun handleSceneStopPreCheck() {
+        if (!scenes.isAnySceneActive()) return sendError(rh.gs(app.aaps.core.ui.R.string.scene_ended))
+        sendToWear(
+            EventData.ConfirmAction(
+                title = rh.gs(app.aaps.core.ui.R.string.scenes),
+                message = "",
+                returnCommand = EventData.ActionSceneStop(),
+                lines = listOf(EventData.ConfirmActionLine(ConfirmationRole.NORMAL.name, rh.gs(app.aaps.core.ui.R.string.scene_end_active))),
+                deferConfirm = config.AAPSCLIENT
+            )
+        )
     }
 
     private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {

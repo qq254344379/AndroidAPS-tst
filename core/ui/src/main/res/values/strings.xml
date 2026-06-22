@@ -360,6 +360,7 @@
     <string name="scene_deactivate">End Scene</string>
     <string name="scene_active">Active</string>
     <string name="scene_ended">Scene ended</string>
+    <string name="scene_end_active" comment="Confirmation line shown on watch before ending the active scene. Displayed in warning color.">End active scene</string>
     <string name="scene_confirm_activate">Activate scene \"%1$s\"?</string>
     <string name="scene_confirm_deactivate">End scene \"%1$s\" and revert changes?</string>
     <string name="scene_conflict_active_tt">Active temporary target will be replaced</string>
