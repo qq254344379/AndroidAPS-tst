@@ -34,6 +34,11 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
         for (quick in quickMap.entries) {
             val isActive = sfm in quick.validFrom..quick.validTo && now - quick.lastUsed > COOLDOWN_MILLIS
             if (isActive && quick.guid.isNotEmpty()) {
+                val icon = when (quick.mode) {
+                    1    -> R.drawable.ic_bolus         // INSULIN mode
+                    2    -> R.drawable.ic_carbs_orange  // CARBS mode
+                    else -> R.drawable.ic_quick_wizard  // WIZARD mode
+                }
                 quickList.add(
                     Action(
                         buttonText = quick.buttonText,
@@ -41,7 +46,7 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
                             context.resources.getString(R.string.quick_wizard_tile_insulin, quick.insulin)
                         else
                             context.resources.getString(R.string.quick_wizard_tile_carbs, quick.carbs),
-                        iconRes = R.drawable.ic_quick_wizard,
+                        iconRes = icon,
                         activityClass = BackgroundActionActivity::class.java.name,
                         action = EventData.ActionQuickWizardPreCheck(quick.guid),
                         message = context.resources.getString(R.string.action_quick_wizard_confirmation)
@@ -96,5 +101,9 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
         return (passed / 1000).toInt()
     }
 
-    override fun getResourceReferences(resources: Resources): List<Int> = listOf(R.drawable.ic_quick_wizard)
+    override fun getResourceReferences(resources: Resources): List<Int> = listOf(
+        R.drawable.ic_quick_wizard,
+        R.drawable.ic_bolus,
+        R.drawable.ic_carbs_orange
+    )
 }
