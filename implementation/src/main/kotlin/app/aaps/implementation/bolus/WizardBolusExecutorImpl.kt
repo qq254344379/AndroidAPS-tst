@@ -18,6 +18,7 @@ import app.aaps.core.data.ui.ConfirmationRole
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.bolus.WizardBolusExecutor
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -86,7 +87,8 @@ class WizardBolusExecutorImpl @Inject constructor(
     private val profileUtil: ProfileUtil,
     private val automation: Automation,
     private val notificationManager: NotificationManager,
-    @ApplicationScope private val appScope: CoroutineScope
+    @ApplicationScope private val appScope: CoroutineScope,
+    private val scenes: SceneAutomationApi
 ) : WizardBolusExecutor {
 
     /**
@@ -124,7 +126,10 @@ class WizardBolusExecutorImpl @Inject constructor(
         val insulinActivate: BatchAction.InsulinActivate? = null,
         val recordOnly: Boolean = false,
         val iCfg: ICfg? = null,
-        val bolusTimestamp: Long? = null
+        val bolusTimestamp: Long? = null,
+        val scene: BatchAction.Scene? = null,
+        val sceneBolusId: Long? = null,
+        val sceneStop: Boolean = false
     )
 
     // Consume-once slots keyed by bolusId — a map, NOT a single var, so prepares from different actors (the
@@ -271,6 +276,8 @@ class WizardBolusExecutorImpl @Inject constructor(
         val ctb = actions.filterIsInstance<BatchAction.CancelTempBasal>().firstOrNull() // ≤1 by construction
         val ceb = actions.filterIsInstance<BatchAction.CancelExtendedBolus>().firstOrNull() // ≤1 by construction
         val ia = actions.filterIsInstance<BatchAction.InsulinActivate>().firstOrNull() // ≤1 by construction
+        val scene = actions.filterIsInstance<BatchAction.Scene>().firstOrNull()      // ≤1 by construction
+        val sceneStop = actions.any { it is BatchAction.SceneStop }                  // ≤1 by construction
         val recordOnly = bolus?.recordOnly == true
         // Gate + pump-init only for an actual INSULIN delivery — carbs-only, a record-only log, and a TT-only batch
         // are always allowed (mirrors executeBolus, which gates only when insulin > 0).
@@ -360,7 +367,17 @@ class WizardBolusExecutorImpl @Inject constructor(
         // client gets an error instead of a silent no-op at confirm (the batch confirm path has no per-action failure channel).
         if (ia != null && profileFunction.getProfile() !is ProfileSealed.EPS)
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.no_profile_set))
-        if (insulin <= 0.0 && carbs == 0 && tt == null && ps == null && rm == null && tb == null && eb == null && ctb == null && ceb == null && ia == null)
+        // Scene: park on the master via SceneExecutor (two-step), retrieve lines for the merged confirmation.
+        var sceneBolusId: Long? = null
+        var sceneLines: List<ConfirmationLine> = emptyList()
+        if (scene != null) {
+            when (val result = scenes.prepareScene(scene.id, scene.durationMinutes)) {
+                is WizardBolusExecutor.PrepareResult.Preview  -> { sceneBolusId = result.bolusId; sceneLines = result.lines }
+                is WizardBolusExecutor.PrepareResult.Error    -> return result
+                is WizardBolusExecutor.PrepareResult.NoAction -> return WizardBolusExecutor.PrepareResult.NoAction
+            }
+        }
+        if (insulin <= 0.0 && carbs == 0 && tt == null && ps == null && rm == null && tb == null && eb == null && ctb == null && ceb == null && ia == null && scene == null && !sceneStop)
             // Nothing to do after caps/clamps (e.g. negative carbs with no COB to remove): a no-op, NOT a delivery
             // error — the caller renders the neutral "no action selected" message, never the bolus-error title.
             return WizardBolusExecutor.PrepareResult.NoAction
@@ -372,11 +389,12 @@ class WizardBolusExecutorImpl @Inject constructor(
             eventType = eventType, carbsDurationHours = bolus?.carbsDurationHours ?: 0,
             tempTarget = tt, profileSwitch = ps, runningMode = rm, recordOnly = recordOnly, iCfg = bolus?.iCfg, bolusTimestamp = bolus?.timestamp?.takeIf { it > 0L },
             tempBasal = cappedTb, extendedBolus = cappedEb, cancelTempBasal = ctb != null, cancelExtendedBolus = ceb != null,
-            insulinActivate = ia
+            insulinActivate = ia, scene = scene, sceneBolusId = sceneBolusId, sceneStop = sceneStop
         )
         // The master is the SOLE author of the confirmation: build the MERGED lines for the whole batch here, so the
         // client renders the master's exact string and a master-local dialog renders the identical one (decision 1).
-        val isTtOnly = bolus == null && ps == null && rm == null && cappedTb == null && cappedEb == null && ctb == null && ceb == null && ia == null
+        val isTtOnly = bolus == null && ps == null && rm == null && cappedTb == null && cappedEb == null && ctb == null && ceb == null && ia == null && scene == null && !sceneStop
+        val sceneStopLine = if (sceneStop) listOf(ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.scene_end_active))) else emptyList()
         val lines = buildFixedLines(bolus, insulin, carbs, recordOnly) +
             (tt?.let { buildTtLine(it, isTtOnly) } ?: emptyList()) +
             (ps?.let { buildPsLine(it) } ?: emptyList()) +
@@ -385,7 +403,9 @@ class WizardBolusExecutorImpl @Inject constructor(
             (cappedEb?.let { buildExtendedBolusLine(it, eb) } ?: emptyList()) +
             (ctb?.let { buildCancelLine(R.string.tempbasal_label) } ?: emptyList()) +
             (ceb?.let { buildCancelLine(R.string.extended_bolus) } ?: emptyList()) +
-            (ia?.let { buildInsulinActivateLine(it) } ?: emptyList())
+            (ia?.let { buildInsulinActivateLine(it) } ?: emptyList()) +
+            sceneLines +
+            sceneStopLine
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
@@ -460,6 +480,8 @@ class WizardBolusExecutorImpl @Inject constructor(
             p.extendedBolus?.let { applyExtendedBolus(it, source, onError) }
             if (p.cancelTempBasal) applyCancelTempBasal(source, onError)
             if (p.cancelExtendedBolus) applyCancelExtendedBolus(source, onError)
+            p.sceneBolusId?.let { sceneId -> scenes.commitScene(sceneId) { onError(it) } }
+            if (p.sceneStop) scenes.stopActiveScene()
             return WizardBolusExecutor.ConfirmResult.Delivered
         }
 

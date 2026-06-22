@@ -224,7 +224,9 @@ data class BatchActionDto(
     // temp_basal ([rate] = percent or absolute U/h per [isPercent]; reuses [durationMinutes]).
     // extended_bolus reuses [insulin] + [durationMinutes].
     val rate: Double = 0.0,
-    val isPercent: Boolean = false
+    val isPercent: Boolean = false,
+    // scene — the master activates the scene with this id; reuses [durationMinutes] for the override (0 = use default).
+    val sceneId: String? = null
 ) {
 
     companion object {
@@ -242,5 +244,11 @@ data class BatchActionDto(
 
         // insulin_activate reuses [iCfgJson] — the master re-applies its active profile with this insulin config.
         const val TYPE_INSULIN_ACTIVATE = "insulin_activate"
+
+        // scene — the master activates a scene by id; durationMinutes 0 = use scene default.
+        const val TYPE_SCENE = "scene"
+
+        // scene_stop — the master ends the currently active scene. No fields required.
+        const val TYPE_SCENE_STOP = "scene_stop"
     }
 }

@@ -133,6 +133,9 @@ sealed class EventData : Event() {
     class ActionSceneStopPreCheck : EventData()
 
     @Serializable
+    data class ActionSceneStopConfirmed(val bolusId: Long) : EventData()
+
+    @Serializable
     data class ActiveSceneState(val active: Boolean) : EventData()
 
     @Serializable

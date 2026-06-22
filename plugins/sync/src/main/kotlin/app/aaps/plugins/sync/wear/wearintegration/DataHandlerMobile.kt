@@ -319,6 +319,10 @@ class DataHandlerMobile @Inject constructor(
             if (!config.appInitialized) return@onEvent
             handleSceneStopPreCheck()
         }
+        onEvent<EventData.ActionSceneStopConfirmed> {
+            if (!config.appInitialized) return@onEvent
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.scenes)))
+        }
         onEventSync<EventData.SnoozeAlert> { uiInteraction.stopAlarm("Muted from wear") }
         onEventSync<EventData.WearException> { fabricPrivacy.logWearException(it) }
         // Coalesce Wear reconnect-flush bursts (Data Layer replays queued events back-to-back).
@@ -649,26 +653,20 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleScenePreCheck(command: EventData.ActionScenePreCheck) {
-        when (val result = scenes.prepareScene(command.id)) {
-            is WizardBolusExecutor.PrepareResult.Preview -> sendToWear(
-                EventData.ConfirmAction(
-                    title = rh.gs(app.aaps.core.ui.R.string.scenes),
-                    message = "",
-                    returnCommand = EventData.ActionSceneConfirmed(command.id, command.title, result.bolusId),
-                    lines = result.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) },
-                    deferConfirm = config.AAPSCLIENT
-                )
-            )
-            is WizardBolusExecutor.PrepareResult.Error    -> sendError(result.message)
-            is WizardBolusExecutor.PrepareResult.NoAction -> sendError(rh.gs(R.string.scene_not_available, command.title))
-        }
+        val label = rh.gs(app.aaps.core.ui.R.string.scenes)
+        contacting()
+        shipPrepared(
+            batchExecutor.prepare(listOf(BatchAction.Scene(command.id)), Sources.Wear, label),
+            label
+        ) { bolusId -> EventData.ActionSceneConfirmed(command.id, command.title, bolusId) }
     }
 
     private suspend fun handleSceneConfirmed(command: EventData.ActionSceneConfirmed) {
+        val label = rh.gs(app.aaps.core.ui.R.string.scenes)
         if (command.bolusId != null) {
-            scenes.commitScene(command.bolusId!!) { sendError(it) }
+            onCommitResult(batchExecutor.commit(command.bolusId!!, Sources.Wear, label))
         } else {
-            // Fallback for watch builds that pre-date the two-step flow (no bolusId).
+            // Fallback for watch builds that pre-date the batchExecutor flow (no bolusId).
             when (val result = scenes.runScene(command.id)) {
                 is SceneAutomationResult.Success        -> Unit
                 is SceneAutomationResult.SceneNotFound,
@@ -680,16 +678,12 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleSceneStopPreCheck() {
-        if (!scenes.isAnySceneActive()) return sendError(rh.gs(app.aaps.core.ui.R.string.scene_ended))
-        sendToWear(
-            EventData.ConfirmAction(
-                title = rh.gs(app.aaps.core.ui.R.string.scenes),
-                message = "",
-                returnCommand = EventData.ActionSceneStop(),
-                lines = listOf(EventData.ConfirmActionLine(ConfirmationRole.NORMAL.name, rh.gs(app.aaps.core.ui.R.string.scene_end_active))),
-                deferConfirm = config.AAPSCLIENT
-            )
-        )
+        val label = rh.gs(app.aaps.core.ui.R.string.scenes)
+        contacting()
+        shipPrepared(
+            batchExecutor.prepare(listOf(BatchAction.SceneStop), Sources.Wear, label),
+            label
+        ) { bolusId -> EventData.ActionSceneStopConfirmed(bolusId) }
     }
 
     private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {

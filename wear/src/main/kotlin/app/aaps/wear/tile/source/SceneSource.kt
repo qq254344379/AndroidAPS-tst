@@ -22,7 +22,7 @@ class SceneSource @Inject constructor(private val context: Context, private val 
             return listOf(
                 Action(
                     buttonText = context.resources.getString(R.string.scene_end),
-                    iconRes = R.drawable.ic_cancel,
+                    iconRes = R.drawable.ic_cancel_red,
                     activityClass = BackgroundActionActivity::class.java.name,
                     action = EventData.ActionSceneStopPreCheck(),
                 )
@@ -60,5 +60,5 @@ class SceneSource @Inject constructor(private val context: Context, private val 
         return runCatching { (EventData.deserialize(raw) as? EventData.ActiveSceneState)?.active == true }.getOrDefault(false)
     }
 
-    override fun getResourceReferences(resources: Resources): List<Int> = listOf(R.drawable.ic_scene_purple, R.drawable.ic_cancel)
+    override fun getResourceReferences(resources: Resources): List<Int> = listOf(R.drawable.ic_scene_purple, R.drawable.ic_cancel_red)
 }

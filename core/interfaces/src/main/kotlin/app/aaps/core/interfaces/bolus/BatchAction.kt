@@ -94,4 +94,16 @@ sealed interface BatchAction {
      * authoritative for the profile it re-applies. ≤1 per batch. Mirrors [ProfileSwitch] (a config activation).
      */
     data class InsulinActivate(val iCfg: ICfg) : BatchAction
+
+    /**
+     * Activate a scene by [id] on the master. [durationMinutes] overrides the scene's default duration
+     * (null = use the scene's own default). The master validates the scene exists and is enabled.
+     */
+    data class Scene(
+        val id: String,
+        val durationMinutes: Int? = null
+    ) : BatchAction
+
+    /** End (deactivate) the currently active scene on the master. No-op if no scene is active. */
+    data object SceneStop : BatchAction
 }
