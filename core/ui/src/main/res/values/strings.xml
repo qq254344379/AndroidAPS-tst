@@ -253,7 +253,7 @@
     <string name="configbuilder_nightscoutversion_label">Nightscout version:</string>
     <string name="not_available_full">Not available</string>
     <string name="engineering_mode_enabled">Engineering mode enabled</string>
-    <string name="back">Back</string>
+    <string name="back" comment="Label for a navigation back button or arrow — go to the previous screen. Not the back of a body or object.">Back</string>
     <string name="next">Next</string>
     <string name="pref_syncs_with_main_phone">Syncs with the main phone</string>
     <string name="show_hide_records">Hide loop records</string>
