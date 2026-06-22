@@ -64,6 +64,7 @@ import app.aaps.core.interfaces.rx.weardata.LoopStatusData
 import app.aaps.core.interfaces.rx.weardata.OapsResultInfo
 import app.aaps.core.interfaces.rx.weardata.TargetRange
 import app.aaps.core.interfaces.rx.weardata.TempTargetInfo
+import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
@@ -156,6 +157,7 @@ class DataHandlerMobile @Inject constructor(
 
     @Inject lateinit var automation: Automation
     @Inject lateinit var scenes: SceneAutomationApi
+    @Inject lateinit var sceneActions: SceneActions
     private val disposable = CompositeDisposable()
 
     /**
@@ -321,7 +323,7 @@ class DataHandlerMobile @Inject constructor(
         }
         onEvent<EventData.ActionSceneStopConfirmed> {
             if (!config.appInitialized) return@onEvent
-            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.scenes)))
+            onCommitResult(sceneActions.stop(triggerChain = false))
         }
         onEventSync<EventData.SnoozeAlert> { uiInteraction.stopAlarm("Muted from wear") }
         onEventSync<EventData.WearException> { fabricPrivacy.logWearException(it) }
@@ -655,18 +657,16 @@ class DataHandlerMobile @Inject constructor(
     private suspend fun handleScenePreCheck(command: EventData.ActionScenePreCheck) {
         val label = rh.gs(app.aaps.core.ui.R.string.scenes)
         contacting()
-        shipPrepared(
-            batchExecutor.prepare(listOf(BatchAction.Scene(command.id)), Sources.Wear, label),
-            label
-        ) { bolusId -> EventData.ActionSceneConfirmed(command.id, command.title, bolusId) }
+        shipPrepared(sceneActions.prepareStart(command.id), label) { bolusId ->
+            EventData.ActionSceneConfirmed(command.id, command.title, bolusId)
+        }
     }
 
     private suspend fun handleSceneConfirmed(command: EventData.ActionSceneConfirmed) {
-        val label = rh.gs(app.aaps.core.ui.R.string.scenes)
         if (command.bolusId != null) {
-            onCommitResult(batchExecutor.commit(command.bolusId!!, Sources.Wear, label))
+            onCommitResult(sceneActions.commitStart(command.bolusId!!))
         } else {
-            // Fallback for watch builds that pre-date the batchExecutor flow (no bolusId).
+            // Fallback for watch builds that pre-date the SceneActions flow (no bolusId).
             when (val result = scenes.runScene(command.id)) {
                 is SceneAutomationResult.Success        -> Unit
                 is SceneAutomationResult.SceneNotFound,
@@ -678,12 +678,18 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleSceneStopPreCheck() {
-        val label = rh.gs(app.aaps.core.ui.R.string.scenes)
-        contacting()
-        shipPrepared(
-            batchExecutor.prepare(listOf(BatchAction.SceneStop), Sources.Wear, label),
-            label
-        ) { bolusId -> EventData.ActionSceneStopConfirmed(bolusId) }
+        // Build confirm locally — no master round-trip needed before showing "End active scene".
+        // The watch waits for RemoteDelivered (deferConfirm) while the stop relays to master.
+        if (!scenes.isAnySceneActive()) return sendError(rh.gs(app.aaps.core.ui.R.string.scene_ended))
+        sendToWear(
+            EventData.ConfirmAction(
+                title = rh.gs(app.aaps.core.ui.R.string.scenes),
+                message = "",
+                returnCommand = EventData.ActionSceneStopConfirmed(),
+                lines = listOf(EventData.ConfirmActionLine(ConfirmationRole.NORMAL.name, rh.gs(app.aaps.core.ui.R.string.scene_end_active))),
+                deferConfirm = config.AAPSCLIENT
+            )
+        )
     }
 
     private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
