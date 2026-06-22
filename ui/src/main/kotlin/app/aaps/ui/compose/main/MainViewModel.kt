@@ -521,9 +521,16 @@ class MainViewModel @Inject constructor(
     private suspend fun executeCarbsMode(entry: QuickWizardEntry) {
         val carbs = entry.carbs()
         if (carbs <= 0) return
+        val hasEcarbs = entry.useEcarbs() == QuickWizardEntry.YES
         executeFixedBatch(
             entry,
-            listOf(BatchAction.Bolus(insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null)),
+            listOf(BatchAction.Bolus(
+                insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null,
+                eCarbsGrams = if (hasEcarbs) entry.carbs2() else 0,
+                eCarbsDelayMinutes = if (hasEcarbs) entry.time() else 0,
+                eCarbsDurationHours = if (hasEcarbs) entry.duration() else 0
+            )),
             rh.gs(app.aaps.core.ui.R.string.carbs),
             IcCarbs
         )
