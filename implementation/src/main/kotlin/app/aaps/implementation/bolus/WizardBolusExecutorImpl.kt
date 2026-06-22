@@ -742,10 +742,21 @@ class WizardBolusExecutorImpl @Inject constructor(
     /** The RM line(s) for any batch (wear / client / phone) — the target mode title + an optional duration. */
     private suspend fun buildRmLine(rm: BatchAction.RunningMode): List<ConfirmationLine> {
         val out = mutableListOf<ConfirmationLine>()
-        out += ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.running_mode), rmModeTitle(rm.mode)))
+        out += ConfirmationLine(rmModeRole(rm.mode), rmModeTitle(rm.mode))
         if (rm.durationMinutes > 0)
-            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), rh.gs(R.string.format_mins, rm.durationMinutes)))
+            out += ConfirmationLine(ConfirmationRole.NORMAL, rh.gs(R.string.confirmation_line, rh.gs(R.string.duration), formatMinutesAsDuration(rm.durationMinutes, rh)))
         return out
+    }
+
+    private fun rmModeRole(mode: RM.Mode): ConfirmationRole = when (mode) {
+        RM.Mode.CLOSED_LOOP       -> ConfirmationRole.LOOP_CLOSED
+        RM.Mode.CLOSED_LOOP_LGS   -> ConfirmationRole.LOOP_LGS
+        RM.Mode.OPEN_LOOP         -> ConfirmationRole.LOOP_OPEN
+        RM.Mode.DISABLED_LOOP     -> ConfirmationRole.LOOP_DISABLED
+        RM.Mode.SUSPENDED_BY_USER -> ConfirmationRole.LOOP_SUSPENDED
+        RM.Mode.DISCONNECTED_PUMP -> ConfirmationRole.LOOP_DISCONNECTED
+        RM.Mode.RESUME            -> ConfirmationRole.LOOP_CLOSED
+        else                      -> ConfirmationRole.PRIMARY
     }
 
     /** Localized title for a target running mode (RESUME resolves to reconnect vs resume by the current loop state). */
