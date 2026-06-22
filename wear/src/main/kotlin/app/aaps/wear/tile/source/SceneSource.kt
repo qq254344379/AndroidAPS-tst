@@ -48,7 +48,6 @@ class SceneSource @Inject constructor(private val context: Context, private val 
         return sceneList
     }
 
-
     override fun getValidFor(): Long? = null
 
     private fun getSceneData(sp: SP): EventData.SceneList =

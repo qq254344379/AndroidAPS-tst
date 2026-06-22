@@ -6,7 +6,6 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import app.aaps.core.data.model.ActiveSceneState
-import app.aaps.core.ui.compose.formatMinutesAsDuration
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.Scene
@@ -44,6 +43,7 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import app.aaps.core.ui.R as CoreUiR
+import app.aaps.core.ui.compose.formatMinutesAsDuration
 
 /**
  * Executes scene activation and deactivation.
@@ -142,7 +142,10 @@ class SceneExecutor @Inject constructor(
 
     private fun sceneActionLine(action: SceneAction): String = when (action) {
         is SceneAction.TempTarget      -> rh.gs(CoreUiR.string.scene_action_tt, profileUtil.fromMgdlToStringWithUnits(action.targetMgdl))
-        is SceneAction.ProfileSwitch   -> rh.gs(CoreUiR.string.scene_action_profile, action.profileName, action.percentage)
+        is SceneAction.ProfileSwitch   -> if (action.profileName.isNotEmpty())
+            rh.gs(CoreUiR.string.scene_action_profile, action.profileName, action.percentage)
+        else
+            rh.gs(CoreUiR.string.scene_action_profile_pct_only, action.percentage)
         is SceneAction.SmbToggle       -> if (action.enabled) rh.gs(CoreUiR.string.scene_action_smb_on) else rh.gs(CoreUiR.string.scene_action_smb_off)
         is SceneAction.LoopModeChange  -> rh.gs(CoreUiR.string.scene_action_running_mode, translator.translate(action.mode))
         is SceneAction.CarePortalEvent -> rh.gs(CoreUiR.string.scene_action_careportal, translator.translate(action.type))
