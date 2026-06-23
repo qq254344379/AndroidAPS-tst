@@ -46,6 +46,7 @@ data class WizardDetailDto(
     val eCarbsDelayMinutes: Int = 0,
     val eCarbsDurationHours: Int = 0,
     val carbTimeMinutes: Int = 0,
+    val alarm: Boolean = false,
 )
 
 /**

@@ -486,6 +486,7 @@ sealed class EventData : Event() {
         val eCarbsDelayMinutes: Int = 0,
         val eCarbsDurationHours: Int = 0,
         val carbTimeMinutes: Int = 0,
+        val alarm: Boolean = false,
     )
 
     @Serializable // returnCommand is sent back to Mobile after confirmation

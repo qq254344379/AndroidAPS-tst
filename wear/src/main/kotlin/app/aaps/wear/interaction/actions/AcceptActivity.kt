@@ -397,11 +397,40 @@ private fun WizardDetailPage(detail: EventData.WizardDetail) {
                         fontWeight = FontWeight.Bold,
                     )
                 }
+                val carbsFontSize = if (detail.eCarbsGrams > 0) 11.sp else 14.sp
                 if (detail.carbs > 0) {
+                    val carbsText = if (detail.carbTimeMinutes != 0) {
+                        val sign = if (detail.carbTimeMinutes > 0) "+" else ""
+                        stringResource(R.string.wizard_carbs_with_time, detail.carbs, "$sign${detail.carbTimeMinutes}")
+                    } else {
+                        stringResource(R.string.wizard_carbs_format, detail.carbs)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            text = carbsText,
+                            color = CarbsOrange,
+                            fontSize = carbsFontSize,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (detail.alarm && detail.carbTimeMinutes > 0) {
+                            Spacer(Modifier.width(3.dp))
+                            Icon(
+                                painter = painterResource(R.drawable.ic_alarm),
+                                contentDescription = null,
+                                tint = CarbsOrange,
+                                modifier = Modifier.size(carbsFontSize.value.dp),
+                            )
+                        }
+                    }
+                }
+                if (detail.eCarbsGrams > 0) {
                     Text(
-                        text = stringResource(R.string.wizard_carbs_format, detail.carbs),
+                        text = stringResource(R.string.wizard_result_ecarbs, detail.eCarbsGrams, detail.eCarbsDurationHours, detail.eCarbsDelayMinutes),
                         color = CarbsOrange,
-                        fontSize = 14.sp,
+                        fontSize = carbsFontSize,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                     )
@@ -485,20 +514,6 @@ private fun WizardDetailPage(detail: EventData.WizardDetail) {
                         }
                         WizardDetailDivider()
                         WizardDetailRow(stringResource(R.string.wizard_result_total), detail.totalInsulin, fmt2)
-                        if (detail.eCarbsGrams > 0) {
-                            WizardDetailDivider()
-                            Text(
-                                text = stringResource(
-                                    R.string.wizard_result_ecarbs,
-                                    detail.eCarbsGrams,
-                                    detail.eCarbsDurationHours,
-                                    detail.eCarbsDelayMinutes,
-                                ),
-                                color = CarbsOrange,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(vertical = 2.dp),
-                            )
-                        }
                     }
                 }
             }

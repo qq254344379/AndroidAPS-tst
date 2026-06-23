@@ -201,6 +201,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDelayMinutes = if (eCarbsGrams > 0) entry.time() else 0,
                 eCarbsDurationHours = if (eCarbsGrams > 0) entry.duration() else 0,
                 carbTimeMinutes = entry.carbTime(),
+                alarm = entry.useAlarm() == QuickWizardEntry.YES && entry.carbTime() > 0,
             ),
         )
     }
@@ -281,6 +282,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDelayMinutes = inputs.eCarbsDelayMinutes,
                 eCarbsDurationHours = inputs.eCarbsDurationHours,
                 carbTimeMinutes = inputs.carbTime,
+                alarm = inputs.alarm && inputs.carbTime > 0,
             ),
         )
     }
