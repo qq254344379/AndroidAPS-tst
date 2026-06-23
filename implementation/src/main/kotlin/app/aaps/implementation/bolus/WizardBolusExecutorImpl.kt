@@ -188,13 +188,20 @@ class WizardBolusExecutorImpl @Inject constructor(
         // Build the master's color-coded confirmation lines here so the client renders the master's EXACT
         // wizard confirmation (shared builder). advisorApplies offers the high-BG "correct now, eat later" fork.
         val advisorApplies = wizard.needsBolusAdvisor()
+        val eCarbsGrams = if (entry.useEcarbs() == QuickWizardEntry.YES) entry.carbs2() else 0
         return WizardBolusExecutor.PrepareResult.Preview(
             insulin = wizard.calculatedTotalInsulin,
             carbs = wizard.carbs,
             bolusId = wizard.timeStamp,
             lines = wizard.buildConfirmationLines(advisor = false, quickWizardEntry = entry),
             advisorApplies = advisorApplies,
-            advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true, quickWizardEntry = entry) else emptyList()
+            advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true, quickWizardEntry = entry) else emptyList(),
+            wizardDetail = wizard.buildWizardDetail().copy(
+                eCarbsGrams = eCarbsGrams,
+                eCarbsDelayMinutes = if (eCarbsGrams > 0) entry.time() else 0,
+                eCarbsDurationHours = if (eCarbsGrams > 0) entry.duration() else 0,
+                carbTimeMinutes = entry.carbTime(),
+            ),
         )
     }
 
@@ -268,7 +275,13 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = inputs.eCarbsDurationHours
             ),
             advisorApplies = advisorApplies,
-            advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true) else emptyList()
+            advisorLines = if (advisorApplies) wizard.buildConfirmationLines(advisor = true) else emptyList(),
+            wizardDetail = wizard.buildWizardDetail().copy(
+                eCarbsGrams = inputs.eCarbsGrams,
+                eCarbsDelayMinutes = inputs.eCarbsDelayMinutes,
+                eCarbsDurationHours = inputs.eCarbsDurationHours,
+                carbTimeMinutes = inputs.carbTime,
+            ),
         )
     }
 

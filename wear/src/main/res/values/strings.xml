@@ -340,4 +340,19 @@
     <string name="confirm">Confirm</string>
     <string name="request">Request</string>
     <string name="constraint_applied">Constraint applied!</string>
+    <string name="wizard_total_insulin" comment="Label above the total insulin amount in the wizard result summary card">Total Insulin</string>
+    <string name="wizard_calculation" comment="Header of the collapsible calculation breakdown card on the wizard result screen">Calculation</string>
+    <string name="wizard_settings_format" comment="%1$s = IC ratio (e.g. 10.0), %2$s = ISF in profile units (e.g. 2.5). Shows current IC and ISF used in the bolus calculation. Example: IC: 10.0 | ISF: 2.5">IC: %1$s | ISF: %2$s</string>
+    <string name="wizard_result_bg" comment="Bolus wizard calculation row label for the blood glucose correction component">BG</string>
+    <string name="wizard_result_bg_tt" comment="%1$s = formatted temp target value in profile units (e.g. 5.5 or 5.0-5.5). Bolus wizard BG correction row when a temp target is active. Example: BG (TT: 5.5)">BG (TT: %1$s)</string>
+    <string name="wizard_result_trend" comment="Bolus wizard calculation row label for the 15-min BG trend correction component">15\' trend</string>
+    <string name="wizard_result_iob" comment="Bolus wizard calculation row label for the IOB (insulin on board) value used in the calculation">IOB</string>
+    <string name="wizard_result_new_iob" comment="%1$s = formatted new total IOB with unit after the bolus is delivered (e.g. 1.50 U). Example: New IOB: 1.50 U">New IOB: %1$s U</string>
+    <string name="wizard_result_cob" comment="%1$.1f = COB grams (e.g. 45.0). Bolus wizard calculation row label for the COB correction component. Example: COB (45.0 g)">COB (%1$.1f g)</string>
+    <string name="wizard_result_carbs" comment="%1$d = carb grams entered (e.g. 40). Bolus wizard calculation row label for the carbs insulin component. Example: Carbs (40 g)">Carbs (%1$d g)</string>
+    <string name="wizard_result_subtotal" comment="Bolus wizard calculation row label for the subtotal before percentage correction and IOB">Subtotal</string>
+    <string name="wizard_result_total" comment="Bolus wizard calculation row label for the final calculated insulin amount to be delivered">Total</string>
+    <string name="wizard_insulin_format" comment="%1$s = formatted insulin value (e.g. 1.50). Shown on the confirm page. Example: 1.50 U">%1$s U</string>
+    <string name="wizard_result_correction_percentage" comment="%1$d = percentage value (e.g. 80). Bolus wizard calculation row label for the percentage correction applied. Example: 80%%">%1$d%%</string>
+    <string name="wizard_result_ecarbs" comment="%1$d = eCarbs grams, %2$d = duration hours, %3$d = delay minutes. Extended carbs row on wizard result. Example: eCarbs: 20g / 3h +30min">eCarbs: %1$dg / %2$dh +%3$dmin</string>
 </resources>
