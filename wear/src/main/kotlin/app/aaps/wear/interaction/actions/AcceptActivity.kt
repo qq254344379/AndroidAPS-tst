@@ -78,8 +78,8 @@ import java.text.DecimalFormat
 class AcceptActivity : DaggerAppCompatActivity() {
 
     private var actionKey = ""
-
     private var deferConfirm = false
+    private var wizardBolusId: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,6 +106,12 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val wizardDetail = extras?.getString(DataLayerListenerServiceWear.KEY_WIZARD_DETAIL)
             ?.let { runCatching { Json.decodeFromString<EventData.WizardDetail>(it) }.getOrNull() }
 
+        if (wizardDetail != null && actionKey.isNotEmpty()) {
+            wizardBolusId = runCatching {
+                (Json.decodeFromString<EventData>(actionKey) as? EventData.ActionWizardConfirmed)?.timeStamp
+            }.getOrNull()
+        }
+
         if (message.isEmpty() && lines.isEmpty() && wizardDetail == null && !isError) {
             finish()
             return
@@ -124,6 +130,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
                 // Hoisted above the pager pages so a page recomposition (e.g. swiping back to page 0) can never
                 // reset it and re-enable a second ✓ tap after the first already fired.
                 var confirmationSent by remember { mutableStateOf(false) }
+                // Track correction as an integer step count so returning to 0 steps always yields
+                // exactly 0.0 (0 * step = 0.0 in IEEE 754), avoiding FP drift from accumulated adds.
+                var correctionSteps by remember { mutableStateOf(0) }
+                val correctionU = if (correctionSteps == 0) 0.0 else correctionSteps * (wizardDetail?.bolusStep ?: 0.0)
 
                 LaunchedEffect(Unit) {
                     delay(60_000)
@@ -134,7 +144,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                     HorizontalPager(state = pagerState) { page ->
                         when (page) {
                             0 -> if (wizardDetail != null) {
-                                WizardDetailPage(wizardDetail)
+                                WizardDetailPage(wizardDetail, correctionSteps) { correctionSteps = it }
                             } else {
                                 val curvedTitle = if (hasLines) title.ifEmpty { null } else null
                                 Box(modifier = Modifier.fillMaxSize()) {
@@ -214,9 +224,9 @@ class AcceptActivity : DaggerAppCompatActivity() {
 
                             else -> WizardConfirmPage(
                                 enabled = !confirmationSent,
-                                totalInsulin = wizardDetail?.totalInsulin,
+                                totalInsulin = wizardDetail?.let { (it.totalInsulin + correctionU).coerceAtLeast(0.0) },
                                 carbs = wizardDetail?.carbs,
-                                onConfirm = { confirmationSent = true; confirm() },
+                                onConfirm = { confirmationSent = true; confirm(correctionU) },
                             )
                         }
                     }
@@ -244,8 +254,11 @@ class AcceptActivity : DaggerAppCompatActivity() {
         }
     }
 
-    private fun confirm() {
-        if (actionKey.isNotEmpty()) startService(IntentWearToMobile(this, actionKey))
+    private fun confirm(correctionU: Double = 0.0) {
+        val key = if (correctionU != 0.0 && wizardBolusId != null)
+            EventData.ActionWizardConfirmed(wizardBolusId!!, correctionU).serialize()
+        else actionKey
+        if (key.isNotEmpty()) startService(IntentWearToMobile(this, key))
         startForegroundService(IntentCancelNotification(this))
         if (deferConfirm) {
             // CLIENT relay: the commit is a master round-trip in flight — do NOT show a (false) success animation.
@@ -319,9 +332,14 @@ private fun WizardConfirmPage(enabled: Boolean, totalInsulin: Double?, carbs: In
 }
 
 @Composable
-private fun WizardDetailPage(detail: EventData.WizardDetail) {
+private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: Int, onCorrectionStepsChange: (Int) -> Unit) {
     val fmt2 = remember { DecimalFormat("0.00") }
     val fmt1 = remember { DecimalFormat("0.0") }
+    val haptic = LocalHapticFeedback.current
+
+    // correctionSteps == 0 → exactly 0.0 (no FP drift); otherwise multiply once for display
+    val correctionU = if (correctionSteps == 0) 0.0 else correctionSteps * detail.bolusStep
+    val adjustedTotal = (detail.totalInsulin + correctionU).coerceAtLeast(0.0)
 
     val totalIob = when {
         detail.includeBolusIOB && detail.includeBasalIOB -> detail.insulinFromBolusIOB + detail.insulinFromBasalIOB
@@ -329,8 +347,8 @@ private fun WizardDetailPage(detail: EventData.WizardDetail) {
         detail.includeBasalIOB                           -> detail.insulinFromBasalIOB
         else                                             -> null
     }
-    // New IOB = current IOB + bolus to deliver (the projected total active insulin after delivery)
-    val newIob = totalIob?.let { it + detail.totalInsulin }
+    // New IOB = current IOB + adjusted bolus (projected total active insulin after delivery)
+    val newIob = totalIob?.let { it + adjustedTotal }
 
     data class CalcRow(val label: String, val value: Double)
 
@@ -382,9 +400,36 @@ private fun WizardDetailPage(detail: EventData.WizardDetail) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
+                    // Integer step bounds: +0.01 epsilon in the division absorbs FP imprecision when
+                    // totalInsulin / bolusStep isn't a clean integer (e.g. 0.35 / 0.05 = 6.999…).
+                    val maxDownSteps = if (detail.bolusStep > 0.0) ((detail.totalInsulin / detail.bolusStep) + 0.01).toInt() else 0
+                    val maxUpSteps   = if (detail.bolusStep > 0.0 && detail.maxBolus > 0.0) (((detail.maxBolus - detail.totalInsulin) / detail.bolusStep) + 0.01).toInt() else Int.MAX_VALUE
+                    val canDecrease  = detail.bolusStep > 0.0 && correctionSteps > -maxDownSteps
+                    val canIncrease  = detail.bolusStep > 0.0 && correctionSteps < maxUpSteps
+                    if (detail.bolusStep > 0.0) {
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(when {
+                                    correctionSteps < 0 -> WearInsulinNegative
+                                    canDecrease         -> WearCalcCardBg
+                                    else                -> Color(0xFF303030)
+                                })
+                                .clickable(enabled = canDecrease) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onCorrectionStepsChange(correctionSteps - 1)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("−", color = if (canDecrease) Color.White else Color(0xFF606060), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
                     Text(
-                        text = fmt2.format(detail.totalInsulin),
+                        text = fmt2.format(adjustedTotal),
                         color = Color.White,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
@@ -396,6 +441,26 @@ private fun WizardDetailPage(detail: EventData.WizardDetail) {
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                     )
+                    if (detail.bolusStep > 0.0) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(when {
+                                    correctionSteps > 0 -> WearInsulinPositive
+                                    canIncrease         -> WearCalcCardBg
+                                    else                -> Color(0xFF303030)
+                                })
+                                .clickable(enabled = canIncrease) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onCorrectionStepsChange(correctionSteps + 1)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("+", color = if (canIncrease) Color.White else Color(0xFF606060), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
                 val carbsFontSize = if (detail.eCarbsGrams > 0) 11.sp else 14.sp
                 if (detail.carbs > 0) {
@@ -511,9 +576,14 @@ private fun WizardDetailPage(detail: EventData.WizardDetail) {
                         if (totalIob != null && totalIob != 0.0) {
                             WizardDetailDivider()
                             WizardDetailRow(stringResource(R.string.wizard_result_iob), -totalIob, fmt2)
+                            if (correctionU != 0.0)
+                                WizardDetailRow(stringResource(R.string.wizard_result_correction), correctionU, fmt2)
+                        } else if (correctionU != 0.0) {
+                            WizardDetailDivider()
+                            WizardDetailRow(stringResource(R.string.wizard_result_correction), correctionU, fmt2)
                         }
                         WizardDetailDivider()
-                        WizardDetailRow(stringResource(R.string.wizard_result_total), detail.totalInsulin, fmt2)
+                        WizardDetailRow(stringResource(R.string.wizard_result_total), adjustedTotal, fmt2)
                     }
                 }
             }

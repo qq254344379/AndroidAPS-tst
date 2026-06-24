@@ -204,6 +204,8 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = if (eCarbsGrams > 0) entry.duration() else 0,
                 carbTimeMinutes = entry.carbTime(),
                 alarm = entry.useAlarm() == QuickWizardEntry.YES && entry.carbTime() > 0,
+                maxBolus = constraintChecker.applyBolusConstraints(ConstraintObject(9999.0, aapsLogger)).value(),
+                bolusStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(wizard.insulinAfterConstraints),
             ),
         )
     }
@@ -285,6 +287,8 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = inputs.eCarbsDurationHours,
                 carbTimeMinutes = inputs.carbTime,
                 alarm = inputs.alarm && inputs.carbTime > 0,
+                maxBolus = constraintChecker.applyBolusConstraints(ConstraintObject(9999.0, aapsLogger)).value(),
+                bolusStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(wizard.insulinAfterConstraints),
             ),
         )
     }
@@ -419,7 +423,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
-    override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean): WizardBolusExecutor.ConfirmResult {
+    override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean, correctionU: Double): WizardBolusExecutor.ConfirmResult {
         // Atomic consume-once: remove(bolusId) returns the parked dose and removes it in one step, so two
         // concurrent commits of the same id can't both deliver (the loser gets null → NoPending). A non-matching
         // id removes nothing, leaving other actors' parked doses intact.
@@ -544,7 +548,16 @@ class WizardBolusExecutorImpl @Inject constructor(
         }
         // Canonical: a wear wizard bolus now records identically to the phone (BOLUS_WIZARD + mgdlGlucose).
         // The mg/dL BG comes from the BCR's glucoseValue (== profileUtil.convertToMgdl(bg, units)).
-        deliverWizardBolus(p.insulin, p.carbs, carbTimeOffset.toInt(), p.bcr?.glucoseValue, p.bcr, notes, source, onError)
+        // correctionU: watch-side ± adjustment added by the user on the result page; adjust BCR so the wizard log
+        // records the actual delivered amount (otherCorrection mirrors the phone wizard's direct-correction field).
+        val correctedInsulin = (p.insulin + correctionU).coerceAtLeast(0.0)
+        val correctedBcr = if (correctionU != 0.0)
+            p.bcr?.copy(
+                otherCorrection = p.bcr.otherCorrection + correctionU,
+                totalInsulin = (p.bcr.totalInsulin + correctionU).coerceAtLeast(0.0)
+            )
+        else p.bcr
+        deliverWizardBolus(correctedInsulin, p.carbs, carbTimeOffset.toInt(), p.bcr?.glucoseValue, correctedBcr, notes, source, onError)
         if (carbs2 > 0) deliverECarbs(carbs2, eventTime, duration, eCarbsDelay, notes, source, onError)
         if (useAlarm && p.carbs > 0 && carbTimeOffset > 0)
             automation.scheduleTimeToEatReminder(T.mins(carbTimeOffset).secs().toInt())

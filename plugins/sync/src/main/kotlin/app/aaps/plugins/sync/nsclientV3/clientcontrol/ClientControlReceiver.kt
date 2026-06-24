@@ -843,4 +843,6 @@ private fun EventData.WizardDetail.toDto() = WizardDetailDto(
     eCarbsDurationHours = eCarbsDurationHours,
     carbTimeMinutes = carbTimeMinutes,
     alarm = alarm,
+    maxBolus = maxBolus,
+    bolusStep = bolusStep,
 )
