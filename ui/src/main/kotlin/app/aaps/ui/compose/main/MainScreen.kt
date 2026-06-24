@@ -227,6 +227,8 @@ fun MainScreen(
                 val activeSceneState by mainViewModel.activeSceneState.collectAsStateWithLifecycle()
                 val sceneExpired by mainViewModel.sceneExpired.collectAsStateWithLifecycle()
                 val masterReachable by mainViewModel.masterReachable.collectAsStateWithLifecycle()
+                // Stable pairing signal — hides the mutating nav buttons on an unpaired client.
+                val masterOrPairedClient by mainViewModel.masterOrPairedClient.collectAsStateWithLifecycle()
                 // (Probe-while-offline is now global — see ComposeMainActivity. This screen still reads
                 // masterReachable for its own gating.)
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -366,6 +368,7 @@ fun MainScreen(
                                 treatmentViewModel.refreshState()
                                 showTreatmentSheet = true
                             },
+                            masterOrPairedClient = masterOrPairedClient,
                             quickWizardCount = uiState.quickWizardItems.size,
                             onAutomationClick = {
                                 scenesViewModel.refreshState()
