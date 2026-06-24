@@ -9,6 +9,7 @@ import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.tempTargets.toTTPresets
+import app.aaps.core.ui.compose.formatMinutesAsDuration
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -150,7 +151,7 @@ class QuickLaunchResolver @Inject constructor(
             val preset = presets.find { it.id == action.presetId }
             preset?.let {
                 val durationMin = (it.duration / 60000L).toInt()
-                rh.gs(app.aaps.core.ui.R.string.format_mins, durationMin)
+                formatMinutesAsDuration(durationMin, rh)
             }
         }
 
