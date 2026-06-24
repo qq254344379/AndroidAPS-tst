@@ -32,8 +32,8 @@ enum class ElementType(
     // CGM
     CGM_XDRIP(category = ElementCategory.CGM, searchable = true),
     CGM_DEX(category = ElementCategory.CGM),
-    // Track B: CALIBRATION still writes directly to the local DB (not yet on the Client-Control channel) —
-    // leave ungated for now; add visibility = PreferenceVisibility.CLIENT_PAIRED when its migration lands.
+    // CALIBRATION is intentionally NOT migrated/gated: it's a CGM-plugin command (activeCalibration.addEntry), not a
+    // DB write, and a client has no CGM source to calibrate — so it stays local/master-only (see Track B calibration notes).
     CALIBRATION(category = ElementCategory.CGM, searchable = true),
 
     // Profile & Targets — minimum level is BOLUS; screen mode (PLAY/EDIT) determined by granted auth level.
@@ -44,19 +44,19 @@ enum class ElementType(
     QUICK_WIZARD_MANAGEMENT(category = ElementCategory.MANAGEMENT, searchable = true, protection = ProtectionCheck.Protection.BOLUS, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
     FOOD_MANAGEMENT(category = ElementCategory.MANAGEMENT, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
 
-    // Careportal — Track B: these therapy-event recorders still write directly to the local DB and are NOT
-    // yet routed through general processing; leave ungated. Add CLIENT_PAIRED to each when migrated.
-    BG_CHECK(category = ElementCategory.CAREPORTAL, searchable = true),
-    NOTE(category = ElementCategory.CAREPORTAL, searchable = true),
-    EXERCISE(category = ElementCategory.CAREPORTAL, searchable = true),
-    QUESTION(category = ElementCategory.CAREPORTAL, searchable = true),
-    ANNOUNCEMENT(category = ElementCategory.CAREPORTAL, searchable = true),
+    // Careportal — migrated to the Client-Control batch channel (BatchAction.TherapyEvent via CareDialogViewModel):
+    // the master is the sole writer and the event syncs back. Gated MASTER_OR_PAIRED_CLIENT (hidden on an unpaired client).
+    BG_CHECK(category = ElementCategory.CAREPORTAL, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
+    NOTE(category = ElementCategory.CAREPORTAL, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
+    EXERCISE(category = ElementCategory.CAREPORTAL, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
+    QUESTION(category = ElementCategory.CAREPORTAL, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
+    ANNOUNCEMENT(category = ElementCategory.CAREPORTAL, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
 
-    // Device maintenance — Track B (direct DB writes) EXCEPT FILL, which routes through BatchExecutor
-    // (recordOnly bolus) and so is gated with CLIENT_PAIRED like the other migrated actions.
-    SENSOR_INSERT(category = ElementCategory.DEVICE, searchable = true),
-    BATTERY_CHANGE(category = ElementCategory.DEVICE, searchable = true),
-    CANNULA_CHANGE(category = ElementCategory.DEVICE, protection = ProtectionCheck.Protection.BOLUS),
+    // Device maintenance. SENSOR_INSERT + BATTERY_CHANGE route through CareDialog; CANNULA_CHANGE + FILL both open the
+    // FillDialog (site / cartridge) — all Client-Control-migrated → gated. SITE_ROTATION's write path is NOT verified yet — ungated.
+    SENSOR_INSERT(category = ElementCategory.DEVICE, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
+    BATTERY_CHANGE(category = ElementCategory.DEVICE, searchable = true, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
+    CANNULA_CHANGE(category = ElementCategory.DEVICE, protection = ProtectionCheck.Protection.BOLUS, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
     FILL(category = ElementCategory.DEVICE, searchable = true, protection = ProtectionCheck.Protection.BOLUS, visibility = ElementVisibility.MASTER_OR_PAIRED_CLIENT),
     SITE_ROTATION(category = ElementCategory.DEVICE, searchable = true),
 

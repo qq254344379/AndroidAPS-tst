@@ -270,6 +270,7 @@ fun MainScreen(
                         onEndScene = { mainViewModel.requestSceneDeactivation() },
                         onDismissScene = { mainViewModel.dismissExpiredScene() },
                         endSceneEnabled = masterReachable,
+                        commandsAllowed = masterOrPairedClient,
                         formatDuration = mainViewModel::formatDuration,
                         paddingValues = contentPadding,
                         fabBottomOffset = if (hasToolbar && showChrome) 56.dp else 0.dp,
