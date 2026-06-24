@@ -15,8 +15,12 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardMode
+import app.aaps.core.data.model.TT
 import app.aaps.core.ui.compose.icons.IcBolus
 import app.aaps.core.ui.compose.icons.IcCarbs
+import app.aaps.core.ui.compose.icons.IcTtActivity
+import app.aaps.core.ui.compose.icons.IcTtEatingSoon
+import app.aaps.core.ui.compose.icons.IcTtHypo
 import app.aaps.core.ui.compose.navigation.descriptionResId
 import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.compose.navigation.labelResId
@@ -66,6 +70,17 @@ class QuickLaunchResolver @Inject constructor(
                 QuickWizardMode.WIZARD  -> action.elementType.icon()
             }
         } ?: action.elementType.icon()
+
+        is QuickLaunchAction.TempTargetPreset  -> {
+            val preset = preferences.get(StringNonKey.TempTargetPresets).toTTPresets()
+                .find { it.id == action.presetId }
+            if (preset != null && !preset.isDeletable) when (preset.reason) {
+                TT.Reason.ACTIVITY     -> IcTtActivity
+                TT.Reason.EATING_SOON  -> IcTtEatingSoon
+                TT.Reason.HYPOGLYCEMIA -> IcTtHypo
+                else                   -> action.elementType.icon()
+            } else action.elementType.icon()
+        }
 
         is QuickLaunchAction.SceneAction       -> sceneRepository.getScene(action.sceneId)
             ?.let { SceneIcons.fromKey(it.icon).icon }
