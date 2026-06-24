@@ -9,6 +9,7 @@ import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.tempTargets.toTTPresets
+import app.aaps.ui.compose.tempTarget.toTTPresetsWithNameRes
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.wizard.QuickWizard
@@ -106,7 +107,7 @@ class QuickLaunchResolver @Inject constructor(
         is QuickLaunchAction.AutomationAction  -> automation.findEventById(action.automationId)?.title ?: "?"
 
         is QuickLaunchAction.TempTargetPreset  -> {
-            val presets = preferences.get(StringNonKey.TempTargetPresets).toTTPresets()
+            val presets = preferences.get(StringNonKey.TempTargetPresets).toTTPresetsWithNameRes()
             val preset = presets.find { it.id == action.presetId }
             preset?.name ?: preset?.nameRes?.let { rh.gs(it) } ?: "?"
         }
