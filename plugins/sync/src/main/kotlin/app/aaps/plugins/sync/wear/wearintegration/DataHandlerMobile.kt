@@ -1587,7 +1587,7 @@ class DataHandlerMobile @Inject constructor(
     private suspend fun generateStatusString(profile: Profile?): String {
         var status = ""
         profile ?: return rh.gs(app.aaps.core.ui.R.string.noprofile)
-        if (!loop.runningMode().isLoopRunning()) status += rh.gs(R.string.disabled_loop) + "\n"
+        if (!loop.runningMode().isLoopRunning()) status += rh.gs(app.aaps.core.ui.R.string.disabled_loop) + "\n"
         return status
     }
 
