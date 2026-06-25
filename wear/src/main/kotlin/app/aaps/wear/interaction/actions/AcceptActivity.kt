@@ -54,7 +54,10 @@ import app.aaps.wear.comm.DataLayerListenerServiceWear
 import app.aaps.wear.comm.IntentCancelNotification
 import app.aaps.wear.comm.IntentWearToMobile
 import dagger.android.support.DaggerAppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.text.DecimalFormat
 
@@ -71,15 +74,17 @@ import java.text.DecimalFormat
  * for the real terminal (a [app.aaps.core.interfaces.rx.weardata.EventData.RemoteDelivered] success or an error
  * [app.aaps.core.interfaces.rx.weardata.EventData.ConfirmAction]), both of which dismiss the spinner.
  *
- * A 60s [LaunchedEffect] auto-dismisses the screen if the user never acts. It is also cancelled implicitly by
- * [onPause] (which finishes the activity), so backgrounding the screen tears it down rather than leaving a stale
- * confirmation alive in the background.
+ * Dismiss behaviour: non-wizard flows finish immediately on [onPause] (screen off / navigated away); wizard flows
+ * instead start a 30s grace-period job so a brief wrist-down doesn't destroy the result — cancelled by [onResume].
+ * Non-wizard flows also have a 60s [LaunchedEffect] absolute timeout as a backstop.
  */
 class AcceptActivity : DaggerAppCompatActivity() {
 
     private var actionKey = ""
     private var deferConfirm = false
     private var wizardBolusId: Long? = null
+    private var isWizardFlow = false
+    private var screenOffJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,6 +110,8 @@ class AcceptActivity : DaggerAppCompatActivity() {
         val title = extras?.getString(DataLayerListenerServiceWear.KEY_TITLE, "") ?: ""
         val wizardDetail = extras?.getString(DataLayerListenerServiceWear.KEY_WIZARD_DETAIL)
             ?.let { runCatching { Json.decodeFromString<EventData.WizardDetail>(it) }.getOrNull() }
+
+        isWizardFlow = wizardDetail != null
 
         if (wizardDetail != null && actionKey.isNotEmpty()) {
             wizardBolusId = runCatching {
@@ -138,7 +145,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
                 val canConfirm = adjustedTotal == null || adjustedTotal > 0.0 || (wizardDetail!!.carbs > 0)
                 val pagerState = rememberPagerState(pageCount = { if (isError && !hasLines) 1 else if (canConfirm) 2 else 1 })
 
-                LaunchedEffect(Unit) {
+                if (wizardDetail == null) LaunchedEffect(Unit) {
                     delay(60_000)
                     finish()
                 }
@@ -246,7 +253,21 @@ class AcceptActivity : DaggerAppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        finish()
+        if (isWizardFlow) {
+            screenOffJob?.cancel()
+            screenOffJob = lifecycleScope.launch {
+                delay(30_000)
+                finish()
+            }
+        } else {
+            finish()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        screenOffJob?.cancel()
+        screenOffJob = null
     }
 
     override fun onNewIntent(intent: Intent) {
