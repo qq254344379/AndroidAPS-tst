@@ -126,7 +126,6 @@ class AcceptActivity : DaggerAppCompatActivity() {
             MaterialTheme {
                 // Wizard flows (wizardDetail != null): page 0 = calculation result, page 1 = confirm.
                 // Non-wizard flows: page 0 = lines, page 1 = confirm (or 1 page for error with no lines).
-                val pagerState = rememberPagerState(pageCount = { if (isError && !hasLines) 1 else 2 })
                 // Hoisted above the pager pages so a page recomposition (e.g. swiping back to page 0) can never
                 // reset it and re-enable a second ✓ tap after the first already fired.
                 var confirmationSent by remember { mutableStateOf(false) }
@@ -134,6 +133,10 @@ class AcceptActivity : DaggerAppCompatActivity() {
                 // exactly 0.0 (0 * step = 0.0 in IEEE 754), avoiding FP drift from accumulated adds.
                 var correctionSteps by remember { mutableStateOf(0) }
                 val correctionU = if (correctionSteps == 0) 0.0 else correctionSteps * (wizardDetail?.bolusStep ?: 0.0)
+                val adjustedTotal = wizardDetail?.let { (it.unclampedInsulin + correctionU).coerceAtLeast(0.0) }
+                // Swipe to confirm is only meaningful when there is insulin or carbs to deliver.
+                val canConfirm = adjustedTotal == null || adjustedTotal > 0.0 || (wizardDetail!!.carbs > 0)
+                val pagerState = rememberPagerState(pageCount = { if (isError && !hasLines) 1 else if (canConfirm) 2 else 1 })
 
                 LaunchedEffect(Unit) {
                     delay(60_000)
