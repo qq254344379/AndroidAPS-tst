@@ -436,6 +436,7 @@ class ClientControlRoundTrip @Inject constructor(
 
 private fun WizardDetailDto.toDomain() = EventData.WizardDetail(
     totalInsulin = totalInsulin,
+    unclampedInsulin = unclampedInsulin,
     carbs = carbs,
     insulinFromBG = insulinFromBG,
     insulinFromTrend = insulinFromTrend,

@@ -121,6 +121,11 @@ class BolusWizard @Inject constructor(
     // Result
     var calculatedTotalInsulin: Double = 0.0
         private set
+    // Raw sum before the negative-total clamp (calculatedTotalInsulin = 0.0 branch); equals
+    // calculatedTotalInsulin when non-negative. Used by the wear correction buttons so they
+    // spend the right number of steps recovering to 0 before going positive.
+    var unclampedCalculatedInsulin: Double = 0.0
+        private set
     var totalBeforePercentageAdjustment: Double = 0.0
         private set
     var carbsEquivalent: Double = 0.0
@@ -275,6 +280,7 @@ class BolusWizard @Inject constructor(
 
         totalBeforePercentageAdjustment = scaledComponents + unscaledComponents
         calculatedTotalInsulin = scaledComponents * percentage / 100.0 + unscaledComponents
+        var preClamp = calculatedTotalInsulin  // save before constraint calcs or negative clamp
 
         // Percentage adjustment
         if (calculatedTotalInsulin >= 0) {
@@ -284,15 +290,18 @@ class BolusWizard @Inject constructor(
                 calcPercentageWithConstraints()
             if (usePercentage)  //Should be updated after calcCorrectionWithConstraints and calcPercentageWithConstraints to have correct synthesis in WizardInfo
                 this.percentageCorrection = Round.roundTo(totalPercentage, 1.0).toInt()
+            preClamp = calculatedTotalInsulin  // update after constraint calcs (may have changed)
         } else {
             carbsEquivalent = (-calculatedTotalInsulin) * ic
             calculatedTotalInsulin = 0.0
             calculatedPercentage = percentageCorrection
             calculatedCorrection = 0.0
+            // preClamp stays as the original negative value
         }
 
         val bolusStep = activePlugin.activePump.pumpDescription.bolusStep
         calculatedTotalInsulin = Round.roundTo(calculatedTotalInsulin, bolusStep)
+        unclampedCalculatedInsulin = Round.roundTo(preClamp, bolusStep)
 
         insulinAfterConstraints = constraintChecker.applyBolusConstraints(ConstraintObject(calculatedTotalInsulin, aapsLogger)).value()
 
@@ -458,6 +467,7 @@ class BolusWizard @Inject constructor(
         } else null
         return EventData.WizardDetail(
             totalInsulin = calculatedTotalInsulin,
+            unclampedInsulin = unclampedCalculatedInsulin,
             carbs = carbs,
             insulinFromBG = insulinFromBG,
             insulinFromTrend = insulinFromTrend,

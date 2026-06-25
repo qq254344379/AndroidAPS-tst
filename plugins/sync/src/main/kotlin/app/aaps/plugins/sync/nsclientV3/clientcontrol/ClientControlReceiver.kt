@@ -824,6 +824,7 @@ class ClientControlReceiver @Inject constructor(
 
 private fun EventData.WizardDetail.toDto() = WizardDetailDto(
     totalInsulin = totalInsulin,
+    unclampedInsulin = unclampedInsulin,
     carbs = carbs,
     insulinFromBG = insulinFromBG,
     insulinFromTrend = insulinFromTrend,

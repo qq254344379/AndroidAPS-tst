@@ -467,6 +467,7 @@ sealed class EventData : Event() {
     @Serializable
     data class WizardDetail(
         val totalInsulin: Double,
+        val unclampedInsulin: Double = totalInsulin,
         val carbs: Int,
         val insulinFromBG: Double,
         val insulinFromTrend: Double,

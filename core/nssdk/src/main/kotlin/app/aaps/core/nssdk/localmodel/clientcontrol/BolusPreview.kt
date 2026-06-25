@@ -28,6 +28,7 @@ data class BolusPreview(
 @Serializable
 data class WizardDetailDto(
     val totalInsulin: Double,
+    val unclampedInsulin: Double = totalInsulin,
     val carbs: Int,
     val insulinFromBG: Double,
     val insulinFromTrend: Double,

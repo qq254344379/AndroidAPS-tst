@@ -186,7 +186,7 @@ class WizardBolusExecutorImpl @Inject constructor(
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_insulin_required))
 
         evictStalePending()
-        pending[wizard.timeStamp] = PendingBolus(wizard.calculatedTotalInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry, carbTimeMinutes = entry.carbTime(), notes = entry.buttonText())
+        pending[wizard.timeStamp] = PendingBolus(wizard.unclampedCalculatedInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry, carbTimeMinutes = entry.carbTime(), notes = entry.buttonText())
         // Build the master's color-coded confirmation lines here so the client renders the master's EXACT
         // wizard confirmation (shared builder). advisorApplies offers the high-BG "correct now, eat later" fork.
         val advisorApplies = wizard.needsBolusAdvisor()
@@ -254,7 +254,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         evictStalePending()
         pending[wizard.timeStamp] =
             PendingBolus(
-                wizard.calculatedTotalInsulin,
+                wizard.unclampedCalculatedInsulin,
                 wizard.carbs,
                 wizard.createBolusCalculatorResult(),
                 wizard.timeStamp,
@@ -554,7 +554,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         val correctedBcr = if (correctionU != 0.0)
             p.bcr?.copy(
                 otherCorrection = p.bcr.otherCorrection + correctionU,
-                totalInsulin = (p.bcr.totalInsulin + correctionU).coerceAtLeast(0.0)
+                totalInsulin = correctedInsulin  // actual delivered amount (already coerced ≥ 0)
             )
         else p.bcr
         deliverWizardBolus(correctedInsulin, p.carbs, carbTimeOffset.toInt(), p.bcr?.glucoseValue, correctedBcr, notes, source, onError)

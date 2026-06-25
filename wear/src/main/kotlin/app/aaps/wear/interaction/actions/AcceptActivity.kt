@@ -224,7 +224,7 @@ class AcceptActivity : DaggerAppCompatActivity() {
 
                             else -> WizardConfirmPage(
                                 enabled = !confirmationSent,
-                                totalInsulin = wizardDetail?.let { (it.totalInsulin + correctionU).coerceAtLeast(0.0) },
+                                totalInsulin = wizardDetail?.let { (it.unclampedInsulin + correctionU).coerceAtLeast(0.0) },
                                 carbs = wizardDetail?.carbs,
                                 onConfirm = { confirmationSent = true; confirm(correctionU) },
                             )
@@ -339,7 +339,10 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
 
     // correctionSteps == 0 → exactly 0.0 (no FP drift); otherwise multiply once for display
     val correctionU = if (correctionSteps == 0) 0.0 else correctionSteps * detail.bolusStep
-    val adjustedTotal = (detail.totalInsulin + correctionU).coerceAtLeast(0.0)
+    // Use unclampedInsulin as the base so that when IOB exceeds the calculated dose (raw < 0,
+    // displayed as 0.00), the user must spend steps recovering to zero before going positive —
+    // matching phone wizard behaviour.
+    val adjustedTotal = (detail.unclampedInsulin + correctionU).coerceAtLeast(0.0)
 
     val totalIob = when {
         detail.includeBolusIOB && detail.includeBasalIOB -> detail.insulinFromBolusIOB + detail.insulinFromBasalIOB
@@ -402,10 +405,11 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    // Integer step bounds: +0.01 epsilon in the division absorbs FP imprecision when
-                    // totalInsulin / bolusStep isn't a clean integer (e.g. 0.35 / 0.05 = 6.999…).
-                    val maxDownSteps = if (detail.bolusStep > 0.0) ((detail.totalInsulin / detail.bolusStep) + 0.01).toInt() else 0
-                    val maxUpSteps   = if (detail.bolusStep > 0.0 && detail.maxBolus > 0.0) (((detail.maxBolus - detail.totalInsulin) / detail.bolusStep) + 0.01).toInt() else Int.MAX_VALUE
+                    // Integer step bounds derived from unclampedInsulin so limits are correct even
+                    // when the raw calculated dose is negative (IOB > calculated → total clamped to 0).
+                    // coerceAtLeast(0): when unclamped < 0 you can't decrease further (already at 0).
+                    val maxDownSteps = if (detail.bolusStep > 0.0) ((detail.unclampedInsulin / detail.bolusStep) + 0.01).toInt().coerceAtLeast(0) else 0
+                    val maxUpSteps   = if (detail.bolusStep > 0.0 && detail.maxBolus > 0.0) (((detail.maxBolus - detail.unclampedInsulin) / detail.bolusStep) + 0.01).toInt() else Int.MAX_VALUE
                     val canDecrease  = detail.bolusStep > 0.0 && correctionSteps > -maxDownSteps
                     val canIncrease  = detail.bolusStep > 0.0 && correctionSteps < maxUpSteps
                     if (detail.bolusStep > 0.0) {
