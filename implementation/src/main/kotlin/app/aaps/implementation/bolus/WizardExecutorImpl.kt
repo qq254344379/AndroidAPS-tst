@@ -36,7 +36,7 @@ class WizardExecutorImpl @Inject constructor(
     }
 
     override suspend fun commit(bolusId: Long, asAdvisor: Boolean, source: Sources, label: String, correctionU: Double): ActionProgress =
-        roleBranch.commit(label, ClientControlActionDispatcher.Command.BolusCommit(bolusId, asAdvisor)) { onError ->
+        roleBranch.commit(label, ClientControlActionDispatcher.Command.BolusCommit(bolusId, asAdvisor, correctionU = correctionU)) { onError ->
             wizardBolusExecutor.confirm(bolusId, source, onError, asAdvisor, correctionU)
         }
 }

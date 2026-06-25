@@ -560,7 +560,7 @@ class ClientControlReceiver @Inject constructor(
             if (!progressDelivering) progressClientId.compareAndSet(entry.clientId, null)
             if (syncDone.get()) appScope.launch { writeDeliveryFailureAck(entry, envelope.counter, comment) }
             else deliverError.set(comment)
-        }, message.asAdvisor)
+        }, message.asAdvisor, correctionU = message.correctionU)
         syncDone.set(true)
         val delivered = result is WizardBolusExecutor.ConfirmResult.Delivered
         if (!delivered) progressClientId.set(null) // NoPending → nothing starts → don't mirror a future bolus to this client

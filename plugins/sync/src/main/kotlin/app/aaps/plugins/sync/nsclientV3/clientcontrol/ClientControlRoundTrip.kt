@@ -331,7 +331,7 @@ class ClientControlRoundTrip @Inject constructor(
                 is ClientControlActionDispatcher.Command.SceneCommit    -> ClientControlMessage.SceneCommit(command.bolusId)
                 is ClientControlActionDispatcher.Command.SceneStop      -> ClientControlMessage.SceneStop(command.triggerChain)
                 is ClientControlActionDispatcher.Command.BolusPrepare   -> ClientControlMessage.BolusPrepare(command.guid)
-                is ClientControlActionDispatcher.Command.BolusCommit    -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)
+                is ClientControlActionDispatcher.Command.BolusCommit    -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor, command.correctionU)
                 is ClientControlActionDispatcher.Command.WizardPrepare  -> with(command.inputs) {
                     ClientControlMessage.WizardPrepare(bg, carbs, percentage, directCorrection, carbTime, useBg, useCob, useIob, useTt, useTrend, alarm, notes, eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours, profileName)
                 }
