@@ -435,19 +435,26 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                         }
                         Spacer(Modifier.width(6.dp))
                     }
-                    Text(
-                        text = fmt2.format(adjustedTotal),
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = stringResource(R.string.insulin_unit_short),
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = fmt2.format(adjustedTotal),
+                                color = Color.White,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = stringResource(R.string.insulin_unit_short),
+                                color = Color.White,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                     if (detail.bolusStep > 0.0) {
                         Spacer(Modifier.width(6.dp))
                         Box(
