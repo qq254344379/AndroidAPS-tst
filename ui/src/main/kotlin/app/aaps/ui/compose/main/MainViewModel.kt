@@ -686,16 +686,19 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val activeTb = persistenceLayer.getTemporaryBasalActiveAt(dateUtil.now())
             val profile = profileFunction.getProfile()
-            val message = if (activeTb != null && profile != null)
-                activeTb.toStringFull(profile, dateUtil, rh)
-            else
-                rh.gs(app.aaps.ui.R.string.no_temp_basal_running)
-            rxBus.send(
-                EventShowDialog.Ok(
-                    title = rh.gs(app.aaps.core.ui.R.string.temp_basal),
-                    message = message
-                )
-            )
+            val title: String
+            val message: String
+            if (activeTb != null && profile != null) {
+                title = rh.gs(app.aaps.core.ui.R.string.temp_basal)
+                message = activeTb.toStringFull(profile, dateUtil, rh)
+            } else {
+                title = rh.gs(app.aaps.core.ui.R.string.base_basal_rate_label)
+                message = if (profile != null)
+                    rh.gs(app.aaps.core.ui.R.string.pump_base_basal_rate, profile.getBasal())
+                else
+                    rh.gs(app.aaps.ui.R.string.no_temp_basal_running)
+            }
+            rxBus.send(EventShowDialog.Ok(title = title, message = message))
         }
     }
 
