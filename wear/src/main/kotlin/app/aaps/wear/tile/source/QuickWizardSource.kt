@@ -21,6 +21,7 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
         // Mirrors QuickWizardMode in :core:objects (not a wear dependency): WIZARD(0), INSULIN(1), CARBS(2).
         // An INSULIN button shows its fixed dose in U; WIZARD/CARBS show carbs in g (the wizard's carb input).
         private const val MODE_INSULIN = 1
+        private const val MODE_CARBS   = 2
     }
 
     override fun getSelectedActions(): List<Action> {
@@ -31,9 +32,9 @@ class QuickWizardSource @Inject constructor(private val context: Context, privat
         for (quick in quickMap.entries) {
             if (sfm in quick.validFrom..quick.validTo && quick.guid.isNotEmpty()) {
                 val icon = when (quick.mode) {
-                    1    -> R.drawable.ic_bolus         // INSULIN mode
-                    2    -> R.drawable.ic_carbs_orange  // CARBS mode
-                    else -> R.drawable.ic_quick_wizard  // WIZARD mode
+                    MODE_INSULIN -> R.drawable.ic_bolus
+                    MODE_CARBS   -> R.drawable.ic_carbs_orange
+                    else         -> R.drawable.ic_quick_wizard
                 }
                 quickList.add(
                     Action(
