@@ -424,16 +424,17 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                 )
+                // Integer step bounds derived from unclampedInsulin so limits are correct even
+                // when the raw calculated dose is negative (IOB > calculated → total clamped to 0).
+                // coerceAtLeast(0): when unclamped < 0 you can't decrease further (already at 0).
+                // detail is stable across correctionSteps recompositions — remember to avoid recalculating on every tap.
+                val maxDownSteps = remember(detail) { if (detail.bolusStep > 0.0) ((detail.unclampedInsulin / detail.bolusStep) + 0.01).toInt().coerceAtLeast(0) else 0 }
+                val maxUpSteps   = remember(detail) { if (detail.bolusStep > 0.0 && detail.maxBolus > 0.0) (((detail.maxBolus - detail.unclampedInsulin) / detail.bolusStep) + 0.01).toInt() else Int.MAX_VALUE }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    // Integer step bounds derived from unclampedInsulin so limits are correct even
-                    // when the raw calculated dose is negative (IOB > calculated → total clamped to 0).
-                    // coerceAtLeast(0): when unclamped < 0 you can't decrease further (already at 0).
-                    val maxDownSteps = if (detail.bolusStep > 0.0) ((detail.unclampedInsulin / detail.bolusStep) + 0.01).toInt().coerceAtLeast(0) else 0
-                    val maxUpSteps   = if (detail.bolusStep > 0.0 && detail.maxBolus > 0.0) (((detail.maxBolus - detail.unclampedInsulin) / detail.bolusStep) + 0.01).toInt() else Int.MAX_VALUE
                     val canDecrease  = detail.bolusStep > 0.0 && correctionSteps > -maxDownSteps
                     val canIncrease  = detail.bolusStep > 0.0 && correctionSteps < maxUpSteps
                     if (detail.bolusStep > 0.0) {
@@ -608,14 +609,11 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                                 )
                             }
                         }
-                        if (totalIob != null && totalIob != 0.0) {
+                        val hasIob = totalIob != null && totalIob != 0.0
+                        if (hasIob || correctionU != 0.0) {
                             WizardDetailDivider()
-                            WizardDetailRow(stringResource(R.string.wizard_result_iob), -totalIob, fmt2)
-                            if (correctionU != 0.0)
-                                WizardDetailRow(stringResource(R.string.wizard_result_correction), correctionU, fmt2)
-                        } else if (correctionU != 0.0) {
-                            WizardDetailDivider()
-                            WizardDetailRow(stringResource(R.string.wizard_result_correction), correctionU, fmt2)
+                            if (hasIob) WizardDetailRow(stringResource(R.string.wizard_result_iob), -totalIob!!, fmt2)
+                            if (correctionU != 0.0) WizardDetailRow(stringResource(R.string.wizard_result_correction), correctionU, fmt2)
                         }
                         WizardDetailDivider()
                         WizardDetailRow(stringResource(R.string.wizard_result_total), adjustedTotal, fmt2)

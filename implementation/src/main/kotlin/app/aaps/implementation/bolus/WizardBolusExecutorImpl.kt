@@ -204,7 +204,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = if (eCarbsGrams > 0) entry.duration() else 0,
                 carbTimeMinutes = entry.carbTime(),
                 alarm = entry.useAlarm() == QuickWizardEntry.YES && entry.carbTime() > 0,
-                maxBolus = constraintChecker.applyBolusConstraints(ConstraintObject(9999.0, aapsLogger)).value(),
+                maxBolus = constraintChecker.getMaxBolusAllowed().value(),
                 bolusStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(wizard.insulinAfterConstraints),
             ),
         )
@@ -287,7 +287,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = inputs.eCarbsDurationHours,
                 carbTimeMinutes = inputs.carbTime,
                 alarm = inputs.alarm && inputs.carbTime > 0,
-                maxBolus = constraintChecker.applyBolusConstraints(ConstraintObject(9999.0, aapsLogger)).value(),
+                maxBolus = constraintChecker.getMaxBolusAllowed().value(),
                 bolusStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(wizard.insulinAfterConstraints),
             ),
         )
@@ -550,7 +550,9 @@ class WizardBolusExecutorImpl @Inject constructor(
         // The mg/dL BG comes from the BCR's glucoseValue (== profileUtil.convertToMgdl(bg, units)).
         // correctionU: watch-side ± adjustment added by the user on the result page; adjust BCR so the wizard log
         // records the actual delivered amount (otherCorrection mirrors the phone wizard's direct-correction field).
-        val correctedInsulin = (p.insulin + correctionU).coerceAtLeast(0.0)
+        val correctedInsulin = constraintChecker.applyBolusConstraints(
+            ConstraintObject((p.insulin + correctionU).coerceAtLeast(0.0), aapsLogger)
+        ).value()
         val correctedBcr = if (correctionU != 0.0)
             p.bcr?.copy(
                 otherCorrection = p.bcr.otherCorrection + correctionU,
