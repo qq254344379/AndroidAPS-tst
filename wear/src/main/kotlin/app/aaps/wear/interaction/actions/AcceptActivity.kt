@@ -347,7 +347,7 @@ private fun WizardConfirmPage(enabled: Boolean, totalInsulin: Double?, carbs: In
         }
         if (carbs != null && carbs > 0) {
             Text(
-                text = stringResource(R.string.wizard_carbs_format, carbs),
+                text = stringResource(R.string.wizard_carbs_short, carbs),
                 color = CarbsOrange,
                 fontSize = 12.sp,
             )
@@ -418,22 +418,12 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (correctionSteps != 0) {
-                    val sign = if (correctionU > 0) "+" else ""
-                    Text(
-                        text = "$sign${fmt2.format(correctionU)} ${stringResource(R.string.insulin_unit_short)}",
-                        color = if (correctionSteps > 0) WearInsulinPositive else WearInsulinNegative,
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.wizard_total_insulin),
-                        color = WearSecondaryText,
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+                Text(
+                    text = stringResource(R.string.wizard_total_insulin),
+                    color = WearSecondaryText,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                )
                 // Integer step bounds derived from unclampedInsulin so limits are correct even
                 // when the raw calculated dose is negative (IOB > calculated → total clamped to 0).
                 // coerceAtLeast(0): when unclamped < 0 you can't decrease further (already at 0).
@@ -474,14 +464,14 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = fmt2.format(adjustedTotal),
-                                color = Color.White,
+                                color = InsulinBlue,
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 text = stringResource(R.string.insulin_unit_short),
-                                color = Color.White,
+                                color = InsulinBlue,
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -508,25 +498,32 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                         }
                     }
                 }
-                val carbsFontSize = if (detail.eCarbsGrams > 0) 11.sp else 14.sp
+                val carbsFontSize = if (detail.eCarbsGrams > 0 || (correctionSteps != 0 && detail.carbTimeMinutes != 0)) 11.sp else 14.sp
+                if (correctionSteps != 0 && detail.carbs == 0) {
+                    val corrSign = if (correctionU > 0) "+" else ""
+                    Text(
+                        text = "$corrSign${fmt2.format(correctionU)} ${stringResource(R.string.insulin_unit_short)}",
+                        color = InsulinBlue,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 if (detail.carbs > 0) {
-                    val carbsText = if (detail.carbTimeMinutes != 0) {
-                        val sign = if (detail.carbTimeMinutes > 0) "+" else ""
-                        stringResource(R.string.wizard_carbs_with_time, detail.carbs, "$sign${detail.carbTimeMinutes}")
-                    } else {
-                        stringResource(R.string.wizard_carbs_format, detail.carbs)
-                    }
+                    val timeSign = if (detail.carbTimeMinutes > 0) "+" else ""
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         Text(
-                            text = carbsText,
+                            text = if (detail.carbTimeMinutes != 0)
+                                stringResource(R.string.wizard_carbs_with_time, detail.carbs, "$timeSign${detail.carbTimeMinutes}")
+                            else
+                                stringResource(R.string.wizard_carbs_short, detail.carbs),
                             color = CarbsOrange,
                             fontSize = carbsFontSize,
                             fontWeight = FontWeight.Bold,
                         )
-                        if (detail.alarm && detail.carbTimeMinutes > 0) {
+                        if (detail.alarm && detail.carbTimeMinutes != 0) {
                             Spacer(Modifier.width(3.dp))
                             Icon(
                                 painter = painterResource(R.drawable.ic_alarm),
@@ -534,6 +531,18 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
                                 tint = CarbsOrange,
                                 modifier = Modifier.size(carbsFontSize.value.dp),
                             )
+                        }
+                        if (correctionSteps != 0) {
+                            val corrSign = if (correctionU > 0) "+" else ""
+                            Spacer(Modifier.width(3.dp))
+                            Text(text = "(", color = WearSecondaryText, fontSize = carbsFontSize)
+                            Text(
+                                text = "$corrSign${fmt2.format(correctionU)} ${stringResource(R.string.insulin_unit_short)}",
+                                color = InsulinBlue,
+                                fontSize = carbsFontSize,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(text = ")", color = WearSecondaryText, fontSize = carbsFontSize)
                         }
                     }
                 }
@@ -554,7 +563,7 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(WearCalcCardBg)
+                .background(WearSummaryCardBg)
                 .padding(5.dp),
         ) {
             Column {
