@@ -418,12 +418,22 @@ private fun WizardDetailPage(detail: EventData.WizardDetail, correctionSteps: In
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = stringResource(R.string.wizard_total_insulin),
-                    color = WearSecondaryText,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                )
+                if (correctionSteps != 0) {
+                    val sign = if (correctionU > 0) "+" else ""
+                    Text(
+                        text = "$sign${fmt2.format(correctionU)} ${stringResource(R.string.insulin_unit_short)}",
+                        color = if (correctionSteps > 0) WearInsulinPositive else WearInsulinNegative,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.wizard_total_insulin),
+                        color = WearSecondaryText,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 // Integer step bounds derived from unclampedInsulin so limits are correct even
                 // when the raw calculated dose is negative (IOB > calculated → total clamped to 0).
                 // coerceAtLeast(0): when unclamped < 0 you can't decrease further (already at 0).
