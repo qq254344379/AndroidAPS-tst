@@ -157,7 +157,8 @@ internal fun ManageBottomSheetContent(
 
         GridSection(modifier = Modifier.padding(horizontal = 16.dp)) {
             // Mutating editors ride the signed Client-Control channel — hidden on an unpaired client
-            // (showMutatingActions=false), always shown on a master. SITE_ROTATION (still ungated) below stays.
+            // (showMutatingActions=false), always shown on a master. SITE_ROTATION now rides it too (its record +
+            // edit write path is Client-Control-migrated), so it is gated alongside the others.
             if (showMutatingActions) {
                 add { modifier ->
                     ManageGridItem(
@@ -217,14 +218,14 @@ internal fun ManageBottomSheetContent(
                         modifier = modifier
                     )
                 }
-            }
-            add { modifier ->
-                ManageGridItem(
-                    elementType = ElementType.SITE_ROTATION,
-                    onDismiss = onDismiss,
-                    onNavigate = onNavigate,
-                    modifier = modifier
-                )
+                add { modifier ->
+                    ManageGridItem(
+                        elementType = ElementType.SITE_ROTATION,
+                        onDismiss = onDismiss,
+                        onNavigate = onNavigate,
+                        modifier = modifier
+                    )
+                }
             }
             if (pumpPlugin != null && showPump) {
                 add { modifier ->
