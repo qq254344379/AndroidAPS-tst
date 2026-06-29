@@ -4,13 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.util.Base64
 import app.aaps.core.interfaces.configuration.ConfigBuilder
-import app.aaps.core.interfaces.constraints.Constraint
-import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.profile.ProfileStore
-import app.aaps.core.interfaces.pump.DetailedBolusInfoStorage
 import app.aaps.core.interfaces.pump.PumpSync
-import app.aaps.core.interfaces.pump.TemporaryBasalStorage
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
@@ -61,9 +57,6 @@ class BLECommRSv3IntegrationTest : TestBase() {
     @Mock lateinit var notificationManager: NotificationManager
     @Mock lateinit var decimalFormatter: DecimalFormatter
     @Mock lateinit var profileStoreProvider: javax.inject.Provider<ProfileStore>
-    @Mock lateinit var constraintsChecker: ConstraintsChecker
-    @Mock lateinit var detailedBolusInfoStorage: DetailedBolusInfoStorage
-    @Mock lateinit var temporaryBasalStorage: TemporaryBasalStorage
 
     private lateinit var danaPump: DanaPump
     private lateinit var bleEncryption: BleEncryption
@@ -96,7 +89,6 @@ class BLECommRSv3IntegrationTest : TestBase() {
         whenever(preferences.get(any<StringComposedNonPreferenceKey>(), any())).thenReturn("")
         whenever(preferences.get(DanaStringNonKey.Password)).thenReturn("0000")
         whenever(danaRSPlugin.mDeviceName).thenReturn(deviceName)
-        whenever(constraintsChecker.applyBolusConstraints(any<Constraint<Double>>())).thenAnswer { it.arguments[0] }
 
         // Provide RSv3 pairing keys so handshake completes without PIN entry
         val encoder = java.util.Base64.getEncoder()
