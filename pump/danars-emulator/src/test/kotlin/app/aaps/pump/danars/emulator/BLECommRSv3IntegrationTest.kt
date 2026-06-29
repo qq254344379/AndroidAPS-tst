@@ -179,7 +179,7 @@ class BLECommRSv3IntegrationTest : TestBase() {
         state.batteryRemaining = 60
         state.currentBasal = 1.5
 
-        val packet = DanaRSPacketGeneralInitialScreenInformation(aapsLogger, danaPump)
+        val packet = DanaRSPacketGeneralInitialScreenInformation(aapsLogger, danaPump, notificationManager)
         bleComm.sendMessage(packet)
 
         assertThat(packet.isReceived).isTrue()
@@ -219,7 +219,7 @@ class BLECommRSv3IntegrationTest : TestBase() {
         assertThat(tempPacket.isReceived).isTrue()
 
         // Command 3: Screen info
-        val screenPacket = DanaRSPacketGeneralInitialScreenInformation(aapsLogger, danaPump)
+        val screenPacket = DanaRSPacketGeneralInitialScreenInformation(aapsLogger, danaPump, notificationManager)
         bleComm.sendMessage(screenPacket)
         assertThat(screenPacket.isReceived).isTrue()
         assertThat(screenPacket.isTempBasalInProgress).isTrue()
