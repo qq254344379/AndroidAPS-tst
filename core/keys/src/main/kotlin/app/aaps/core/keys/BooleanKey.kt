@@ -221,9 +221,13 @@ enum class BooleanKey(
     NsClientAllowClientControl(
         "ns_allow_client_control", false,
         R.string.pref_title_ns_allow_client_control, R.string.pref_summary_ns_allow_client_control,
-        // No longer on the prefs screen — it's the stop/allow-communication switch on the Authorized clients screen.
-        // Default OFF, but ON in simple mode (resolved in PreferencesImpl.calculatedDefaultValue). Hidden on a client.
+        // The rich stop/allow-communication switch lives on the Authorized clients screen; it is ALSO exposed in a
+        // "Remote control" category on the NSCv3 settings screen (NSClientV3Plugin.getPreferenceScreenContent) so it
+        // is reachable from search. Default OFF, but ON in simple mode (resolved in PreferencesImpl.calculatedDefaultValue). Hidden on a client.
         calculatedDefaultValue = true, showInNsClientMode = false,
+        // Remote control rides the WebSocket — hide the toggle (and its single-item "Remote control" parent category)
+        // when WS is off, and on a client where the key is already hidden (so the category never shows empty).
+        dependency = NsClient3UseWs, hideParentScreenIfHidden = true,
         // Synced master→client (MasterOnly — the client mirrors, never pushes back) so a paired client knows
         // whether the master is accepting commands and can gate its UI. buildSyncedPrefs publishes the EFFECTIVE
         // value for this key (see RunningConfigurationImpl), not the raw default.
