@@ -107,6 +107,10 @@ class WizardBolusExecutorImpl @Inject constructor(
         val bolusId: Long,
         val entry: QuickWizardEntry?,
         val carbTimeMinutes: Int = 0,
+        // Manual-wizard "time to eat" reminder flag. A QuickWizard ignores this and reads its own
+        // entry.useAlarm() at confirm() instead; parked here so a MANUAL wizard (entry == null) can
+        // still schedule the reminder on the master — without it the manual-wizard alarm was dropped.
+        val useAlarm: Boolean = false,
         val notes: String? = null,
         val mode: BolusMode = BolusMode.WIZARD,
         val eventType: TE.Type? = null,
@@ -260,6 +264,7 @@ class WizardBolusExecutorImpl @Inject constructor(
                 wizard.timeStamp,
                 entry = null,
                 carbTimeMinutes = inputs.carbTime,
+                useAlarm = inputs.alarm,
                 notes = inputs.notes,
                 eCarbsGrams = inputs.eCarbsGrams,
                 eCarbsDelayMinutes = inputs.eCarbsDelayMinutes,
@@ -526,7 +531,9 @@ class WizardBolusExecutorImpl @Inject constructor(
         }
 
         val carbTimeOffset = p.carbTimeMinutes.toLong()
-        var useAlarm = false
+        // Manual wizard: honor the parked alarm flag. A QuickWizard overrides this from its own
+        // entry.useAlarm() in the `qwe != null` block below.
+        var useAlarm = p.useAlarm
         val currentTime = dateUtil.now()
         var eventTime = currentTime
         var carbs2 = 0
