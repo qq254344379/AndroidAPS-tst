@@ -192,7 +192,7 @@ class WizardBolusExecutorImpl @Inject constructor(
             return WizardBolusExecutor.PrepareResult.Error(rh.gs(R.string.wizard_no_insulin_required))
 
         evictStalePending()
-        pending[wizard.timeStamp] = PendingBolus(wizard.calculatedTotalInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry, carbTimeMinutes = entry.carbTime(), notes = entry.buttonText())
+        pending[wizard.timeStamp] = PendingBolus(wizard.unclampedCalculatedInsulin, wizard.carbs, wizard.createBolusCalculatorResult(), wizard.timeStamp, entry, carbTimeMinutes = entry.carbTime(), notes = entry.buttonText())
         // Build the master's color-coded confirmation lines here so the client renders the master's EXACT
         // wizard confirmation (shared builder). advisorApplies offers the high-BG "correct now, eat later" fork.
         val advisorApplies = wizard.needsBolusAdvisor()
@@ -210,6 +210,8 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = if (eCarbsGrams > 0) entry.duration() else 0,
                 carbTimeMinutes = entry.carbTime(),
                 alarm = entry.useAlarm() == QuickWizardEntry.YES && entry.carbTime() > 0,
+                maxBolus = constraintChecker.getMaxBolusAllowed().value(),
+                bolusStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(wizard.insulinAfterConstraints),
             ),
         )
     }
@@ -258,7 +260,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         evictStalePending()
         pending[wizard.timeStamp] =
             PendingBolus(
-                wizard.calculatedTotalInsulin,
+                wizard.unclampedCalculatedInsulin,
                 wizard.carbs,
                 wizard.createBolusCalculatorResult(),
                 wizard.timeStamp,
@@ -292,6 +294,8 @@ class WizardBolusExecutorImpl @Inject constructor(
                 eCarbsDurationHours = inputs.eCarbsDurationHours,
                 carbTimeMinutes = inputs.carbTime,
                 alarm = inputs.alarm && inputs.carbTime > 0,
+                maxBolus = constraintChecker.getMaxBolusAllowed().value(),
+                bolusStep = pump.pumpDescription.pumpType.determineCorrectBolusStepSize(wizard.insulinAfterConstraints),
             ),
         )
     }
@@ -433,7 +437,7 @@ class WizardBolusExecutorImpl @Inject constructor(
         return WizardBolusExecutor.PrepareResult.Preview(insulin, carbs, bolusId, lines = lines, advisorApplies = false, advisorLines = emptyList())
     }
 
-    override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean): WizardBolusExecutor.ConfirmResult {
+    override suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean, correctionU: Double): WizardBolusExecutor.ConfirmResult {
         // Atomic consume-once: remove(bolusId) returns the parked dose and removes it in one step, so two
         // concurrent commits of the same id can't both deliver (the loser gets null → NoPending). A non-matching
         // id removes nothing, leaving other actors' parked doses intact.
@@ -573,7 +577,18 @@ class WizardBolusExecutorImpl @Inject constructor(
         }
         // Canonical: a wear wizard bolus now records identically to the phone (BOLUS_WIZARD + mgdlGlucose).
         // The mg/dL BG comes from the BCR's glucoseValue (== profileUtil.convertToMgdl(bg, units)).
-        deliverWizardBolus(p.insulin, p.carbs, carbTimeOffset.toInt(), p.bcr?.glucoseValue, p.bcr, notes, source, onError)
+        // correctionU: watch-side ± adjustment added by the user on the result page; adjust BCR so the wizard log
+        // records the actual delivered amount (otherCorrection mirrors the phone wizard's direct-correction field).
+        val correctedInsulin = constraintChecker.applyBolusConstraints(
+            ConstraintObject((p.insulin + correctionU).coerceAtLeast(0.0), aapsLogger)
+        ).value()
+        val correctedBcr = if (correctionU != 0.0)
+            p.bcr?.copy(
+                otherCorrection = p.bcr.otherCorrection + correctionU,
+                totalInsulin = correctedInsulin  // actual delivered amount (already coerced ≥ 0)
+            )
+        else p.bcr
+        deliverWizardBolus(correctedInsulin, p.carbs, carbTimeOffset.toInt(), p.bcr?.glucoseValue, correctedBcr, notes, source, onError)
         if (carbs2 > 0) deliverECarbs(carbs2, eventTime, duration, eCarbsDelay, notes, source, onError)
         if (useAlarm && p.carbs > 0 && carbTimeOffset > 0)
             automation.scheduleTimeToEatReminder(T.mins(carbTimeOffset).secs().toInt())
