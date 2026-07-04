@@ -42,6 +42,7 @@ import androidx.wear.compose.material3.curvedText
 import app.aaps.wear.R
 import app.aaps.wear.data.ComplicationData
 import app.aaps.wear.data.ComplicationDataRepository
+import app.aaps.wear.interaction.actions.CarbsOrange
 import app.aaps.wear.interaction.actions.InsulinBlue
 import app.aaps.wear.interaction.menus.MainMenuActivity
 import app.aaps.wear.interaction.utils.DisplayFormat
@@ -168,7 +169,7 @@ private fun BgGraphScreen(repository: ComplicationDataRepository, displayFormat:
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(text = "${statusData.iobSum}$insulinUnit", fontSize = statsFontSize, color = InsulinBlue)
-                    Text(text = statusData.cob, fontSize = statsFontSize, color = CarbsColor)
+                    Text(text = statusData.cob, fontSize = statsFontSize, color = CarbsOrange)
                     Text(text = basalText, fontSize = statsFontSize, color = SecondaryText)
                     Text(text = targetText, fontSize = statsFontSize, color = when (statusData.tempTargetLevel) {
                         1    -> AutosensTargetColor
