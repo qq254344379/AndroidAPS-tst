@@ -29,11 +29,19 @@ class SceneSource @Inject constructor(private val context: Context, private val 
             )
         }
         val sceneData = getSceneData(sp)
-        seedDefaultSlotsIfNeeded(sceneData)
+        val slotValues = (1..4).map { sp.getString(preferenceKey(it), SLOT_AUTO) }
 
-        val selectedEntries = (1..4).mapNotNull { i ->
-            val id = sp.getString(preferenceKey(i), "none")
-            if (id == "none") null else sceneData.entries.find { it.id == id }
+        // Slots explicitly pinned to a scene id are resolved first and removed from the auto pool,
+        // so an "Automatic" slot never duplicates a scene another slot already claims.
+        val explicitIds = slotValues.filterNot { it == SLOT_AUTO || it == SLOT_NONE }.toSet()
+        val autoPool = sceneData.entries.filterNot { it.id in explicitIds }.iterator()
+
+        val selectedEntries = slotValues.mapNotNull { value ->
+            when (value) {
+                SLOT_NONE -> null
+                SLOT_AUTO -> if (autoPool.hasNext()) autoPool.next() else null
+                else      -> sceneData.entries.find { it.id == value }
+            }
         }
         return selectedEntries.map { entry ->
             Action(
@@ -53,15 +61,6 @@ class SceneSource @Inject constructor(private val context: Context, private val 
 
     private fun preferenceKey(index: Int) = "tile_scene_$index"
 
-    // Seeds the 4 slots with the first scenes in phone order, once — mirrors StaticTileSource's
-    // setDefaultSettings(). Deferred until real scene data exists so a watch that hasn't synced
-    // yet doesn't permanently lock all slots to "none" before any scenes ever arrived.
-    private fun seedDefaultSlotsIfNeeded(sceneData: EventData.SceneList) {
-        if (sp.contains(preferenceKey(1)) || sceneData.entries.isEmpty()) return
-        val ids = sceneData.entries.map { it.id }
-        for (i in 1..4) sp.putString(preferenceKey(i), ids.getOrElse(i - 1) { "none" })
-    }
-
     private fun getSceneData(sp: SP): EventData.SceneList =
         EventData.deserialize(sp.getString(R.string.key_scene_data, EventData.SceneList(arrayListOf()).serialize())) as EventData.SceneList
 
@@ -72,4 +71,12 @@ class SceneSource @Inject constructor(private val context: Context, private val 
     }
 
     override fun getResourceReferences(resources: Resources): List<Int> = listOf(R.drawable.ic_scene_purple, R.drawable.ic_cancel_red)
+
+    companion object {
+        /** Slot not deliberately touched by the user — auto-fills with the next unclaimed scene. */
+        const val SLOT_AUTO = "auto"
+
+        /** Slot deliberately emptied by the user in the settings screen — stays empty. */
+        const val SLOT_NONE = "none"
+    }
 }

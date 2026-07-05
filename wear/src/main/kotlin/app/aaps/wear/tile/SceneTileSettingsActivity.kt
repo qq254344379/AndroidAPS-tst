@@ -23,11 +23,10 @@ class SceneTileSettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
         super.onCreate(savedInstanceState)
-        val options = sceneSource.getSceneEntries().map { TileSettingOption(it.id, it.title) } +
-            TileSettingOption("none", getString(R.string.tile_none))
+        val liveOptions = sceneSource.getSceneEntries().map { TileSettingOption(it.id, it.title) }
         setContent {
             MaterialTheme {
-                SceneTileSettingsScreen(sp = sp, options = options)
+                SceneTileSettingsScreen(sp = sp, liveOptions = liveOptions)
             }
         }
     }
@@ -39,9 +38,9 @@ class SceneTileSettingsActivity : AppCompatActivity() {
 }
 
 @Composable
-private fun SceneTileSettingsScreen(sp: SP, options: List<TileSettingOption>) {
+private fun SceneTileSettingsScreen(sp: SP, liveOptions: List<TileSettingOption>) {
     val slots = remember {
-        (1..4).map { i -> mutableStateOf(sp.getString("tile_scene_$i", "none")) }
+        (1..4).map { i -> mutableStateOf(sp.getString("tile_scene_$i", SceneSource.SLOT_AUTO)) }
     }
     val labels = listOf(
         stringResource(R.string.tile_scene_1),
@@ -49,10 +48,19 @@ private fun SceneTileSettingsScreen(sp: SP, options: List<TileSettingOption>) {
         stringResource(R.string.tile_scene_3),
         stringResource(R.string.tile_scene_4)
     )
+    val baseOptions = listOf(TileSettingOption(SceneSource.SLOT_AUTO, stringResource(R.string.tile_scene_auto))) +
+        liveOptions +
+        TileSettingOption(SceneSource.SLOT_NONE, stringResource(R.string.tile_none))
+    val unavailableLabel = stringResource(R.string.tile_scene_unavailable)
     val rows = (0..3).map { i ->
+        val currentValue = slots[i].value
+        // A slot pinned to a scene that's since been deleted/disabled won't be in baseOptions —
+        // add a synthetic entry so the picker shows "Unavailable" instead of the raw id.
+        val options = if (baseOptions.any { it.value == currentValue }) baseOptions
+                      else baseOptions + TileSettingOption(currentValue, unavailableLabel)
         TileSettingRow(
             label = labels[i],
-            currentValue = slots[i].value,
+            currentValue = currentValue,
             options = options,
             onSelect = { value ->
                 slots[i].value = value
