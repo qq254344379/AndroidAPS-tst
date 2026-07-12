@@ -114,7 +114,7 @@ class InsulinManagementViewModel @Inject constructor(
             val insulins = insulinManager.insulins.map { it.deepClone() }
             val activeICfg = profileFunction.getProfile()?.iCfg
             val activeLabel = activeICfg?.insulinLabel
-            val activeConcentration = profileFunction.getProfile()?.iCfg?.concentration ?: 1.0  // Only insulin with Current Active concentration can be set from Insulin Management
+            val activeConcentration = activeICfg?.concentration ?: 1.0  // Only insulin with Current Active concentration can be set from Insulin Management  // Only insulin with Current Active concentration can be set from Insulin Management
             val currentIndex = (if (reload) insulinManager.insulinIndex(activeICfg) else targetIndex ?: uiState.value.currentCardIndex)
                 .coerceIn(0, (insulins.size - 1).coerceAtLeast(0))
             val currentICfg = insulins.getOrNull(currentIndex)
@@ -143,7 +143,10 @@ class InsulinManagementViewModel @Inject constructor(
                 autoGenerateName()
                 if (saveAfterAutoName) saveCurrentInsulin()
             }
-            targetIndex?.let { _sideEffect.emit(SideEffect.ScrollToInsulin(it)) }
+            
+            // Force the scroll to the computed currentIndex on reload (entry) or targetIndex request.
+            // This ensures we land on the active insulin when opening the screen, even if the VM state was stale.
+            _sideEffect.emit(SideEffect.ScrollToInsulin(currentIndex))
         }
     }
 
@@ -162,7 +165,12 @@ class InsulinManagementViewModel @Inject constructor(
     private suspend fun updateRunningInsulin() {
         val now = dateUtil.now()
         val activeIcfg = persistenceLayer.getEffectiveProfileSwitchActiveAt(now)?.iCfg
-        _uiState.update { it.copy(activeInsulinLabel = activeIcfg?.insulinLabel) }
+        _uiState.update {
+            it.copy(
+                activeInsulinLabel = activeIcfg?.insulinLabel,
+                activeConcentration = activeIcfg?.concentration ?: 1.0
+            )
+        }
     }
 
     /**
@@ -188,7 +196,14 @@ class InsulinManagementViewModel @Inject constructor(
             config.AAPSCLIENT   -> loadData(reload = true)
             // Master is the conflict authority: ask before discarding an in-progress edit.
             hasUnsavedChanges() -> _uiState.update { it.copy(externalUpdatePending = true) }
-            else                -> loadData(reload = true)
+            // For the Master phone, handle external updates (e.g. from NS) while preserving the user's
+            // current card selection. loadData(reload = false) uses the already-reloaded manager state.
+            else                -> {
+                viewModelScope.launch {
+                    insulinManager.loadSettings()
+                    loadData(reload = false)
+                }
+            }
         }
     }
 
@@ -418,6 +433,10 @@ class InsulinManagementViewModel @Inject constructor(
         stored.insulinPeakTime = editedICfg.insulinPeakTime
         stored.concentration = editedICfg.concentration
         stored.insulinNickname = editedICfg.insulinNickname
+
+        // Sync UI state before store to avoid FAB lag/blocking and ensure hasUnsavedChanges() is false
+        _uiState.update { it.copy(insulins = insulinManager.insulins.map { it.deepClone() }) }
+
         uel.log(Action.STORE_INSULIN, Sources.Insulin, value = ValueWithUnit.SimpleString(editedICfg.insulinLabel))
         insulinManager.storeSettings()
         lastAppliedConfig = preferences.get(StringNonKey.InsulinConfiguration) // mark as our own write
@@ -431,6 +450,10 @@ class InsulinManagementViewModel @Inject constructor(
         val newICfg = source?.deepClone() ?: InsulinType.OREF_RAPID_ACTING.iCfg
         newICfg.insulinLabel = ""
         insulinManager.addNewInsulin(newICfg)
+
+        // Sync UI state before store to ensure hasUnsavedChanges() is false
+        _uiState.update { it.copy(insulins = insulinManager.insulins.map { it.deepClone() }) }
+
         lastAppliedConfig = preferences.get(StringNonKey.InsulinConfiguration) // mark as our own write
         loadData(targetIndex = insulinManager.currentInsulinIndex, reload = false, autoName = state.autoNameEnabled, saveAfterAutoName = true)
     }
@@ -449,6 +472,10 @@ class InsulinManagementViewModel @Inject constructor(
 
         insulinManager.currentInsulinIndex = state.currentCardIndex
         insulinManager.removeCurrentInsulin()
+
+        // Sync UI state before store to ensure hasUnsavedChanges() is false
+        _uiState.update { it.copy(insulins = insulinManager.insulins.map { it.deepClone() }) }
+
         lastAppliedConfig = preferences.get(StringNonKey.InsulinConfiguration) // mark as our own write
         loadData(reload = false)
         return true
