@@ -26,6 +26,7 @@ import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.profile.EffectiveProfile
 import app.aaps.core.interfaces.profile.ProfileStore
+import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.CommandQueue
@@ -70,10 +71,11 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     @Mock lateinit var uel: UserEntryLogger
     @Mock lateinit var loop: Loop
     @Mock lateinit var automation: Automation
+    @Mock lateinit var bolusProgressData: BolusProgressData
 
     private fun create() = WizardBolusExecutorImpl(
         aapsLogger, rh, config, quickWizard, bolusWizardProvider, profileFunction, profileRepository, insulin, iobCobCalculator, constraintsChecker, activePlugin,
-        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation, notificationManager,
+        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation, notificationManager, bolusProgressData,
         CoroutineScope(Dispatchers.Unconfined)
     )
 
