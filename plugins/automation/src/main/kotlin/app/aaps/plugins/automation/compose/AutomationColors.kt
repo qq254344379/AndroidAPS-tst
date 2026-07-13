@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import app.aaps.core.interfaces.automation.AutomationIconData
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.color
 import app.aaps.plugins.automation.actions.Action
 import app.aaps.plugins.automation.triggers.Trigger

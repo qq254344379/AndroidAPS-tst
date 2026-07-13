@@ -3,7 +3,7 @@ package app.aaps.plugins.automation.triggers
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.keys.IntKey
 import app.aaps.core.ui.compose.icons.IcCarbs
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.utils.JsonHelper
 import app.aaps.core.utils.JsonHelper.safeGetDouble
 import app.aaps.plugins.automation.R

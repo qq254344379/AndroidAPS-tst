@@ -3,7 +3,7 @@ package app.aaps.plugins.automation.actions
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.ui.compose.icons.IcPluginSms
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.utils.JsonHelper
 import app.aaps.plugins.automation.R
 import app.aaps.plugins.automation.elements.InputString

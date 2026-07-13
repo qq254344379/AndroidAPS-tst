@@ -3,6 +3,7 @@ package app.aaps.plugins.automation
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.automation.AutomationEvent
 import app.aaps.core.interfaces.automation.AutomationIconData
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.ui.compose.icons.IcUserOptions

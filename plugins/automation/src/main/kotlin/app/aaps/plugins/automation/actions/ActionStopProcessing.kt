@@ -3,7 +3,7 @@ package app.aaps.plugins.automation.actions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
 import app.aaps.core.interfaces.pump.PumpEnactResult
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.plugins.automation.R
 import com.google.gson.JsonObject
 import dagger.android.HasAndroidInjector

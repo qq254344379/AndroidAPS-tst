@@ -1,7 +1,7 @@
 package app.aaps.plugins.automation.compose
 
 import androidx.compose.ui.graphics.vector.ImageVector
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.interfaces.navigation.ElementType
 
 sealed interface AutomationRoute {
     data object List : AutomationRoute

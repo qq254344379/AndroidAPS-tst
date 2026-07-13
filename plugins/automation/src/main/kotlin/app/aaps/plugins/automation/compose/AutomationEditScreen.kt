@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import app.aaps.core.data.model.Scene
 import app.aaps.core.ui.compose.ExcludeFromJacocoGeneratedReport
 import app.aaps.core.ui.compose.icons.IcAutomation
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.color
 import app.aaps.plugins.automation.R
 import app.aaps.plugins.automation.actions.Action

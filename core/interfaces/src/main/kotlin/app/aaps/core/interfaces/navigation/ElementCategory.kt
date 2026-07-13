@@ -1,4 +1,4 @@
-package app.aaps.core.ui.compose.navigation
+package app.aaps.core.interfaces.navigation
 
 /**
  * Logical grouping for configuration screens and bottom sheets.
