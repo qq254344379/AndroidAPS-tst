@@ -93,10 +93,7 @@ fun ScenesBottomSheet(
                                     modifier = Modifier.padding(top = 4.dp)
                                 ) {
                                     item.triggerIcons.forEach { data ->
-                                        val elementType = data.semanticType?.let { typeName ->
-                                            runCatching { ElementType.valueOf(typeName) }.getOrNull()
-                                        }
-                                        val tint = elementType?.color() ?: MaterialTheme.colorScheme.onSurfaceVariant
+                                        val tint = data.elementType?.color() ?: MaterialTheme.colorScheme.onSurfaceVariant
                                         Icon(
                                             imageVector = data.icon,
                                             contentDescription = null,
@@ -115,10 +112,7 @@ fun ScenesBottomSheet(
                                         )
                                     }
                                     item.actionIcons.forEach { data ->
-                                        val elementType = data.semanticType?.let { typeName ->
-                                            runCatching { ElementType.valueOf(typeName) }.getOrNull()
-                                        }
-                                        val tint = elementType?.color() ?: MaterialTheme.colorScheme.onSurfaceVariant
+                                        val tint = data.elementType?.color() ?: MaterialTheme.colorScheme.onSurfaceVariant
                                         Icon(
                                             imageVector = data.icon,
                                             contentDescription = null,
@@ -135,10 +129,7 @@ fun ScenesBottomSheet(
                     leadingContent = {
                         val firstIcon = item.firstActionIcon
                         if (firstIcon != null) {
-                            val elementType = firstIcon.semanticType?.let { typeName ->
-                                runCatching { ElementType.valueOf(typeName) }.getOrNull()
-                            }
-                            val tint = elementType?.color() ?: automationColor
+                            val tint = firstIcon.elementType?.color() ?: automationColor
                             TonalIcon(
                                 icon = firstIcon.icon,
                                 color = tint.copy(alpha = itemAlpha)

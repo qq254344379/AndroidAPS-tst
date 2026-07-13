@@ -183,6 +183,18 @@ fun ElementType.icon(): ImageVector = when (this) {
     ElementType.EXIT                    -> Icons.AutoMirrored.Filled.ExitToApp
 }
 
+fun ElementCategory.labelResId(): Int = when (this) {
+    ElementCategory.TREATMENT -> R.string.overview_treatment_label
+    ElementCategory.CGM -> R.string.cgm
+    ElementCategory.MANAGEMENT -> R.string.manage
+    ElementCategory.CAREPORTAL -> R.string.careportal
+    ElementCategory.DEVICE -> R.string.device_maintenance
+    ElementCategory.BASAL -> R.string.basal
+    ElementCategory.SYSTEM,
+    ElementCategory.NAVIGATION,
+    ElementCategory.INTERNAL -> 0
+}
+
 fun ElementType.labelResId(): Int = when (this) {
     ElementType.INSULIN                 -> R.string.overview_insulin_label
     ElementType.CARBS                   -> R.string.carbs

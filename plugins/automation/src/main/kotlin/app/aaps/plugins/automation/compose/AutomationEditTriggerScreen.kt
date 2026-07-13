@@ -265,15 +265,13 @@ private fun LeafCard(
         Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val icon = trigger.composeIcon()
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = trigger.iconColor(),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Box(modifier = Modifier.width(6.dp))
-                }
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = trigger.iconColor(),
+                    modifier = Modifier.size(20.dp)
+                )
+                Box(modifier = Modifier.width(6.dp))
                 Text(
                     text = stringResource(trigger.friendlyName()),
                     style = MaterialTheme.typography.labelLarge,

@@ -43,7 +43,7 @@ class AutomationEventObject(private val injector: HasAndroidInjector) : Automati
     override suspend fun preconditionCanRun(): Boolean = getPreconditions().shouldRun()
     override fun firstActionIcon(): AutomationIconData? =
         actions.firstOrNull()?.let { action ->
-            action.composeIcon().let { AutomationIconData(it, action.elementType().name) }
+            AutomationIconData(action.composeIcon(), action.elementType())
         }
 
     override fun actionsDescription(): List<String> = actions.map { it.shortDescription() }
@@ -57,7 +57,7 @@ class AutomationEventObject(private val injector: HasAndroidInjector) : Automati
 
     override fun actionIcons(): Set<AutomationIconData> =
         actions.mapTo(mutableSetOf()) { action ->
-            action.composeIcon().let { AutomationIconData(it, action.elementType().name) }
+            AutomationIconData(action.composeIcon(), action.elementType())
         }
 
     private fun fillTriggerIconSet(connector: TriggerConnector, set: MutableSet<AutomationIconData>) {
@@ -65,7 +65,7 @@ class AutomationEventObject(private val injector: HasAndroidInjector) : Automati
             if (t is TriggerConnector) {
                 fillTriggerIconSet(t, set)
             } else {
-                t.composeIcon().let { set.add(AutomationIconData(it, t.elementType().name)) }
+                set.add(AutomationIconData(t.composeIcon(), t.elementType()))
             }
         }
     }
