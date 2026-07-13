@@ -10,9 +10,9 @@ import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.ui.compose.icons.IcProfile
+import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.utils.JsonHelper
 import app.aaps.plugins.automation.R
-import app.aaps.plugins.automation.compose.IconTint
 import app.aaps.plugins.automation.elements.InputProfileName
 import dagger.android.HasAndroidInjector
 import org.json.JSONObject
@@ -32,7 +32,7 @@ class ActionProfileSwitch(injector: HasAndroidInjector) : Action(injector) {
     override fun friendlyName(): Int = R.string.profilename
     override fun shortDescription(): String = rh.gs(R.string.changengetoprofilename, inputProfileName.value)
     override fun composeIcon() = IcProfile
-    override fun composeIconTint() = IconTint.Profile
+    override fun elementType() = ElementType.PROFILE_MANAGEMENT
 
     override suspend fun doAction(): PumpEnactResult {
         val activeProfileName = profileFunction.getProfileName()

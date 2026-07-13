@@ -93,11 +93,15 @@ fun ScenesBottomSheet(
                                     modifier = Modifier.padding(top = 4.dp)
                                 ) {
                                     item.triggerIcons.forEach { data ->
+                                        val elementType = data.semanticType?.let { typeName ->
+                                            runCatching { ElementType.valueOf(typeName) }.getOrNull()
+                                        }
+                                        val tint = elementType?.color() ?: MaterialTheme.colorScheme.onSurfaceVariant
                                         Icon(
                                             imageVector = data.icon,
                                             contentDescription = null,
                                             modifier = Modifier.size(20.dp),
-                                            tint = data.tint ?: MaterialTheme.colorScheme.onSurfaceVariant
+                                            tint = tint
                                         )
                                     }
                                     if (item.triggerIcons.isNotEmpty() && item.actionIcons.isNotEmpty()) {
@@ -111,11 +115,15 @@ fun ScenesBottomSheet(
                                         )
                                     }
                                     item.actionIcons.forEach { data ->
+                                        val elementType = data.semanticType?.let { typeName ->
+                                            runCatching { ElementType.valueOf(typeName) }.getOrNull()
+                                        }
+                                        val tint = elementType?.color() ?: MaterialTheme.colorScheme.onSurfaceVariant
                                         Icon(
                                             imageVector = data.icon,
                                             contentDescription = null,
                                             modifier = Modifier.size(20.dp),
-                                            tint = data.tint ?: MaterialTheme.colorScheme.onSurfaceVariant
+                                            tint = tint
                                         )
                                     }
                                 }
@@ -127,9 +135,13 @@ fun ScenesBottomSheet(
                     leadingContent = {
                         val firstIcon = item.firstActionIcon
                         if (firstIcon != null) {
+                            val elementType = firstIcon.semanticType?.let { typeName ->
+                                runCatching { ElementType.valueOf(typeName) }.getOrNull()
+                            }
+                            val tint = elementType?.color() ?: automationColor
                             TonalIcon(
                                 icon = firstIcon.icon,
-                                color = (firstIcon.tint ?: automationColor).copy(alpha = itemAlpha)
+                                color = tint.copy(alpha = itemAlpha)
                             )
                         } else {
                             TonalIcon(

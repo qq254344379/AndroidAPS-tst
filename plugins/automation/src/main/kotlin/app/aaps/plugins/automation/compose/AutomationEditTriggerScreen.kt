@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.aaps.plugins.automation.R
+import app.aaps.plugins.automation.compose.iconColor
 import app.aaps.plugins.automation.compose.triggers.TriggerEditor
 import app.aaps.plugins.automation.triggers.Trigger
 import app.aaps.plugins.automation.triggers.TriggerConnector
@@ -268,7 +269,7 @@ private fun LeafCard(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = trigger.composeIconTint() ?: MaterialTheme.colorScheme.onSurface,
+                        tint = trigger.iconColor(),
                         modifier = Modifier.size(20.dp)
                     )
                     Box(modifier = Modifier.width(6.dp))
