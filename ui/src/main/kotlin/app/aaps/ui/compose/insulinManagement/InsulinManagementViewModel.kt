@@ -114,7 +114,7 @@ class InsulinManagementViewModel @Inject constructor(
             val insulins = insulinManager.insulins.map { it.deepClone() }
             val activeICfg = profileFunction.getProfile()?.iCfg
             val activeLabel = activeICfg?.insulinLabel
-            val activeConcentration = activeICfg?.concentration ?: 1.0  // Only insulin with Current Active concentration can be set from Insulin Management  // Only insulin with Current Active concentration can be set from Insulin Management
+            val activeConcentration = activeICfg?.concentration ?: 1.0  // Only insulin with Current Active concentration can be set from Insulin Management
             val currentIndex = (if (reload) insulinManager.insulinIndex(activeICfg) else targetIndex ?: uiState.value.currentCardIndex)
                 .coerceIn(0, (insulins.size - 1).coerceAtLeast(0))
             val currentICfg = insulins.getOrNull(currentIndex)
@@ -196,13 +196,12 @@ class InsulinManagementViewModel @Inject constructor(
             config.AAPSCLIENT   -> loadData(reload = true)
             // Master is the conflict authority: ask before discarding an in-progress edit.
             hasUnsavedChanges() -> _uiState.update { it.copy(externalUpdatePending = true) }
-            // For the Master phone, handle external updates (e.g. from NS) while preserving the user's
-            // current card selection. loadData(reload = false) uses the already-reloaded manager state.
+            // Master, no in-progress edit: adopt the external change but keep the user's card selection.
+            // loadSettings() re-reads the pref synchronously (we're on the Main viewModelScope collector),
+            // then loadData(reload = false) rebuilds state off the fresh list while preserving currentCardIndex.
             else                -> {
-                viewModelScope.launch {
-                    insulinManager.loadSettings()
-                    loadData(reload = false)
-                }
+                insulinManager.loadSettings()
+                loadData(reload = false)
             }
         }
     }
@@ -471,12 +470,12 @@ class InsulinManagementViewModel @Inject constructor(
         }
 
         insulinManager.currentInsulinIndex = state.currentCardIndex
-        insulinManager.removeCurrentInsulin()
-
-        // Sync UI state before store to ensure hasUnsavedChanges() is false
-        _uiState.update { it.copy(insulins = insulinManager.insulins.map { it.deepClone() }) }
+        insulinManager.removeCurrentInsulin() // persists internally (storeSettings)
 
         lastAppliedConfig = preferences.get(StringNonKey.InsulinConfiguration) // mark as our own write
+        // Full resync in one atomic update: insulins + coerced index + editor for the new current card.
+        // (A partial insulins-only pre-update would leave the editor on the removed insulin, transiently
+        //  reporting hasUnsavedChanges() == true — and out-of-bounds when the last card is deleted.)
         loadData(reload = false)
         return true
     }
