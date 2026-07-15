@@ -1005,6 +1005,26 @@ class SmsCommunicatorPluginTest : TestBaseWithProfile() {
         assertThat(smsCommunicatorPlugin.messages[1].text).isEqualTo("Remote bolus not available. Try again later.")
     }
 
+    @Test fun processBolusStopPressedTest() = runBlocking {
+        // A bolus the user cancels mid-delivery still succeeds (partial), and the reply is prefixed with "STOP PRESSED".
+        whenever(preferences.get(BooleanKey.SmsAllowRemoteCommands)).thenReturn(true)
+        whenever(constraintChecker.applyBolusConstraints(anyOrNull())).thenReturn(ConstraintObject(1.0, aapsLogger))
+        whenever(constraintChecker.applyExtendedBolusConstraints(anyOrNull())).thenReturn(ConstraintObject(1.0, aapsLogger))
+        whenever(preferences.get(IntKey.SmsRemoteBolusDistance)).thenReturn(15)
+        whenever(dateUtilMocked.now()).thenReturn(Constants.remoteBolusMinDistance + 1002L)
+        whenever(loop.runningMode()).thenReturn(RM.Mode.CLOSED_LOOP)
+        whenever(rh.gs(app.aaps.core.ui.R.string.stop_pressed)).thenReturn("STOP PRESSED")
+        whenever(bolusProgressData.isStopPressed).thenReturn(true)
+        smsCommunicatorPlugin.lastRemoteBolusTime = 0
+
+        smsCommunicatorPlugin.messages = ArrayList()
+        smsCommunicatorPlugin.processSms(Sms("1234", "BOLUS 1"))
+        assertThat(smsCommunicatorPlugin.messages[1].text).contains("To deliver bolus 1.00U reply with code")
+        val passCode: String = smsCommunicatorPlugin.messageToConfirm?.confirmCode!!
+        smsCommunicatorPlugin.processSms(Sms("1234", passCode))
+        assertThat(smsCommunicatorPlugin.messages[3].text).contains("STOP PRESSED Bolus 1.00U delivered successfully")
+    }
+
     @Test fun processCalTest() = runBlocking {
 
         //CAL

@@ -842,6 +842,25 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     }
 
     @Test
+    fun bolus_onCommandFailure_whenStopPressed_doesNotPostAlarm() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(false))
+        whenever(bolusProgressData.isStopPressed).thenReturn(true)
+        val executor = create()
+
+        executor.deliverWizardBolus(
+            insulin = 1.0, carbs = 0, carbTimeMinutes = 0, mgdlGlucose = null,
+            bolusCalculatorResult = null, notes = null, source = Sources.QuickWizard, onError = { }
+        )
+
+        // A user-initiated cancel is not a failure: no URGENT alarm even though the command result is unsuccessful.
+        verify(notificationManager, never()).post(
+            eq(NotificationId.BOLUS_DELIVERY_FAILED), any<String>(), any<NotificationLevel>(), any<Int>(),
+            anyOrNull<Int>(), any<List<NotificationAction>>(), anyOrNull<() -> Boolean>()
+        )
+    }
+
+    @Test
     fun deliverInsulin_recordsCorrectionBolusWithNoteOnUserEntry() = runTest {
         whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
         whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
