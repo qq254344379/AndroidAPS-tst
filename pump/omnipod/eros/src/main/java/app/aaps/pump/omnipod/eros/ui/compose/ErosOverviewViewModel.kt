@@ -113,6 +113,12 @@ class ErosOverviewViewModel @Inject constructor(
     companion object {
 
         private const val PLACEHOLDER = "-"
+
+        /**
+         * The pod keeps delivering for this long after [OmnipodConstants.NOMINAL_POD_LIFE],
+         * up to a total lifetime of [OmnipodConstants.SERVICE_DURATION].
+         */
+        private val POD_GRACE_PERIOD: Duration = OmnipodConstants.SERVICE_DURATION.minus(OmnipodConstants.NOMINAL_POD_LIFE)
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -208,9 +214,9 @@ class ErosOverviewViewModel @Inject constructor(
             val expiryLevel = if (expiresAt != null && DateTime.now().isAfter(expiresAt)) StatusLevel.CRITICAL else StatusLevel.NORMAL
             add(PumpInfoRow(label = rh.gs(CommonR.string.omnipod_common_overview_pod_expiry_date), value = expiryValue, level = expiryLevel))
 
-            // Hard end date (+8 hours after expiry)
-            val hardEndAt = expiresAt?.plusHours(8)
-            val hardEndValue = hardEndAt?.let { dateUtil.dateAndTimeString(it.millis) } ?: PLACEHOLDER
+            // Pod hard end (end of the grace period following expiry)
+            val hardEndAt = expiresAt?.plus(POD_GRACE_PERIOD)
+            val hardEndValue = hardEndAt?.let { readableZonedTime(it) } ?: PLACEHOLDER
             val hardEndLevel = if (hardEndAt != null && DateTime.now().isAfter(hardEndAt)) StatusLevel.CRITICAL else StatusLevel.NORMAL
             add(PumpInfoRow(label = rh.gs(CommonR.string.omnipod_common_overview_pod_hard_end_date), value = hardEndValue, level = hardEndLevel))
 

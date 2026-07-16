@@ -65,7 +65,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.Duration
-import java.time.Instant
 import java.time.ZonedDateTime
 import java.util.Date
 import java.util.Locale
@@ -97,6 +96,12 @@ class DashOverviewViewModel @Inject constructor(
 
         private const val PLACEHOLDER = "-"
         private const val MAX_TIME_DEVIATION_MINUTES = 10L
+
+        /**
+         * The pod keeps delivering for this long after [OmnipodDashPodStateManager.expiry],
+         * which already reports the nominal expiry with the grace period deducted.
+         */
+        private const val POD_GRACE_PERIOD_HOURS = 8L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -238,13 +243,13 @@ class DashOverviewViewModel @Inject constructor(
             }
             add(PumpInfoRow(label = rh.gs(CommonR.string.omnipod_common_overview_pod_expiry_date), value = expiryValue, level = expiryLevel))
 
-            // Hard end date (+8 hours after expiry)
-            val hardEndAt = expiresAt?.toInstant()?.plus(Duration.ofHours(8))
-            val hardEndValue = hardEndAt?.let { dateUtil.dateAndTimeString(it.toEpochMilli()) } ?: PLACEHOLDER
+            // Pod hard end (end of the grace period following expiry)
+            val hardEndAt = expiresAt?.plusHours(POD_GRACE_PERIOD_HOURS)
+            val hardEndValue = hardEndAt?.let { dateUtil.dateAndTimeString(it.toEpochSecond() * 1000) } ?: PLACEHOLDER
             val hardEndLevel = when {
-                hardEndAt != null && Instant.now().isAfter(hardEndAt)                          -> StatusLevel.CRITICAL
-                hardEndAt != null && Instant.now().isAfter(hardEndAt.minus(Duration.ofHours(4))) -> StatusLevel.WARNING
-                else                                                                            -> StatusLevel.NORMAL
+                hardEndAt != null && ZonedDateTime.now().isAfter(hardEndAt)               -> StatusLevel.CRITICAL
+                hardEndAt != null && ZonedDateTime.now().isAfter(hardEndAt.minusHours(4)) -> StatusLevel.WARNING
+                else                                                                      -> StatusLevel.NORMAL
             }
             add(PumpInfoRow(label = rh.gs(CommonR.string.omnipod_common_overview_pod_hard_end_date), value = hardEndValue, level = hardEndLevel))
 
