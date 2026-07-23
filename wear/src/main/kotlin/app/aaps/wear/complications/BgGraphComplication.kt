@@ -47,7 +47,7 @@ class BgGraphComplication : ModernBaseComplicationProviderService() {
 
         return when (type) {
             ComplicationType.SMALL_IMAGE -> {
-                val icon = Icon.createWithBitmap(renderGraphBitmap(data, SMALL_IMAGE_WIDTH_PX, SMALL_IMAGE_HEIGHT_PX))
+                val icon = Icon.createWithBitmap(renderGraphBitmap(data))
                 SmallImageComplicationData.Builder(
                     smallImage = SmallImage.Builder(image = icon, type = SmallImageType.PHOTO).build(),
                     contentDescription = contentDescription
@@ -57,7 +57,7 @@ class BgGraphComplication : ModernBaseComplicationProviderService() {
             }
 
             ComplicationType.PHOTO_IMAGE -> {
-                val icon = Icon.createWithBitmap(renderGraphBitmap(data, PHOTO_IMAGE_WIDTH_PX, PHOTO_IMAGE_HEIGHT_PX))
+                val icon = Icon.createWithBitmap(renderGraphBitmap(data))
                 PhotoImageComplicationData.Builder(
                     photoImage = icon,
                     contentDescription = contentDescription
@@ -73,9 +73,15 @@ class BgGraphComplication : ModernBaseComplicationProviderService() {
         }
     }
 
+    // Rendered at screen width and 2:1 so the dp-based sizes inside renderBgGraph (hour labels,
+    // bottom reserve, line widths) keep the same proportions as on the tile/activity; the face
+    // downscales the bitmap to its slot.
     // No background fill — the watchface behind the slot supplies it, so the graph blends into
-    // any (dark) face instead of showing a hard black rectangle
-    private fun renderGraphBitmap(data: ComplicationStore, widthPx: Int, heightPx: Int): Bitmap {
+    // any (dark) face instead of showing a hard black rectangle. The now label is dropped: the
+    // now-line plus hour labels already anchor the time axis, and the face shows the clock itself
+    private fun renderGraphBitmap(data: ComplicationStore): Bitmap {
+        val widthPx = resources.displayMetrics.widthPixels
+        val heightPx = widthPx / 2
         val bitmap = createBitmap(widthPx, heightPx)
         val historyHours = sp.getString("complication_bg_graph_hours", "3").toIntOrNull() ?: 3
         CanvasDrawScope().draw(
@@ -84,7 +90,7 @@ class BgGraphComplication : ModernBaseComplicationProviderService() {
             canvas = ComposeCanvas(Canvas(bitmap)),
             size = Size(widthPx.toFloat(), heightPx.toFloat())
         ) {
-            renderBgGraph(data, historyHours)
+            renderBgGraph(data, historyHours, showNowLabel = false)
         }
         return bitmap
     }
@@ -114,14 +120,4 @@ class BgGraphComplication : ModernBaseComplicationProviderService() {
     override fun getComplicationAction(): ComplicationAction = ComplicationAction.BG_GRAPH
 
     override fun getProviderCanonicalName(): String = BgGraphComplication::class.java.canonicalName!!
-
-    companion object {
-
-        // Rendered at fixed 2:1; the watchface scales the image to its slot. Tune after
-        // testing real slot geometries in Watch Face Studio faces.
-        private const val SMALL_IMAGE_WIDTH_PX = 256
-        private const val SMALL_IMAGE_HEIGHT_PX = 128
-        private const val PHOTO_IMAGE_WIDTH_PX = 450
-        private const val PHOTO_IMAGE_HEIGHT_PX = 225
-    }
 }

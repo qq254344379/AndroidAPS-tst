@@ -198,7 +198,7 @@
         <service
             android:name=".complications.BgGraphComplication"
             android:exported="true"
-            android:icon="@drawable/ic_graph"
+            android:icon="@drawable/ic_bg_graph_mono"
             android:label="@string/complication_bg_graph"
             android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
             <intent-filter>
