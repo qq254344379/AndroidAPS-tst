@@ -501,6 +501,27 @@ enum class PumpType(
         maxReservoirReading = 200,
         source = Source.EQuil,
         useHardwareLink = true,
+    ),
+
+    // Lenomed custom pump (ported from the 鑫丹娜 4.4.2.6 build into dev)
+    LENOMED(
+        description = "Lenomed",
+        manufacturer = ManufacturerType.G2e,
+        model = "Lenomed",
+        bolusSize = 0.05,
+        specialBolusSize = null,
+        extendedBolusSettings = DoseSettings(0.05, 30, 8 * 60, 0.05),
+        pumpTempBasalType = PumpTempBasalType.Absolute,
+        tbrSettings = DoseSettings(0.05, 30, 24 * 60, 0.0, 35.0),
+        specialBasalDurations = arrayOf(Capability.BasalRate_Duration30minAllowed),
+        baseBasalMinValue = 0.05,
+        baseBasalMaxValue = 15.0,
+        baseBasalStep = 0.05,
+        baseBasalSpecialSteps = null,
+        pumpCapability = PumpCapability.DiaconnCapabilities,
+        isPatchPump = true,
+        maxReservoirReading = 300,
+        source = Source.Lenomed
     );
 
     fun manufacturer() = parent?.manufacturer ?: manufacturer ?: throw IllegalStateException()
@@ -540,7 +561,8 @@ enum class PumpType(
         VirtualPump,
         Unknown,
         EQuil,
-        Carelevo
+        Carelevo,
+        Lenomed
     }
 
     companion object {

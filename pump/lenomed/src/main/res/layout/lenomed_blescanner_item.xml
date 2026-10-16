@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout android:layout_width="match_parent" android:layout_height="52.0dp" android:layout_marginStart="15.669983dp" android:layout_marginEnd="15.669983dp"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <TextView android:textSize="20.0sp" android:textColor="#ffffff" android:id="@id/ble_name" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_centerVertical="true" android:layout_toStartOf="@id/ble_address" android:layout_alignParentStart="true" />
+    <TextView android:textSize="20.0sp" android:textColor="#ff00a0e9" android:id="@id/ble_address" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_centerVertical="true" android:layout_marginStart="6.5dp" android:layout_alignParentEnd="true" />
+</RelativeLayout>
