@@ -33,8 +33,6 @@ import app.aaps.core.ui.toast.ToastUtils;
 import app.aaps.pump.lenomed.R;
 import app.aaps.pump.lenomed.databinding.LenomedBlescannerActivityBinding;
 import app.aaps.pump.lenomed.events.EventEmbectaDeviceChange;
-import ch.qos.logback.core.CoreConstants;
-import ch.qos.logback.core.rolling.helper.IntegerTokenConverter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -48,7 +46,6 @@ import kotlin.text.StringsKt;
 
 /* JADX INFO: compiled from: LenomedBLEScanActivity.kt */
 /* JADX INFO: loaded from: classes4.dex */
-@Metadata(d1 = {"\u0000\u0093\u0001\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0010\b\n\u0000\n\u0002\u0010\u0000\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\b\u0003\n\u0002\u0010\u000e\n\u0002\b\u0007*\u0001=\u0018\u0000 D2\u00020\u0001:\u0003DEFB\u0007¢\u0006\u0004\b\u0002\u0010\u0003J\u0012\u0010-\u001a\u00020.2\b\u0010/\u001a\u0004\u0018\u000100H\u0015J\b\u00101\u001a\u00020.H\u0014J\b\u00102\u001a\u00020.H\u0014J\b\u00103\u001a\u000204H\u0003J\b\u00105\u001a\u000206H\u0003J\u0012\u00107\u001a\u00020.2\b\u00108\u001a\u0004\u0018\u000109H\u0002J\u0010\u0010?\u001a\u00020@2\u0006\u0010A\u001a\u000204H\u0002J\u0010\u0010B\u001a\u00020@2\u0006\u0010C\u001a\u000204H\u0002R\u001e\u0010\u0004\u001a\u00020\u00058\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0006\u0010\u0007\"\u0004\b\b\u0010\tR\u001e\u0010\n\u001a\u00020\u000b8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\f\u0010\r\"\u0004\b\u000e\u0010\u000fR\u001e\u0010\u0010\u001a\u00020\u00118\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0012\u0010\u0013\"\u0004\b\u0014\u0010\u0015R\u001e\u0010\u0016\u001a\u00020\u00178\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0018\u0010\u0019\"\u0004\b\u001a\u0010\u001bR\u0014\u0010\u001c\u001a\b\u0018\u00010\u001dR\u00020\u0000X\u0082\u000e¢\u0006\u0002\n\u0000R&\u0010\u001e\u001a\u001a\u0012\b\u0012\u00060 R\u00020\u00000\u001fj\f\u0012\b\u0012\u00060 R\u00020\u0000`!X\u0082\u0004¢\u0006\u0002\n\u0000R\u0016\u0010\"\u001a\u0004\u0018\u00010#8BX\u0082\u0004¢\u0006\u0006\u001a\u0004\b$\u0010%R\u0010\u0010&\u001a\u0004\u0018\u00010'X\u0082\u000e¢\u0006\u0002\n\u0000R\u0016\u0010(\u001a\n **\u0004\u0018\u00010)0)X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010+\u001a\u00020,X\u0082.¢\u0006\u0002\n\u0000R\u000e\u0010:\u001a\u00020;X\u0082\u0004¢\u0006\u0002\n\u0000R\u0010\u0010<\u001a\u00020=X\u0082\u0004¢\u0006\u0004\n\u0002\u0010>¨\u0006G"}, d2 = {"Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity;", "Lapp/aaps/core/ui/activities/TranslatedDaggerAppCompatActivity;", "<init>", "()V", "sp", "Lapp/aaps/core/interfaces/sharedPreferences/SP;", "getSp", "()Lapp/aaps/core/interfaces/sharedPreferences/SP;", "setSp", "(Lapp/aaps/core/interfaces/sharedPreferences/SP;)V", "blePreCheck", "Lapp/aaps/core/interfaces/pump/BlePreCheck;", "getBlePreCheck", "()Lapp/aaps/core/interfaces/pump/BlePreCheck;", "setBlePreCheck", "(Lapp/aaps/core/interfaces/pump/BlePreCheck;)V", CoreConstants.CONTEXT_SCOPE_VALUE, "Landroid/content/Context;", "getContext", "()Landroid/content/Context;", "setContext", "(Landroid/content/Context;)V", "rxBus", "Lapp/aaps/core/interfaces/rx/bus/RxBus;", "getRxBus", "()Lapp/aaps/core/interfaces/rx/bus/RxBus;", "setRxBus", "(Lapp/aaps/core/interfaces/rx/bus/RxBus;)V", "listAdapter", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$ListAdapter;", "devices", "Ljava/util/ArrayList;", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$BluetoothDeviceItem;", "Lkotlin/collections/ArrayList;", "bluetoothAdapter", "Landroid/bluetooth/BluetoothAdapter;", "getBluetoothAdapter", "()Landroid/bluetooth/BluetoothAdapter;", "bluetoothLeScanner", "Landroid/bluetooth/le/BluetoothLeScanner;", "serviceUUID", "Ljava/util/UUID;", "kotlin.jvm.PlatformType", "binding", "Lapp/aaps/pump/lenomed/databinding/LenomedBlescannerActivityBinding;", "onCreate", "", "savedInstanceState", "Landroid/os/Bundle;", "onResume", "onPause", "startScan", "", "stopScan", "", "addBleDevice", "device", "Landroid/bluetooth/BluetoothDevice;", "mBleScanCallback", "Landroid/bluetooth/le/ScanCallback;", "debugGattCallback", "app/aaps/pump/lenomed/activities/LenomedBLEScanActivity$debugGattCallback$1", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$debugGattCallback$1;", "propertiesToString", "", "properties", "permissionsToString", "permissions", "Companion", "ListAdapter", "BluetoothDeviceItem", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActivity {
 
     /* JADX INFO: renamed from: Companion, reason: from kotlin metadata */
@@ -75,7 +72,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         @Override // android.bluetooth.le.ScanCallback
         public void onScanResult(int callbackType, ScanResult result) {
             Intrinsics.checkNotNullParameter(result, "result");
-            this.this$0.addBleDevice(result.getDevice());
+            LenomedBLEScanActivity.this.addBleDevice(result.getDevice());
         }
 
         @Override // android.bluetooth.le.ScanCallback
@@ -83,7 +80,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
             Log.d(LenomedBLEScanActivity.INSTANCE.getTAG(), "Scan failed with error code: " + errorCode);
         }
     };
-    private final LenomedBLEScanActivity$debugGattCallback$1 debugGattCallback = new BluetoothGattCallback() { // from class: app.aaps.pump.lenomed.activities.LenomedBLEScanActivity$debugGattCallback$1
+    private final android.bluetooth.BluetoothGattCallback debugGattCallback = new BluetoothGattCallback() { // from class: app.aaps.pump.lenomed.activities.LenomedBLEScanActivity$debugGattCallback$1
         @Override // android.bluetooth.BluetoothGattCallback
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == 0) {
@@ -109,7 +106,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
             if (status == 0) {
                 Log.d(LenomedBLEScanActivity.INSTANCE.getTAG(), "=== GATT Services & Characteristics (Debug Print) ===");
                 if (gatt != null && (services = gatt.getServices()) != null) {
-                    LenomedBLEScanActivity lenomedBLEScanActivity = this.this$0;
+                    LenomedBLEScanActivity lenomedBLEScanActivity = LenomedBLEScanActivity.this;
                     for (BluetoothGattService bluetoothGattService : services) {
                         Log.d(LenomedBLEScanActivity.INSTANCE.getTAG(), "Service UUID: " + bluetoothGattService.getUuid());
                         List<BluetoothGattCharacteristic> characteristics = bluetoothGattService.getCharacteristics();
@@ -164,7 +161,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         if (context != null) {
             return context;
         }
-        Intrinsics.throwUninitializedPropertyAccessException(CoreConstants.CONTEXT_SCOPE_VALUE);
+        Intrinsics.throwUninitializedPropertyAccessException("");
         return null;
     }
 
@@ -196,7 +193,6 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
     }
 
     /* JADX INFO: compiled from: LenomedBLEScanActivity.kt */
-    @Metadata(d1 = {"\u0000\u0014\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0002\b\u0003\n\u0002\u0010\u000e\n\u0002\b\u0003\b\u0086\u0003\u0018\u00002\u00020\u0001B\t\b\u0002¢\u0006\u0004\b\u0002\u0010\u0003R\u0014\u0010\u0004\u001a\u00020\u0005X\u0086D¢\u0006\b\n\u0000\u001a\u0004\b\u0006\u0010\u0007¨\u0006\b"}, d2 = {"Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$Companion;", "", "<init>", "()V", "TAG", "", "getTAG", "()Ljava/lang/String;", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
     public static final class Companion {
         public /* synthetic */ Companion(DefaultConstructorMarker defaultConstructorMarker) {
             this();
@@ -232,7 +228,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         if (supportActionBar2 != null) {
             supportActionBar2.setDisplayShowHomeEnabled(true);
         }
-        BlePreCheck.prerequisitesCheck$default(getBlePreCheck(), this, null, 2, null);
+        getBlePreCheck().prerequisitesCheck(this, null);
         this.listAdapter = new ListAdapter();
         LenomedBlescannerActivityBinding lenomedBlescannerActivityBinding2 = this.binding;
         if (lenomedBlescannerActivityBinding2 == null) {
@@ -325,7 +321,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         if (device == null || device.getName() == null || Intrinsics.areEqual(device.getName(), "") || (name = device.getName()) == null) {
             return;
         }
-        if (StringsKt.startsWith$default(name, "Ai", false, 2, (Object) null) && name.length() == 11) {
+        if (name.startsWith("Ai") && name.length() == 11) {
             String strSubstring = name.substring(2);
             Intrinsics.checkNotNullExpressionValue(strSubstring, "substring(...)");
             String str = strSubstring;
@@ -334,17 +330,12 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
                     return;
                 }
             }
-            BluetoothDeviceItem bluetoothDeviceItem = new BluetoothDeviceItem(this, device);
+            BluetoothDeviceItem bluetoothDeviceItem = new BluetoothDeviceItem(device);
             if (this.devices.contains(bluetoothDeviceItem)) {
                 return;
             }
             this.devices.add(bluetoothDeviceItem);
-            new Handler(Looper.getMainLooper()).post(new Runnable() { // from class: app.aaps.pump.lenomed.activities.LenomedBLEScanActivity$$ExternalSyntheticLambda0
-                @Override // java.lang.Runnable
-                public final void run() {
-                    LenomedBLEScanActivity.addBleDevice$lambda$1(this.f$0);
-                }
-            });
+            new Handler(Looper.getMainLooper()).post(() -> LenomedBLEScanActivity.addBleDevice$lambda$1(LenomedBLEScanActivity.this));
             Log.d(TAG, "Added device: " + device.getName() + " with address: " + device.getAddress());
         }
     }
@@ -358,7 +349,6 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
     }
 
     /* JADX INFO: compiled from: LenomedBLEScanActivity.kt */
-    @Metadata(d1 = {"\u00004\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0010\b\n\u0000\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0010\t\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0002\b\u0002\b\u0080\u0004\u0018\u00002\u00020\u0001:\u0001\u0011B\u0007¢\u0006\u0004\b\u0002\u0010\u0003J\b\u0010\u0004\u001a\u00020\u0005H\u0016J\u0014\u0010\u0006\u001a\u00060\u0007R\u00020\b2\u0006\u0010\t\u001a\u00020\u0005H\u0016J\u0010\u0010\n\u001a\u00020\u000b2\u0006\u0010\t\u001a\u00020\u0005H\u0016J$\u0010\f\u001a\u00020\r2\u0006\u0010\t\u001a\u00020\u00052\b\u0010\u000e\u001a\u0004\u0018\u00010\r2\b\u0010\u000f\u001a\u0004\u0018\u00010\u0010H\u0016¨\u0006\u0012"}, d2 = {"Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$ListAdapter;", "Landroid/widget/BaseAdapter;", "<init>", "(Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity;)V", "getCount", "", "getItem", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$BluetoothDeviceItem;", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity;", IntegerTokenConverter.CONVERTER_KEY, "getItemId", "", "getView", "Landroid/view/View;", "convertView", "parent", "Landroid/view/ViewGroup;", "ViewHolder", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
     public final class ListAdapter extends BaseAdapter {
         @Override // android.widget.Adapter
         public long getItemId(int i) {
@@ -386,7 +376,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
             if (convertView == null) {
                 convertView = View.inflate(LenomedBLEScanActivity.this.getApplicationContext(), R.layout.lenomed_blescanner_item, null);
                 Intrinsics.checkNotNull(convertView);
-                viewHolder = new ViewHolder(this, convertView);
+                viewHolder = new ViewHolder(convertView);
                 convertView.setTag(viewHolder);
             } else {
                 Object tag = convertView.getTag();
@@ -399,16 +389,13 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         }
 
         /* JADX INFO: compiled from: LenomedBLEScanActivity.kt */
-        @Metadata(d1 = {"\u0000,\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0010\u0002\n\u0002\b\u0003\b\u0082\u0004\u0018\u00002\u00020\u0001B\u000f\u0012\u0006\u0010\u0002\u001a\u00020\u0003¢\u0006\u0004\b\u0004\u0010\u0005J\u0010\u0010\f\u001a\u00020\r2\u0006\u0010\u0002\u001a\u00020\u0003H\u0017J\u0014\u0010\u000e\u001a\u00020\r2\n\u0010\u000f\u001a\u00060\u0007R\u00020\bH\u0007R\u0012\u0010\u0006\u001a\u00060\u0007R\u00020\bX\u0082.¢\u0006\u0002\n\u0000R\u000e\u0010\t\u001a\u00020\nX\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u000b\u001a\u00020\nX\u0082\u0004¢\u0006\u0002\n\u0000¨\u0006\u0010"}, d2 = {"Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$ListAdapter$ViewHolder;", "Landroid/view/View$OnClickListener;", "v", "Landroid/view/View;", "<init>", "(Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$ListAdapter;Landroid/view/View;)V", "item", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$BluetoothDeviceItem;", "Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity;", "name", "Landroid/widget/TextView;", "address", "onClick", "", "setData", "data", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
         private final class ViewHolder implements View.OnClickListener {
             private final TextView address;
             private BluetoothDeviceItem item;
             private final TextView name;
-            final /* synthetic */ ListAdapter this$0;
 
-            public ViewHolder(ListAdapter listAdapter, View v) {
+            public ViewHolder(View v) {
                 Intrinsics.checkNotNullParameter(v, "v");
-                this.this$0 = listAdapter;
                 View viewFindViewById = v.findViewById(R.id.ble_name);
                 Intrinsics.checkNotNullExpressionValue(viewFindViewById, "findViewById(...)");
                 this.name = (TextView) viewFindViewById;
@@ -421,9 +408,9 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
             @Override // android.view.View.OnClickListener
             public void onClick(View v) {
                 Intrinsics.checkNotNullParameter(v, "v");
-                LenomedBLEScanActivity.this.getSp().putString(app.aaps.core.utils.R.string.key_pump_lenomed_name, this.name.getText().toString());
+                LenomedBLEScanActivity.this.getSp().putString(app.aaps.pump.lenomed.R.string.key_pump_lenomed_name, this.name.getText().toString());
                 SP sp = LenomedBLEScanActivity.this.getSp();
-                int i = app.aaps.core.utils.R.string.key_pump_lenomed_address;
+                int i = app.aaps.pump.lenomed.R.string.key_pump_lenomed_address;
                 BluetoothDeviceItem bluetoothDeviceItem = this.item;
                 BluetoothDeviceItem bluetoothDeviceItem2 = null;
                 if (bluetoothDeviceItem == null) {
@@ -465,14 +452,11 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
     }
 
     /* JADX INFO: compiled from: LenomedBLEScanActivity.kt */
-    @Metadata(d1 = {"\u0000(\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0010\u000b\n\u0002\b\u0003\n\u0002\u0010\u000e\n\u0002\b\u0002\n\u0002\u0010\b\n\u0000\b\u0086\u0004\u0018\u00002\u00020\u0001B\u0011\b\u0000\u0012\u0006\u0010\u0002\u001a\u00020\u0003¢\u0006\u0004\b\u0004\u0010\u0005J\u0013\u0010\b\u001a\u00020\t2\b\u0010\n\u001a\u0004\u0018\u00010\u0001H\u0096\u0002J\u0018\u0010\u000b\u001a\u00020\t2\u0006\u0010\f\u001a\u00020\r2\u0006\u0010\u000e\u001a\u00020\rH\u0002J\b\u0010\u000f\u001a\u00020\u0010H\u0016R\u0011\u0010\u0002\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u0006\u0010\u0007¨\u0006\u0011"}, d2 = {"Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity$BluetoothDeviceItem;", "", "device", "Landroid/bluetooth/BluetoothDevice;", "<init>", "(Lapp/aaps/pump/lenomed/activities/LenomedBLEScanActivity;Landroid/bluetooth/BluetoothDevice;)V", "getDevice", "()Landroid/bluetooth/BluetoothDevice;", "equals", "", "other", "stringEquals", "arg1", "", "arg2", "hashCode", "", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
     public final class BluetoothDeviceItem {
         private final BluetoothDevice device;
-        final /* synthetic */ LenomedBLEScanActivity this$0;
 
-        public BluetoothDeviceItem(LenomedBLEScanActivity lenomedBLEScanActivity, BluetoothDevice device) {
+        public BluetoothDeviceItem(BluetoothDevice device) {
             Intrinsics.checkNotNullParameter(device, "device");
-            this.this$0 = lenomedBLEScanActivity;
             this.device = device;
         }
 
@@ -522,7 +506,7 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         if ((properties & 32) != 0) {
             arrayList.add("INDICATE");
         }
-        return CollectionsKt.joinToString$default(arrayList, " | ", null, null, 0, null, null, 62, null);
+        return String.join(" | ", arrayList);
     }
 
     /* JADX INFO: Access modifiers changed from: private */
@@ -534,6 +518,6 @@ public final class LenomedBLEScanActivity extends TranslatedDaggerAppCompatActiv
         if ((permissions & 16) != 0) {
             arrayList.add("WRITE");
         }
-        return CollectionsKt.joinToString$default(arrayList, " | ", null, null, 0, null, null, 62, null);
+        return String.join(" | ", arrayList);
     }
 }

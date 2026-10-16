@@ -16,7 +16,6 @@ import kotlin.jvm.internal.StringCompanionObject;
 
 /* JADX INFO: compiled from: LenomedPacket.kt */
 /* JADX INFO: loaded from: classes4.dex */
-@Metadata(d1 = {"\u0000V\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0010\u000b\n\u0002\b\u0006\n\u0002\u0010\u0005\n\u0002\b\u0005\n\u0002\u0010\u000e\n\u0002\b\u0004\n\u0002\u0010\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\b\n\u0002\b\u0002\n\u0002\u0010\u0012\n\u0002\b\u0011\b\u0016\u0018\u0000 >2\u00020\u0001:\u0001>B\u000f\u0012\u0006\u0010\u0002\u001a\u00020\u0003¢\u0006\u0004\b\u0004\u0010\u0005J\u0006\u0010%\u001a\u00020\u0015J\u0006\u0010&\u001a\u00020'J\"\u0010(\u001a\u00020)2\u0006\u0010\u001b\u001a\u00020\u001c2\u0006\u0010*\u001a\u00020+2\b\b\u0002\u0010,\u001a\u00020\u001cH\u0004J\u000e\u0010(\u001a\u00020)2\u0006\u0010\u001b\u001a\u00020\u001cJ\u000e\u0010-\u001a\u00020.2\u0006\u0010/\u001a\u00020)J\u000e\u00100\u001a\u00020+2\u0006\u00101\u001a\u00020.J\u000e\u00102\u001a\u00020+2\u0006\u00101\u001a\u00020.J\u0010\u00103\u001a\u00020.2\u0006\u00104\u001a\u00020+H\u0016J\u0010\u00105\u001a\u00020'2\u0006\u00106\u001a\u00020.H\u0016J\u000e\u00107\u001a\u00020+2\u0006\u0010/\u001a\u00020)J\u000e\u00108\u001a\u00020+2\u0006\u0010/\u001a\u00020)J\u000e\u00109\u001a\u00020+2\u0006\u0010/\u001a\u00020)J\u000e\u0010:\u001a\u00020+2\u0006\u00101\u001a\u00020.J\u000e\u0010;\u001a\u00020\u00152\u0006\u0010<\u001a\u00020+J\u000e\u0010=\u001a\u00020\u00152\u0006\u0010<\u001a\u00020+R\u0014\u0010\u0002\u001a\u00020\u0003X\u0084\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u0006\u0010\u0007R\u001e\u0010\b\u001a\u00020\t8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\n\u0010\u000b\"\u0004\b\f\u0010\rR\u001e\u0010\u000e\u001a\u00020\u000f8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0010\u0010\u0011\"\u0004\b\u0012\u0010\u0013R\u000e\u0010\u0014\u001a\u00020\u0015X\u0082\u000e¢\u0006\u0002\n\u0000R\u001a\u0010\u0016\u001a\u00020\u0015X\u0086\u000e¢\u0006\u000e\n\u0000\u001a\u0004\b\u0017\u0010\u0018\"\u0004\b\u0019\u0010\u001aR\u001a\u0010\u001b\u001a\u00020\u001cX\u0086\u000e¢\u0006\u000e\n\u0000\u001a\u0004\b\u001d\u0010\u001e\"\u0004\b\u001f\u0010 R\u0014\u0010!\u001a\u00020\"X\u0096D¢\u0006\b\n\u0000\u001a\u0004\b#\u0010$¨\u0006?"}, d2 = {"Lapp/aaps/pump/lenomed/packet/LenomedPacket;", "", "injector", "Ldagger/android/HasAndroidInjector;", "<init>", "(Ldagger/android/HasAndroidInjector;)V", "getInjector", "()Ldagger/android/HasAndroidInjector;", "aapsLogger", "Lapp/aaps/core/interfaces/logging/AAPSLogger;", "getAapsLogger", "()Lapp/aaps/core/interfaces/logging/AAPSLogger;", "setAapsLogger", "(Lapp/aaps/core/interfaces/logging/AAPSLogger;)V", "dateUtil", "Lapp/aaps/core/interfaces/utils/DateUtil;", "getDateUtil", "()Lapp/aaps/core/interfaces/utils/DateUtil;", "setDateUtil", "(Lapp/aaps/core/interfaces/utils/DateUtil;)V", "received", "", "failed", "getFailed", "()Z", "setFailed", "(Z)V", "msgType", "", "getMsgType", "()B", "setMsgType", "(B)V", "friendlyName", "", "getFriendlyName", "()Ljava/lang/String;", "success", "setReceived", "", "prefixEncode", "Ljava/nio/ByteBuffer;", "dataLength", "", "sop", "suffixEncode", "", "buffer", "getType", "bytes", "getCmd", "encode", "msgSeq", "handleMessage", "data", "getByteToInt", "getShortToInt", "getIntToInt", "getSeq", "isSuccInquireResponseResult", "result", "isSuccSettingResponseResult", "Companion", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public class LenomedPacket {
     public static final byte BT_MSG_DATA_LOC = 1;
 
@@ -49,10 +48,6 @@ public class LenomedPacket {
 
     public LenomedPacket() {
         this.friendlyName = "UNKNOWN_PACKET";
-    }
-
-    protected final HasAndroidInjector getInjector() {
-        return this.injector;
     }
 
     public final AAPSLogger getAapsLogger() {
@@ -286,7 +281,6 @@ public class LenomedPacket {
     }
 
     /* JADX INFO: compiled from: LenomedPacket.kt */
-    @Metadata(d1 = {"\u00004\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0002\b\u0003\n\u0002\u0010\b\n\u0002\b\u0002\n\u0002\u0010\u0005\n\u0002\b\t\n\u0002\u0010\u0012\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0007\n\u0002\u0010\u000e\n\u0002\b\u0003\b\u0086\u0003\u0018\u00002\u00020\u0001B\t\b\u0002¢\u0006\u0004\b\u0002\u0010\u0003J\u0016\u0010\u0011\u001a\u00020\u00122\u0006\u0010\u0013\u001a\u00020\u00122\u0006\u0010\u0014\u001a\u00020\u0005J\u000e\u0010\u0015\u001a\u00020\u00162\u0006\u0010\u0017\u001a\u00020\u0012J\u000e\u0010\u0018\u001a\u00020\u00052\u0006\u0010\u0019\u001a\u00020\u0016J\u000e\u0010\u001a\u001a\u00020\u00052\u0006\u0010\u0019\u001a\u00020\u0016J\u000e\u0010\u001b\u001a\u00020\u00052\u0006\u0010\u0019\u001a\u00020\u0016J\u000e\u0010\u001c\u001a\u00020\u00052\u0006\u0010\u0017\u001a\u00020\u0012J\u000e\u0010\u001d\u001a\u00020\u001e2\u0006\u0010\u0017\u001a\u00020\u0012J\u000e\u0010\u001f\u001a\u00020\u001e2\u0006\u0010 \u001a\u00020\u0012R\u000e\u0010\u0004\u001a\u00020\u0005X\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\u0006\u001a\u00020\u0005X\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\u0007\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\t\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\n\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\u000b\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\f\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\r\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\u000e\u001a\u00020\u0005X\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\u000f\u001a\u00020\bX\u0086T¢\u0006\u0002\n\u0000R\u000e\u0010\u0010\u001a\u00020\u0005X\u0086T¢\u0006\u0002\n\u0000¨\u0006!"}, d2 = {"Lapp/aaps/pump/lenomed/packet/LenomedPacket$Companion;", "", "<init>", "()V", "MSG_LEN", "", "MSG_LEN_BIG", "SOP_WRITE", "", "SOP_WRITE_X", "SOP_READ", "SOP_WRITE_x11", "SOP_WRITE_x21", "SOP_BIG", "MSG_TYPE_LOC", "BT_MSG_DATA_LOC", "MSG_SEQ_LOC", "getCRC16CCITT", "", "pSendBuf", "nEnd", "prefixDecode", "Ljava/nio/ByteBuffer;", "bytes", "getByteToInt", "buffer", "getShortToInt", "getIntToInt", "defect", "toHex", "", "toNarrowHex", "packet", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
     public static final class Companion {
         public /* synthetic */ Companion(DefaultConstructorMarker defaultConstructorMarker) {
             this();
@@ -336,7 +330,7 @@ public class LenomedPacket {
             if (bytes[0] != 119) {
                 return 98;
             }
-            byte[] bArrCopyOfRange = ArraysKt.copyOfRange(bytes, 0, bytes.length - 2);
+            byte[] bArrCopyOfRange = java.util.Arrays.copyOfRange(bytes, 0, bytes.length - 2);
             return !Arrays.equals(getCRC16CCITT(bArrCopyOfRange, bArrCopyOfRange.length), new byte[]{bytes[bytes.length - 2], bytes[bytes.length - 1]}) ? 99 : 0;
         }
 

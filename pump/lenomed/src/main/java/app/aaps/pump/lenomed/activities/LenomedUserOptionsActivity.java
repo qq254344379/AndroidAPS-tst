@@ -7,31 +7,47 @@ import androidx.appcompat.app.ActionBar;
 import app.aaps.core.interfaces.logging.AAPSLogger;
 import app.aaps.core.interfaces.logging.LTag;
 import app.aaps.core.interfaces.plugin.ActivePlugin;
-import app.aaps.core.interfaces.queue.Callback;
 import app.aaps.core.interfaces.queue.CommandQueue;
 import app.aaps.core.interfaces.resources.ResourceHelper;
 import app.aaps.core.interfaces.sharedPreferences.SP;
 import app.aaps.core.interfaces.ui.UiInteraction;
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy;
 import app.aaps.core.ui.activities.TranslatedDaggerAppCompatActivity;
-import app.aaps.core.ui.elements.NumberPicker;
+import app.aaps.pump.lenomed.compat.NumberPickerCompat;
 import app.aaps.core.ui.toast.ToastUtils;
 import app.aaps.pump.lenomed.LenomedPump;
 import app.aaps.pump.lenomed.R;
 import app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity;
 import app.aaps.pump.lenomed.databinding.EmbectaUserOptionsActivityBinding;
-import ch.qos.logback.core.CoreConstants;
-import coil.disk.DiskLruCache;
-import io.reactivex.rxjava3.disposables.CompositeDisposable;
 import java.text.DecimalFormat;
 import javax.inject.Inject;
-import kotlin.Metadata;
 import kotlin.jvm.internal.Intrinsics;
+import app.aaps.pump.lenomed.LenomedSupportKt;
+import app.aaps.core.interfaces.notifications.AlarmSound;
+import kotlin.Unit;
+import kotlinx.coroutines.CoroutineScope;
+import kotlinx.coroutines.CoroutineScopeKt;
 
 /* JADX INFO: compiled from: LenomedUserOptionsActivity.kt */
 /* JADX INFO: loaded from: classes4.dex */
-@Metadata(d1 = {"\u0000p\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u000b\u0018\u00002\u00020\u0001B\u0007¢\u0006\u0004\b\u0002\u0010\u0003J\b\u0010>\u001a\u00020?H\u0014J\b\u0010@\u001a\u00020?H\u0014J\u0012\u0010A\u001a\u00020?2\b\u0010B\u001a\u0004\u0018\u00010CH\u0014J\b\u0010D\u001a\u00020?H\u0002J\b\u0010E\u001a\u00020?H\u0002J\b\u0010F\u001a\u00020?H\u0002J\b\u0010G\u001a\u00020?H\u0002J\b\u0010H\u001a\u00020?H\u0002J\b\u0010I\u001a\u00020?H\u0002J\b\u0010J\u001a\u00020?H\u0002J\b\u0010K\u001a\u00020?H\u0002J\b\u0010L\u001a\u00020?H\u0002J\b\u0010M\u001a\u00020?H\u0002R\u001e\u0010\u0004\u001a\u00020\u00058\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0006\u0010\u0007\"\u0004\b\b\u0010\tR\u001e\u0010\n\u001a\u00020\u000b8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\f\u0010\r\"\u0004\b\u000e\u0010\u000fR\u001e\u0010\u0010\u001a\u00020\u00118\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0012\u0010\u0013\"\u0004\b\u0014\u0010\u0015R\u001e\u0010\u0016\u001a\u00020\u00178\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0018\u0010\u0019\"\u0004\b\u001a\u0010\u001bR\u001e\u0010\u001c\u001a\u00020\u001d8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u001e\u0010\u001f\"\u0004\b \u0010!R\u001e\u0010\"\u001a\u00020#8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b$\u0010%\"\u0004\b&\u0010'R\u001e\u0010(\u001a\u00020)8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b*\u0010+\"\u0004\b,\u0010-R\u001e\u0010.\u001a\u00020/8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b0\u00101\"\u0004\b2\u00103R\u001e\u00104\u001a\u0002058\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b6\u00107\"\u0004\b8\u00109R\u000e\u0010:\u001a\u00020;X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010<\u001a\u00020=X\u0082.¢\u0006\u0002\n\u0000¨\u0006N"}, d2 = {"Lapp/aaps/pump/lenomed/activities/LenomedUserOptionsActivity;", "Lapp/aaps/core/ui/activities/TranslatedDaggerAppCompatActivity;", "<init>", "()V", "fabricPrivacy", "Lapp/aaps/core/interfaces/utils/fabric/FabricPrivacy;", "getFabricPrivacy", "()Lapp/aaps/core/interfaces/utils/fabric/FabricPrivacy;", "setFabricPrivacy", "(Lapp/aaps/core/interfaces/utils/fabric/FabricPrivacy;)V", CoreConstants.CONTEXT_SCOPE_VALUE, "Landroid/content/Context;", "getContext", "()Landroid/content/Context;", "setContext", "(Landroid/content/Context;)V", "lenomedPump", "Lapp/aaps/pump/lenomed/LenomedPump;", "getLenomedPump", "()Lapp/aaps/pump/lenomed/LenomedPump;", "setLenomedPump", "(Lapp/aaps/pump/lenomed/LenomedPump;)V", "activePlugin", "Lapp/aaps/core/interfaces/plugin/ActivePlugin;", "getActivePlugin", "()Lapp/aaps/core/interfaces/plugin/ActivePlugin;", "setActivePlugin", "(Lapp/aaps/core/interfaces/plugin/ActivePlugin;)V", "commandQueue", "Lapp/aaps/core/interfaces/queue/CommandQueue;", "getCommandQueue", "()Lapp/aaps/core/interfaces/queue/CommandQueue;", "setCommandQueue", "(Lapp/aaps/core/interfaces/queue/CommandQueue;)V", "sp", "Lapp/aaps/core/interfaces/sharedPreferences/SP;", "getSp", "()Lapp/aaps/core/interfaces/sharedPreferences/SP;", "setSp", "(Lapp/aaps/core/interfaces/sharedPreferences/SP;)V", "uiInteraction", "Lapp/aaps/core/interfaces/ui/UiInteraction;", "getUiInteraction", "()Lapp/aaps/core/interfaces/ui/UiInteraction;", "setUiInteraction", "(Lapp/aaps/core/interfaces/ui/UiInteraction;)V", "aapsLogger", "Lapp/aaps/core/interfaces/logging/AAPSLogger;", "getAapsLogger", "()Lapp/aaps/core/interfaces/logging/AAPSLogger;", "setAapsLogger", "(Lapp/aaps/core/interfaces/logging/AAPSLogger;)V", "rh", "Lapp/aaps/core/interfaces/resources/ResourceHelper;", "getRh", "()Lapp/aaps/core/interfaces/resources/ResourceHelper;", "setRh", "(Lapp/aaps/core/interfaces/resources/ResourceHelper;)V", "disposable", "Lio/reactivex/rxjava3/disposables/CompositeDisposable;", "binding", "Lapp/aaps/pump/lenomed/databinding/EmbectaUserOptionsActivityBinding;", "onResume", "", "onPause", "onCreate", "savedInstanceState", "Landroid/os/Bundle;", "initNumberPickers", "syncThresholdValues", "onSaveInfusionClick", "onSaveBluetoothClick", "onSaveMaximumBolusClick", "onSaveMaximumBasalClick", "onSaveBolusDailyTotalClick", "onSaveBasalDailyTotalClick", "onSaveFixedExhaustClick", "performSave", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatActivity {
+
+    private CoroutineScope eventScope;
+
+    public final CoroutineScope getEventScope() {
+        if (this.eventScope == null) {
+            this.eventScope = LenomedSupportKt.lenomedIoScope();
+        }
+        return this.eventScope;
+    }
+
+    public final void releaseEventScope() {
+        CoroutineScope scope = this.eventScope;
+        if (scope != null) {
+            CoroutineScopeKt.cancel(scope, null);
+            this.eventScope = null;
+        }
+    }
 
     @Inject
     public AAPSLogger aapsLogger;
@@ -45,7 +61,6 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
 
     @Inject
     public Context context;
-    private final CompositeDisposable disposable = new CompositeDisposable();
 
     @Inject
     public FabricPrivacy fabricPrivacy;
@@ -81,7 +96,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
         if (context != null) {
             return context;
         }
-        Intrinsics.throwUninitializedPropertyAccessException(CoreConstants.CONTEXT_SCOPE_VALUE);
+        Intrinsics.throwUninitializedPropertyAccessException("");
         return null;
     }
 
@@ -195,7 +210,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
 
     @Override // androidx.fragment.app.FragmentActivity, android.app.Activity
     protected void onPause() {
-        this.disposable.clear();
+        releaseEventScope();
         super.onPause();
     }
 
@@ -238,79 +253,44 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding4 = null;
         }
-        embectaUserOptionsActivityBinding4.saveInfusion.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda0
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveInfusionClick();
-            }
-        });
+        embectaUserOptionsActivityBinding4.saveInfusion.setOnClickListener(v -> onSaveInfusionClick());
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding5 = this.binding;
         if (embectaUserOptionsActivityBinding5 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding5 = null;
         }
-        embectaUserOptionsActivityBinding5.saveBluetooth.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda1
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveBluetoothClick();
-            }
-        });
+        embectaUserOptionsActivityBinding5.saveBluetooth.setOnClickListener(v -> onSaveBluetoothClick());
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding6 = this.binding;
         if (embectaUserOptionsActivityBinding6 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding6 = null;
         }
-        embectaUserOptionsActivityBinding6.saveMaximumBolus.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda2
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveMaximumBolusClick();
-            }
-        });
+        embectaUserOptionsActivityBinding6.saveMaximumBolus.setOnClickListener(v -> onSaveMaximumBolusClick());
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding7 = this.binding;
         if (embectaUserOptionsActivityBinding7 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding7 = null;
         }
-        embectaUserOptionsActivityBinding7.saveMaximumBasal.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda3
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveMaximumBasalClick();
-            }
-        });
+        embectaUserOptionsActivityBinding7.saveMaximumBasal.setOnClickListener(v -> onSaveMaximumBasalClick());
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding8 = this.binding;
         if (embectaUserOptionsActivityBinding8 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding8 = null;
         }
-        embectaUserOptionsActivityBinding8.saveBolusDailyTotal.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda4
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveBolusDailyTotalClick();
-            }
-        });
+        embectaUserOptionsActivityBinding8.saveBolusDailyTotal.setOnClickListener(v -> onSaveBolusDailyTotalClick());
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding9 = this.binding;
         if (embectaUserOptionsActivityBinding9 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding9 = null;
         }
-        embectaUserOptionsActivityBinding9.saveBasalDailyTotal.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda5
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveBasalDailyTotalClick();
-            }
-        });
+        embectaUserOptionsActivityBinding9.saveBasalDailyTotal.setOnClickListener(v -> onSaveBasalDailyTotalClick());
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding10 = this.binding;
         if (embectaUserOptionsActivityBinding10 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
         } else {
             embectaUserOptionsActivityBinding = embectaUserOptionsActivityBinding10;
         }
-        embectaUserOptionsActivityBinding.saveFixedExhaust.setOnClickListener(new View.OnClickListener() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$$ExternalSyntheticLambda6
-            @Override // android.view.View.OnClickListener
-            public final void onClick(View view) {
-                this.f$0.onSaveFixedExhaustClick();
-            }
-        });
+        embectaUserOptionsActivityBinding.saveFixedExhaust.setOnClickListener(v -> onSaveFixedExhaustClick());
         getAapsLogger().debug(LTag.PUMP, "UserOptionsLoaded: " + ((System.currentTimeMillis() - getLenomedPump().getLastConnection()) / ((long) 1000)) + " s ago\ninfusionEnabled: " + getLenomedPump().getInfusionEnabled() + "\nbluetoothEnabled: " + getLenomedPump().getBluetoothEnabled() + "\nmaxBolus: " + getLenomedPump().getMaxBolus() + "\nmaxBasal: " + getLenomedPump().getMaxBasal() + "\nmaxBolusePerDay: " + getLenomedPump().getMaxBolusePerDay() + "\nbasalDailyTotalThreshold: " + getLenomedPump().getBasalDailyTotalThreshold() + "\nfixedExhaustThreshold: " + getLenomedPump().getFixedExhaustThreshold());
     }
 
@@ -322,8 +302,8 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding = null;
         }
-        NumberPicker numberPicker = embectaUserOptionsActivityBinding.maximumBolusRate;
-        DecimalFormat decimalFormat = new DecimalFormat(DiskLruCache.VERSION);
+        NumberPickerCompat numberPicker = embectaUserOptionsActivityBinding.maximumBolusRate;
+        DecimalFormat decimalFormat = new DecimalFormat("0.0");
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding3 = this.binding;
         if (embectaUserOptionsActivityBinding3 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
@@ -336,8 +316,8 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding4 = null;
         }
-        NumberPicker numberPicker2 = embectaUserOptionsActivityBinding4.maximumBasalRate;
-        DecimalFormat decimalFormat2 = new DecimalFormat(DiskLruCache.VERSION);
+        NumberPickerCompat numberPicker2 = embectaUserOptionsActivityBinding4.maximumBasalRate;
+        DecimalFormat decimalFormat2 = new DecimalFormat("0.0");
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding5 = this.binding;
         if (embectaUserOptionsActivityBinding5 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
@@ -350,8 +330,8 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding6 = null;
         }
-        NumberPicker numberPicker3 = embectaUserOptionsActivityBinding6.embectaBolusDailyTotal;
-        DecimalFormat decimalFormat3 = new DecimalFormat(DiskLruCache.VERSION);
+        NumberPickerCompat numberPicker3 = embectaUserOptionsActivityBinding6.embectaBolusDailyTotal;
+        DecimalFormat decimalFormat3 = new DecimalFormat("0.0");
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding7 = this.binding;
         if (embectaUserOptionsActivityBinding7 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
@@ -364,8 +344,8 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding8 = null;
         }
-        NumberPicker numberPicker4 = embectaUserOptionsActivityBinding8.embectaBasalDailyTotal;
-        DecimalFormat decimalFormat4 = new DecimalFormat(DiskLruCache.VERSION);
+        NumberPickerCompat numberPicker4 = embectaUserOptionsActivityBinding8.embectaBasalDailyTotal;
+        DecimalFormat decimalFormat4 = new DecimalFormat("0.0");
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding9 = this.binding;
         if (embectaUserOptionsActivityBinding9 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
@@ -378,8 +358,8 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding10 = null;
         }
-        NumberPicker numberPicker5 = embectaUserOptionsActivityBinding10.embectaFixedExhaust;
-        DecimalFormat decimalFormat5 = new DecimalFormat(DiskLruCache.VERSION);
+        NumberPickerCompat numberPicker5 = embectaUserOptionsActivityBinding10.embectaFixedExhaust;
+        DecimalFormat decimalFormat5 = new DecimalFormat("0.0");
         EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding11 = this.binding;
         if (embectaUserOptionsActivityBinding11 == null) {
             Intrinsics.throwUninitializedPropertyAccessException("binding");
@@ -405,7 +385,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
                 Intrinsics.throwUninitializedPropertyAccessException("binding");
                 embectaUserOptionsActivityBinding2 = null;
             }
-            value = embectaUserOptionsActivityBinding2.maximumBolusRate.getValue();
+            value = embectaUserOptionsActivityBinding2.maximumBolusRate.getDecimalValue();
         }
         lenomedPump.setMaxBolus(value);
         LenomedPump lenomedPump2 = getLenomedPump();
@@ -417,7 +397,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
                 Intrinsics.throwUninitializedPropertyAccessException("binding");
                 embectaUserOptionsActivityBinding3 = null;
             }
-            value2 = embectaUserOptionsActivityBinding3.maximumBasalRate.getValue();
+            value2 = embectaUserOptionsActivityBinding3.maximumBasalRate.getDecimalValue();
         }
         lenomedPump2.setMaxBasal(value2);
         LenomedPump lenomedPump3 = getLenomedPump();
@@ -429,7 +409,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
                 Intrinsics.throwUninitializedPropertyAccessException("binding");
                 embectaUserOptionsActivityBinding4 = null;
             }
-            value3 = embectaUserOptionsActivityBinding4.embectaBolusDailyTotal.getValue();
+            value3 = embectaUserOptionsActivityBinding4.embectaBolusDailyTotal.getDecimalValue();
         }
         lenomedPump3.setMaxBolusePerDay(value3);
         LenomedPump lenomedPump4 = getLenomedPump();
@@ -441,7 +421,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
                 Intrinsics.throwUninitializedPropertyAccessException("binding");
                 embectaUserOptionsActivityBinding5 = null;
             }
-            value4 = embectaUserOptionsActivityBinding5.embectaBasalDailyTotal.getValue();
+            value4 = embectaUserOptionsActivityBinding5.embectaBasalDailyTotal.getDecimalValue();
         }
         lenomedPump4.setBasalDailyTotalThreshold(value4);
         LenomedPump lenomedPump5 = getLenomedPump();
@@ -454,7 +434,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             } else {
                 embectaUserOptionsActivityBinding = embectaUserOptionsActivityBinding6;
             }
-            value5 = embectaUserOptionsActivityBinding.embectaFixedExhaust.getValue();
+            value5 = embectaUserOptionsActivityBinding.embectaFixedExhaust.getDecimalValue();
         }
         lenomedPump5.setFixedExhaustThreshold(value5);
         getAapsLogger().debug(LTag.PUMP, "syncThresholdValues: Updated thresholds: maxBolus=" + getLenomedPump().getMaxBolus() + ", maxBasal=" + getLenomedPump().getMaxBasal() + ", maxBolusePerDay=" + getLenomedPump().getMaxBolusePerDay() + ", basalDailyTotalThreshold=" + getLenomedPump().getBasalDailyTotalThreshold() + ", fixedExhaustThreshold=" + getLenomedPump().getFixedExhaustThreshold());
@@ -495,7 +475,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding = null;
         }
-        lenomedPump.setMaxBolus(embectaUserOptionsActivityBinding.maximumBolusRate.getValue());
+        lenomedPump.setMaxBolus(embectaUserOptionsActivityBinding.maximumBolusRate.getDecimalValue());
         getSp().putDouble(R.string.key_lenomed_bolus_single, getLenomedPump().getMaxBolus());
         performSave();
     }
@@ -509,7 +489,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding = null;
         }
-        lenomedPump.setMaxBasal(embectaUserOptionsActivityBinding.maximumBasalRate.getValue());
+        lenomedPump.setMaxBasal(embectaUserOptionsActivityBinding.maximumBasalRate.getDecimalValue());
         getSp().putDouble(R.string.key_lenomed_basal_single, getLenomedPump().getMaxBasal());
         performSave();
     }
@@ -523,7 +503,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding = null;
         }
-        lenomedPump.setMaxBolusePerDay(embectaUserOptionsActivityBinding.embectaBolusDailyTotal.getValue());
+        lenomedPump.setMaxBolusePerDay(embectaUserOptionsActivityBinding.embectaBolusDailyTotal.getDecimalValue());
         getSp().putDouble(R.string.key_lenomed_bolus_daily_total_threshold, getLenomedPump().getMaxBolusePerDay());
         performSave();
     }
@@ -537,7 +517,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding = null;
         }
-        lenomedPump.setBasalDailyTotalThreshold(embectaUserOptionsActivityBinding.embectaBasalDailyTotal.getValue());
+        lenomedPump.setBasalDailyTotalThreshold(embectaUserOptionsActivityBinding.embectaBasalDailyTotal.getDecimalValue());
         getSp().putDouble(R.string.key_lenomed_basal_daily_total_threshold, getLenomedPump().getBasalDailyTotalThreshold());
         performSave();
     }
@@ -551,7 +531,7 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
             Intrinsics.throwUninitializedPropertyAccessException("binding");
             embectaUserOptionsActivityBinding = null;
         }
-        lenomedPump.setFixedExhaustThreshold(embectaUserOptionsActivityBinding.embectaFixedExhaust.getValue());
+        lenomedPump.setFixedExhaustThreshold(embectaUserOptionsActivityBinding.embectaFixedExhaust.getDecimalValue());
         getSp().putDouble(R.string.key_lenomed_fixed_exhaust_threshold, getLenomedPump().getFixedExhaustThreshold());
         performSave();
     }
@@ -560,60 +540,31 @@ public final class LenomedUserOptionsActivity extends TranslatedDaggerAppCompatA
         if (getLenomedPump().getSetUserOptionType() == 11) {
             syncThresholdValues();
         }
-        getCommandQueue().setUserOptions(new AnonymousClass1());
-    }
-
-    /* JADX INFO: renamed from: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$performSave$1, reason: invalid class name */
-    /* JADX INFO: compiled from: LenomedUserOptionsActivity.kt */
-    @Metadata(d1 = {"\u0000\u0011\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u0002\n\u0000*\u0001\u0000\b\n\u0018\u00002\u00020\u0001J\b\u0010\u0002\u001a\u00020\u0003H\u0016¨\u0006\u0004"}, d2 = {"app/aaps/pump/lenomed/activities/LenomedUserOptionsActivity$performSave$1", "Lapp/aaps/core/interfaces/queue/Callback;", "run", "", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
-    public static final class AnonymousClass1 extends Callback {
-        AnonymousClass1() {
-        }
-
-        @Override // java.lang.Runnable
-        public void run() {
-            if (getResult().getSuccess()) {
-                final LenomedUserOptionsActivity lenomedUserOptionsActivity = LenomedUserOptionsActivity.this;
-                lenomedUserOptionsActivity.runOnUiThread(new Runnable() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$performSave$1$$ExternalSyntheticLambda0
-                    @Override // java.lang.Runnable
-                    public final void run() {
-                        LenomedUserOptionsActivity.AnonymousClass1.run$lambda$0(lenomedUserOptionsActivity);
+        // CommandQueue.setUserOptions() is suspend on dev; the old Callback ran on the IO
+        // dispatcher, which is where this helper invokes onResult.
+        LenomedSupportKt.setUserOptionsAsync(getCommandQueue(), getEventScope(), result -> {
+            if (result.getSuccess()) {
+                runOnUiThread(() -> {
+                    EmbectaUserOptionsActivityBinding b = this.binding;
+                    if (b == null) {
+                        Intrinsics.throwUninitializedPropertyAccessException("binding");
+                        b = null;
                     }
+                    b.infusionSwitch.setChecked(getLenomedPump().getInfusionEnabled());
+                    EmbectaUserOptionsActivityBinding b2 = this.binding;
+                    if (b2 == null) {
+                        Intrinsics.throwUninitializedPropertyAccessException("binding");
+                        b2 = null;
+                    }
+                    b2.bluetoothSwitch.setChecked(getLenomedPump().getBluetoothEnabled());
+                    ToastUtils.INSTANCE.okToast(getContext(), getRh().gs(R.string.save_success), false);
                 });
             } else {
-                final LenomedUserOptionsActivity lenomedUserOptionsActivity2 = LenomedUserOptionsActivity.this;
-                lenomedUserOptionsActivity2.runOnUiThread(new Runnable() { // from class: app.aaps.pump.lenomed.activities.LenomedUserOptionsActivity$performSave$1$$ExternalSyntheticLambda1
-                    @Override // java.lang.Runnable
-                    public final void run() {
-                        LenomedUserOptionsActivity.AnonymousClass1.run$lambda$1(lenomedUserOptionsActivity2, this);
-                    }
-                });
+                runOnUiThread(() -> getUiInteraction().runAlarm(result.getComment(), getRh().gs(R.string.pumperror), AlarmSound.BOLUS_ERROR));
             }
-            LenomedUserOptionsActivity.this.getAapsLogger().debug(LTag.PUMP, "performSave: Result type=" + LenomedUserOptionsActivity.this.getLenomedPump().getSetUserOptionType() + ", success=" + getResult().getSuccess() + ", comment=" + getResult().getComment());
-        }
-
-        /* JADX INFO: Access modifiers changed from: private */
-        public static final void run$lambda$0(LenomedUserOptionsActivity lenomedUserOptionsActivity) {
-            EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding = lenomedUserOptionsActivity.binding;
-            EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding2 = null;
-            if (embectaUserOptionsActivityBinding == null) {
-                Intrinsics.throwUninitializedPropertyAccessException("binding");
-                embectaUserOptionsActivityBinding = null;
-            }
-            embectaUserOptionsActivityBinding.infusionSwitch.setChecked(lenomedUserOptionsActivity.getLenomedPump().getInfusionEnabled());
-            EmbectaUserOptionsActivityBinding embectaUserOptionsActivityBinding3 = lenomedUserOptionsActivity.binding;
-            if (embectaUserOptionsActivityBinding3 == null) {
-                Intrinsics.throwUninitializedPropertyAccessException("binding");
-            } else {
-                embectaUserOptionsActivityBinding2 = embectaUserOptionsActivityBinding3;
-            }
-            embectaUserOptionsActivityBinding2.bluetoothSwitch.setChecked(lenomedUserOptionsActivity.getLenomedPump().getBluetoothEnabled());
-            ToastUtils.okToast$default(ToastUtils.INSTANCE, lenomedUserOptionsActivity.getContext(), lenomedUserOptionsActivity.getRh().gs(R.string.save_success), false, 4, null);
-        }
-
-        /* JADX INFO: Access modifiers changed from: private */
-        public static final void run$lambda$1(LenomedUserOptionsActivity lenomedUserOptionsActivity, AnonymousClass1 anonymousClass1) {
-            lenomedUserOptionsActivity.getUiInteraction().runAlarm(anonymousClass1.getResult().getComment(), lenomedUserOptionsActivity.getRh().gs(R.string.pumperror), app.aaps.core.ui.R.raw.boluserror);
-        }
+            getAapsLogger().debug(LTag.PUMP, "performSave: Result type=" + getLenomedPump().getSetUserOptionType() + ", success=" + result.getSuccess() + ", comment=" + result.getComment());
+            return Unit.INSTANCE;
+        });
     }
+
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode variants of the colours in values/colors_lenomed.xml -->
+    <color name="pumpStatusBackground">#505050</color>
+    <color name="userOption">#6ae86d</color>
+</resources>

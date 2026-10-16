@@ -1,6 +1,4 @@
 package app.aaps.pump.lenomed.packet;
-
-import androidx.exifinterface.media.ExifInterface;
 import app.aaps.core.interfaces.logging.LTag;
 import app.aaps.pump.lenomed.LenomedPump;
 import java.nio.ByteBuffer;
@@ -17,7 +15,6 @@ import kotlin.ranges.IntRange;
 
 /* JADX INFO: compiled from: BasalLimitInquireResponsePacket.kt */
 /* JADX INFO: loaded from: classes4.dex */
-@Metadata(d1 = {"\u00006\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0010\b\n\u0002\b\u0005\n\u0002\u0010\u0002\n\u0000\n\u0002\u0010\u0012\n\u0000\n\u0002\u0010\u000e\n\u0002\b\u0003\b\u0007\u0018\u00002\u00020\u0001B\u000f\u0012\u0006\u0010\u0002\u001a\u00020\u0003¢\u0006\u0004\b\u0004\u0010\u0005J\u0010\u0010\u0012\u001a\u00020\u00132\u0006\u0010\u0014\u001a\u00020\u0015H\u0016R\u001e\u0010\u0006\u001a\u00020\u00078\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\b\u0010\t\"\u0004\b\n\u0010\u000bR\u001a\u0010\f\u001a\u00020\rX\u0086\u000e¢\u0006\u000e\n\u0000\u001a\u0004\b\u000e\u0010\u000f\"\u0004\b\u0010\u0010\u0011R\u0014\u0010\u0016\u001a\u00020\u0017X\u0096D¢\u0006\b\n\u0000\u001a\u0004\b\u0018\u0010\u0019¨\u0006\u001a"}, d2 = {"Lapp/aaps/pump/lenomed/packet/BasalLimitInquireResponsePacket;", "Lapp/aaps/pump/lenomed/packet/LenomedPacket;", "injector", "Ldagger/android/HasAndroidInjector;", "<init>", "(Ldagger/android/HasAndroidInjector;)V", "lenomedPump", "Lapp/aaps/pump/lenomed/LenomedPump;", "getLenomedPump", "()Lapp/aaps/pump/lenomed/LenomedPump;", "setLenomedPump", "(Lapp/aaps/pump/lenomed/LenomedPump;)V", "result", "", "getResult", "()I", "setResult", "(I)V", "handleMessage", "", "data", "", "friendlyName", "", "getFriendlyName", "()Ljava/lang/String;", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public final class BasalLimitInquireResponsePacket extends LenomedPacket {
     private final String friendlyName;
 
@@ -141,12 +138,14 @@ public final class BasalLimitInquireResponsePacket extends LenomedPacket {
                 Intrinsics.checkNotNull(pumpProfiles);
                 pumpProfiles[i9][i10] = arrayList3.get(i10);
             }
-            getAapsLogger().debug(LTag.PUMPCOMM, "Result --> pattern: " + byteToInt + " (Basal " + (byteToInt == 1 ? ExifInterface.GPS_MEASUREMENT_IN_PROGRESS : "B") + "), hourly rates: " + arrayList3 + ", times: [" + CollectionsKt.joinToString$default(new IntRange(0, 23), null, null, null, 0, null, new Function1() { // from class: app.aaps.pump.lenomed.packet.BasalLimitInquireResponsePacket$$ExternalSyntheticLambda0
-                @Override // kotlin.jvm.functions.Function1
-                public final Object invoke(Object obj) {
-                    return BasalLimitInquireResponsePacket.handleMessage$lambda$0(((Integer) obj).intValue());
+            StringBuilder times = new StringBuilder();
+            for (int hour = 0; hour <= 23; hour++) {
+                if (times.length() > 0) {
+                    times.append(", ");
                 }
-            }, 31, null) + "]");
+                times.append(String.format("%02d:00", hour));
+            }
+            getAapsLogger().debug(LTag.PUMPCOMM, "Result --> pattern: " + byteToInt + " (Basal " + (byteToInt == 1 ? "" : "B") + "), hourly rates: " + arrayList3 + ", times: [" + times + "]");
             getAapsLogger().debug(LTag.PUMPCOMM, "Full 48-segment rates for reference: " + arrayList + ", times: " + arrayList2);
             setFailed(false);
         } catch (Exception e) {

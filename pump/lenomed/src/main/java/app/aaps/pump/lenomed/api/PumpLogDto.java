@@ -7,7 +7,6 @@ import kotlin.jvm.internal.Intrinsics;
 
 /* JADX INFO: compiled from: LenomedApiResponse.kt */
 /* JADX INFO: loaded from: classes4.dex */
-@Metadata(d1 = {"\u0000,\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0010\u000e\n\u0002\b\u0004\n\u0002\u0010\b\n\u0000\n\u0002\u0010 \n\u0002\u0018\u0002\n\u0002\b\u0013\n\u0002\u0010\u000b\n\u0002\b\u0004\b\u0086\b\u0018\u00002\u00020\u0001B=\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\u0006\u0010\u0004\u001a\u00020\u0003\u0012\u0006\u0010\u0005\u001a\u00020\u0003\u0012\u0006\u0010\u0006\u001a\u00020\u0003\u0012\u0006\u0010\u0007\u001a\u00020\b\u0012\f\u0010\t\u001a\b\u0012\u0004\u0012\u00020\u000b0\n¢\u0006\u0004\b\f\u0010\rJ\t\u0010\u0017\u001a\u00020\u0003HÆ\u0003J\t\u0010\u0018\u001a\u00020\u0003HÆ\u0003J\t\u0010\u0019\u001a\u00020\u0003HÆ\u0003J\t\u0010\u001a\u001a\u00020\u0003HÆ\u0003J\t\u0010\u001b\u001a\u00020\bHÆ\u0003J\u000f\u0010\u001c\u001a\b\u0012\u0004\u0012\u00020\u000b0\nHÆ\u0003JK\u0010\u001d\u001a\u00020\u00002\b\b\u0002\u0010\u0002\u001a\u00020\u00032\b\b\u0002\u0010\u0004\u001a\u00020\u00032\b\b\u0002\u0010\u0005\u001a\u00020\u00032\b\b\u0002\u0010\u0006\u001a\u00020\u00032\b\b\u0002\u0010\u0007\u001a\u00020\b2\u000e\b\u0002\u0010\t\u001a\b\u0012\u0004\u0012\u00020\u000b0\nHÆ\u0001J\u0013\u0010\u001e\u001a\u00020\u001f2\b\u0010 \u001a\u0004\u0018\u00010\u0001HÖ\u0003J\t\u0010!\u001a\u00020\bHÖ\u0001J\t\u0010\"\u001a\u00020\u0003HÖ\u0001R\u0016\u0010\u0002\u001a\u00020\u00038\u0006X\u0087\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u000e\u0010\u000fR\u0016\u0010\u0004\u001a\u00020\u00038\u0006X\u0087\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u0010\u0010\u000fR\u0016\u0010\u0005\u001a\u00020\u00038\u0006X\u0087\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u0011\u0010\u000fR\u0016\u0010\u0006\u001a\u00020\u00038\u0006X\u0087\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u0012\u0010\u000fR\u0016\u0010\u0007\u001a\u00020\b8\u0006X\u0087\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u0013\u0010\u0014R\u001c\u0010\t\u001a\b\u0012\u0004\u0012\u00020\u000b0\n8\u0006X\u0087\u0004¢\u0006\b\n\u0000\u001a\u0004\b\u0015\u0010\u0016¨\u0006#"}, d2 = {"Lapp/aaps/pump/lenomed/api/PumpLogDto;", "", "app_uid", "", "app_version", "pump_uid", "pump_version", "incarnation_num", "", "pumplog_info", "", "Lapp/aaps/pump/lenomed/api/PumpLog;", "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/util/List;)V", "getApp_uid", "()Ljava/lang/String;", "getApp_version", "getPump_uid", "getPump_version", "getIncarnation_num", "()I", "getPumplog_info", "()Ljava/util/List;", "component1", "component2", "component3", "component4", "component5", "component6", "copy", "equals", "", "other", "hashCode", "toString", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public final /* data */ class PumpLogDto {
 
     @SerializedName("app_uid")
@@ -53,30 +52,10 @@ public final /* data */ class PumpLogDto {
         return pumpLogDto.copy(str, str2, str3, str4, i3, list2);
     }
 
-    /* JADX INFO: renamed from: component1, reason: from getter */
-    public final String getApp_uid() {
-        return this.app_uid;
-    }
 
-    /* JADX INFO: renamed from: component2, reason: from getter */
-    public final String getApp_version() {
-        return this.app_version;
-    }
 
-    /* JADX INFO: renamed from: component3, reason: from getter */
-    public final String getPump_uid() {
-        return this.pump_uid;
-    }
 
-    /* JADX INFO: renamed from: component4, reason: from getter */
-    public final String getPump_version() {
-        return this.pump_version;
-    }
 
-    /* JADX INFO: renamed from: component5, reason: from getter */
-    public final int getIncarnation_num() {
-        return this.incarnation_num;
-    }
 
     public final List<PumpLog> component6() {
         return this.pumplog_info;

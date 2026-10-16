@@ -1,13 +1,13 @@
 package app.aaps.pump.lenomed.packet;
 
 import app.aaps.core.interfaces.logging.AAPSLogger;
+import app.aaps.pump.lenomed.LenomedSupportKt;
 import app.aaps.core.interfaces.logging.LTag;
 import app.aaps.core.interfaces.resources.ResourceHelper;
 import app.aaps.core.interfaces.sharedPreferences.SP;
-import app.aaps.pump.danars.encryption.BleEncryption;
+import app.aaps.pump.lenomed.compat.BleEncryption;
 import app.aaps.pump.lenomed.LenomedPump;
 import app.aaps.pump.lenomed.R;
-import com.google.android.material.timepicker.TimeModel;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import javax.inject.Inject;
@@ -21,7 +21,6 @@ import org.joda.time.DateTime;
 
 /* JADX INFO: compiled from: BigAPSMainInfoInquireResponsePacket.kt */
 /* JADX INFO: loaded from: classes4.dex */
-@Metadata(d1 = {"\u0000F\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0010\u0002\n\u0000\n\u0002\u0010\u0012\n\u0000\n\u0002\u0010\b\n\u0002\b\u0002\n\u0002\u0010\u000e\n\u0002\b\u0003\u0018\u00002\u00020\u0001B\u000f\u0012\u0006\u0010\u0002\u001a\u00020\u0003¢\u0006\u0004\b\u0004\u0010\u0005J\u0010\u0010\u0018\u001a\u00020\u00192\u0006\u0010\u001a\u001a\u00020\u001bH\u0017J\u0010\u0010\u001c\u001a\u00020\u001d2\u0006\u0010\u001e\u001a\u00020\u001dH\u0002R\u001e\u0010\u0006\u001a\u00020\u00078\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\b\u0010\t\"\u0004\b\n\u0010\u000bR\u001e\u0010\f\u001a\u00020\r8\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u000e\u0010\u000f\"\u0004\b\u0010\u0010\u0011R\u001e\u0010\u0012\u001a\u00020\u00138\u0006@\u0006X\u0087.¢\u0006\u000e\n\u0000\u001a\u0004\b\u0014\u0010\u0015\"\u0004\b\u0016\u0010\u0017R\u0014\u0010\u001f\u001a\u00020 X\u0096D¢\u0006\b\n\u0000\u001a\u0004\b!\u0010\"¨\u0006#"}, d2 = {"Lapp/aaps/pump/lenomed/packet/BigAPSMainInfoInquireResponsePacket;", "Lapp/aaps/pump/lenomed/packet/LenomedPacket;", "injector", "Ldagger/android/HasAndroidInjector;", "<init>", "(Ldagger/android/HasAndroidInjector;)V", "lenomedPump", "Lapp/aaps/pump/lenomed/LenomedPump;", "getLenomedPump", "()Lapp/aaps/pump/lenomed/LenomedPump;", "setLenomedPump", "(Lapp/aaps/pump/lenomed/LenomedPump;)V", "sp", "Lapp/aaps/core/interfaces/sharedPreferences/SP;", "getSp", "()Lapp/aaps/core/interfaces/sharedPreferences/SP;", "setSp", "(Lapp/aaps/core/interfaces/sharedPreferences/SP;)V", "rh", "Lapp/aaps/core/interfaces/resources/ResourceHelper;", "getRh", "()Lapp/aaps/core/interfaces/resources/ResourceHelper;", "setRh", "(Lapp/aaps/core/interfaces/resources/ResourceHelper;)V", "handleMessage", "", "data", "", "parseBCD", "", "byte", "friendlyName", "", "getFriendlyName", "()Ljava/lang/String;", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public final class BigAPSMainInfoInquireResponsePacket extends LenomedPacket {
     private final String friendlyName;
 
@@ -99,12 +98,7 @@ public final class BigAPSMainInfoInquireResponsePacket extends LenomedPacket {
     @Override // app.aaps.pump.lenomed.packet.LenomedPacket
     public void handleMessage(byte[] data) {
         Intrinsics.checkNotNullParameter(data, "data");
-        getAapsLogger().debug(LTag.PUMPCOMM, "Raw data: " + ArraysKt.joinToString$default(data, (CharSequence) null, (CharSequence) null, (CharSequence) null, 0, (CharSequence) null, new Function1() { // from class: app.aaps.pump.lenomed.packet.BigAPSMainInfoInquireResponsePacket$$ExternalSyntheticLambda0
-            @Override // kotlin.jvm.functions.Function1
-            public final Object invoke(Object obj) {
-                return BigAPSMainInfoInquireResponsePacket.handleMessage$lambda$0(((Byte) obj).byteValue());
-            }
-        }, 31, (Object) null));
+        getAapsLogger().debug(LTag.PUMPCOMM, "Raw data: " + LenomedSupportKt.bytesToHexString(data, ", "));
         ByteBuffer byteBufferPrefixDecode = LenomedPacket.INSTANCE.prefixDecode(data);
         try {
             getLenomedPump().setSystemRemainBattery(getByteToInt(byteBufferPrefixDecode));
@@ -142,16 +136,16 @@ public final class BigAPSMainInfoInquireResponsePacket extends LenomedPacket {
             LTag lTag2 = LTag.PUMPCOMM;
             int year = getLenomedPump().getYear() + 2000;
             StringCompanionObject stringCompanionObject2 = StringCompanionObject.INSTANCE;
-            String str2 = String.format(TimeModel.ZERO_LEADING_NUMBER_FORMAT, Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getMonth())}, 1));
+            String str2 = String.format("%02d", Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getMonth())}, 1));
             Intrinsics.checkNotNullExpressionValue(str2, "format(...)");
             StringCompanionObject stringCompanionObject3 = StringCompanionObject.INSTANCE;
-            String str3 = String.format(TimeModel.ZERO_LEADING_NUMBER_FORMAT, Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getDay())}, 1));
+            String str3 = String.format("%02d", Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getDay())}, 1));
             Intrinsics.checkNotNullExpressionValue(str3, "format(...)");
             StringCompanionObject stringCompanionObject4 = StringCompanionObject.INSTANCE;
-            String str4 = String.format(TimeModel.ZERO_LEADING_NUMBER_FORMAT, Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getHour())}, 1));
+            String str4 = String.format("%02d", Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getHour())}, 1));
             Intrinsics.checkNotNullExpressionValue(str4, "format(...)");
             StringCompanionObject stringCompanionObject5 = StringCompanionObject.INSTANCE;
-            String str5 = String.format(TimeModel.ZERO_LEADING_NUMBER_FORMAT, Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getMinute())}, 1));
+            String str5 = String.format("%02d", Arrays.copyOf(new Object[]{Integer.valueOf(getLenomedPump().getMinute())}, 1));
             Intrinsics.checkNotNullExpressionValue(str5, "format(...)");
             aapsLogger2.debug(lTag2, "pump time: " + year + "-" + str2 + "-" + str3 + StringUtils.SPACE + str4 + ":" + str5);
             getAapsLogger().debug(LTag.PUMPCOMM, "daily basal limit: " + (((double) ((getByteToInt(byteBufferPrefixDecode) * 256) + getByteToInt(byteBufferPrefixDecode))) / 10.0d) + " U");

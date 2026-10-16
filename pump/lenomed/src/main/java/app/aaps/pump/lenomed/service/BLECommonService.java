@@ -1,6 +1,7 @@
 package app.aaps.pump.lenomed.service;
 
 import android.bluetooth.BluetoothAdapter;
+import app.aaps.pump.lenomed.LenomedSupportKt;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
@@ -17,7 +18,6 @@ import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.os.SystemClock;
 import android.util.SparseArray;
-import androidx.constraintlayout.core.motion.utils.TypedValues;
 import androidx.core.app.ActivityCompat;
 import app.aaps.core.interfaces.logging.AAPSLogger;
 import app.aaps.core.interfaces.logging.LTag;
@@ -32,7 +32,6 @@ import app.aaps.pump.lenomed.LenomedPump;
 import app.aaps.pump.lenomed.packet.LenomedPacket;
 import app.aaps.pump.lenomed.packet.LenomedResponseMessageHashTable;
 import app.aaps.pump.lenomed.packet.LenomedSettingResponseMessageHashTable;
-import ch.qos.logback.core.CoreConstants;
 import io.socket.client.Socket;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
@@ -58,7 +57,6 @@ import org.apache.commons.lang3.StringUtils;
 /* JADX INFO: compiled from: BLECommonService.kt */
 /* JADX INFO: loaded from: classes4.dex */
 @Singleton
-@Metadata(d1 = {"\u0000Ã\u0001\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u0012\n\u0000\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\u0010\b\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0010\u000e\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u000b\n\u0002\b\u0006\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0005\n\u0002\u0010\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u000b\n\u0002\u0010 \n\u0002\u0018\u0002\n\u0002\b\t\n\u0002\u0010\t\n\u0002\b\b\n\u0002\b\u0004\n\u0002\u0018\u0002\n\u0002\b\u0004*\u0001^\b\u0007\u0018\u0000 e2\u00020\u0001:\u0001eBQ\b\u0001\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\u0006\u0010\u0004\u001a\u00020\u0005\u0012\u0006\u0010\u0006\u001a\u00020\u0007\u0012\u0006\u0010\b\u001a\u00020\t\u0012\u0006\u0010\n\u001a\u00020\u000b\u0012\u0006\u0010\f\u001a\u00020\r\u0012\u0006\u0010\u000e\u001a\u00020\u000f\u0012\u0006\u0010\u0010\u001a\u00020\u0011\u0012\u0006\u0010\u0012\u001a\u00020\u0013¢\u0006\u0004\b\u0014\u0010\u0015J\b\u00105\u001a\u00020\u001eH\u0002J\u0018\u00106\u001a\u00020)2\u0006\u00107\u001a\u00020%2\b\u00108\u001a\u0004\u0018\u00010%J\u0006\u00109\u001a\u00020:J\u000e\u0010;\u001a\u00020:2\u0006\u00107\u001a\u00020%J\b\u0010<\u001a\u00020:H\u0007J\u0014\u0010A\u001a\u00020\u001e*\u00020\u00192\u0006\u0010B\u001a\u00020\u0019H\u0002J\u0018\u0010C\u001a\u00020:2\u0006\u0010D\u001a\u0002002\u0006\u0010E\u001a\u00020\u0019H\u0003J\u0010\u0010I\u001a\n\u0012\u0004\u0012\u00020K\u0018\u00010JH\u0002J\b\u0010L\u001a\u00020:H\u0003J\u0018\u0010M\u001a\u00020:2\u0006\u0010N\u001a\u00020'2\u0006\u0010O\u001a\u00020\u001eH\u0003J\u0010\u0010P\u001a\u00020:2\u0006\u0010Q\u001a\u00020\u001eH\u0007J\u0016\u0010R\u001a\u00020:2\u0006\u0010S\u001a\u00020\u001d2\u0006\u0010T\u001a\u00020UJ\u0010\u0010V\u001a\u00020:2\u0006\u0010E\u001a\u00020\u0019H\u0002J\u0010\u0010W\u001a\u00020:2\u0006\u0010E\u001a\u00020\u0019H\u0002J\u001a\u0010X\u001a\u00020:2\u0006\u0010E\u001a\u00020\u00192\b\b\u0002\u0010Y\u001a\u00020)H\u0002J\u0018\u0010Z\u001a\u00020:2\u0006\u0010[\u001a\u00020\u001e2\u0006\u0010\\\u001a\u00020\u001dH\u0002J\u0018\u0010`\u001a\u00020:2\u0006\u0010a\u001a\u00020b2\u0006\u0010E\u001a\u00020\u0019H\u0003J\b\u0010c\u001a\u00020:H\u0007J\b\u0010d\u001a\u00020:H\u0007R\u000e\u0010\u0002\u001a\u00020\u0003X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u0004\u001a\u00020\u0005X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u0006\u001a\u00020\u0007X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\b\u001a\u00020\tX\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\n\u001a\u00020\u000bX\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\f\u001a\u00020\rX\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u000e\u001a\u00020\u000fX\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u0010\u001a\u00020\u0011X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u0012\u001a\u00020\u0013X\u0082\u0004¢\u0006\u0002\n\u0000R\u0014\u0010\u0016\u001a\b\u0012\u0002\b\u0003\u0018\u00010\u0017X\u0082\u000e¢\u0006\u0002\n\u0000R\u0010\u0010\u0018\u001a\u0004\u0018\u00010\u0019X\u0082\u000e¢\u0006\u0002\n\u0000RB\u0010\u001a\u001a6\u0012\u0016\u0012\u0014\u0012\u0004\u0012\u00020\u001d\u0012\u0004\u0012\u00020\u001e\u0012\u0004\u0012\u00020\u00190\u001c0\u001bj\u001a\u0012\u0016\u0012\u0014\u0012\u0004\u0012\u00020\u001d\u0012\u0004\u0012\u00020\u001e\u0012\u0004\u0012\u00020\u00190\u001c`\u001fX\u0082\u0004¢\u0006\u0002\n\u0000R\u0016\u0010 \u001a\u0004\u0018\u00010!8BX\u0082\u0004¢\u0006\u0006\u001a\u0004\b\"\u0010#R\u0010\u0010$\u001a\u0004\u0018\u00010%X\u0082\u000e¢\u0006\u0002\n\u0000R\u0010\u0010&\u001a\u0004\u0018\u00010'X\u0082\u000e¢\u0006\u0002\n\u0000R\u001a\u0010(\u001a\u00020)X\u0086\u000e¢\u0006\u000e\n\u0000\u001a\u0004\b(\u0010*\"\u0004\b+\u0010,R\u001a\u0010-\u001a\u00020)X\u0086\u000e¢\u0006\u000e\n\u0000\u001a\u0004\b-\u0010*\"\u0004\b.\u0010,R\u0010\u0010/\u001a\u0004\u0018\u000100X\u0082\u000e¢\u0006\u0002\n\u0000R\u0010\u00101\u001a\u0004\u0018\u000100X\u0082\u000e¢\u0006\u0002\n\u0000R\u000e\u00102\u001a\u00020\u001eX\u0082\u000e¢\u0006\u0002\n\u0000R\u000e\u00103\u001a\u000204X\u0082\u0004¢\u0006\u0002\n\u0000R\u0014\u0010=\u001a\u00020>X\u0082\u0004¢\u0006\b\n\u0000\u0012\u0004\b?\u0010@R\u0014\u0010F\u001a\u0002008BX\u0082\u0004¢\u0006\u0006\u001a\u0004\bG\u0010HR\u0010\u0010]\u001a\u00020^X\u0082\u0004¢\u0006\u0004\n\u0002\u0010_¨\u0006f"}, d2 = {"Lapp/aaps/pump/lenomed/service/BLECommonService;", "", "injector", "Ldagger/android/HasAndroidInjector;", "aapsLogger", "Lapp/aaps/core/interfaces/logging/AAPSLogger;", "rh", "Lapp/aaps/core/interfaces/resources/ResourceHelper;", CoreConstants.CONTEXT_SCOPE_VALUE, "Landroid/content/Context;", "rxBus", "Lapp/aaps/core/interfaces/rx/bus/RxBus;", "lenomedResponseMessageHashTable", "Lapp/aaps/pump/lenomed/packet/LenomedResponseMessageHashTable;", "lenomedSettingResponseMessageHashTable", "Lapp/aaps/pump/lenomed/packet/LenomedSettingResponseMessageHashTable;", "lenomedPump", "Lapp/aaps/pump/lenomed/LenomedPump;", "uiInteraction", "Lapp/aaps/core/interfaces/ui/UiInteraction;", "<init>", "(Ldagger/android/HasAndroidInjector;Lapp/aaps/core/interfaces/logging/AAPSLogger;Lapp/aaps/core/interfaces/resources/ResourceHelper;Landroid/content/Context;Lapp/aaps/core/interfaces/rx/bus/RxBus;Lapp/aaps/pump/lenomed/packet/LenomedResponseMessageHashTable;Lapp/aaps/pump/lenomed/packet/LenomedSettingResponseMessageHashTable;Lapp/aaps/pump/lenomed/LenomedPump;Lapp/aaps/core/interfaces/ui/UiInteraction;)V", "scheduledDisconnection", "Ljava/util/concurrent/ScheduledFuture;", "processedMessageByte", "", "mSendQueue", "Ljava/util/ArrayList;", "Lkotlin/Triple;", "Lapp/aaps/pump/lenomed/packet/LenomedPacket;", "", "Lkotlin/collections/ArrayList;", "bluetoothAdapter", "Landroid/bluetooth/BluetoothAdapter;", "getBluetoothAdapter", "()Landroid/bluetooth/BluetoothAdapter;", "connectDeviceName", "", "bluetoothGatt", "Landroid/bluetooth/BluetoothGatt;", "isConnected", "", "()Z", "setConnected", "(Z)V", "isConnecting", "setConnecting", "uartIndicate", "Landroid/bluetooth/BluetoothGattCharacteristic;", "uartWrite", "mSequence", "responseBuffer", "Ljava/io/ByteArrayOutputStream;", "getMsgSequence", Socket.EVENT_CONNECT, TypedValues.TransitionType.S_FROM, "address", "stopConnecting", "", Socket.EVENT_DISCONNECT, "close", "mGattCallback", "Landroid/bluetooth/BluetoothGattCallback;", "getMGattCallback$annotations", "()V", "indexOfSequence", "sequence", "writeCharacteristicNoResponse", "characteristic", "data", "uartWriteBTGattChar", "getUartWriteBTGattChar", "()Landroid/bluetooth/BluetoothGattCharacteristic;", "getSupportedGattServices", "", "Landroid/bluetooth/BluetoothGattService;", "findCharacteristic", "onConnectionStateChangeSynchronized", "gatt", "newState", "setRequestMtu", "mtu", "sendMessage", "message", "waitMillis", "", "processResponseMessage", "processSettingResponseMessage", "processMessage", "isSetting", "matchAndNotifyQueue", "receivedCommand", "handler", "mScanCallback", "app/aaps/pump/lenomed/service/BLECommonService$mScanCallback$1", "Lapp/aaps/pump/lenomed/service/BLECommonService$mScanCallback$1;", "parseBroadcastPacket", "device", "Landroid/bluetooth/BluetoothDevice;", "startBroadcastScan", "stopBroadcastScan", "Companion", "lenomed_fullRelease"}, k = 1, mv = {2, 2, 0}, xi = 48)
 public final class BLECommonService {
     private static final String CHARACTERISTIC_CONFIG_UUID = "00002902-0000-1000-8000-00805f9b34fb";
     private static final byte[] EBT_END_MARKER = {69, 66, 84};
@@ -76,7 +74,7 @@ public final class BLECommonService {
     private final LenomedResponseMessageHashTable lenomedResponseMessageHashTable;
     private final LenomedSettingResponseMessageHashTable lenomedSettingResponseMessageHashTable;
     private final BluetoothGattCallback mGattCallback;
-    private final BLECommonService$mScanCallback$1 mScanCallback;
+    private final android.bluetooth.le.ScanCallback mScanCallback;
     private final ArrayList<Triple<LenomedPacket, Integer, byte[]>> mSendQueue;
     private int mSequence;
     private byte[] processedMessageByte;
@@ -116,20 +114,20 @@ public final class BLECommonService {
             @Override // android.bluetooth.BluetoothGattCallback
             public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
                 Intrinsics.checkNotNullParameter(gatt, "gatt");
-                this.this$0.onConnectionStateChangeSynchronized(gatt, newState);
+                BLECommonService.this.onConnectionStateChangeSynchronized(gatt, newState);
             }
 
             @Override // android.bluetooth.BluetoothGattCallback
             public void onServicesDiscovered(BluetoothGatt gatt, int status) {
                 Intrinsics.checkNotNullParameter(gatt, "gatt");
-                this.this$0.aapsLogger.debug(LTag.PUMPBTCOMM, "Services discovered");
+                BLECommonService.this.aapsLogger.debug(LTag.PUMPBTCOMM, "Services discovered");
                 if (status == 0) {
-                    this.this$0.findCharacteristic();
+                    BLECommonService.this.findCharacteristic();
                     SystemClock.sleep(1600L);
-                    this.this$0.setConnected(true);
-                    this.this$0.setConnecting(false);
-                    ArrayList arrayList = this.this$0.mSendQueue;
-                    BLECommonService bLECommonService = this.this$0;
+                    BLECommonService.this.setConnected(true);
+                    BLECommonService.this.setConnecting(false);
+                    ArrayList arrayList = BLECommonService.this.mSendQueue;
+                    BLECommonService bLECommonService = BLECommonService.this;
                     synchronized (arrayList) {
                         bLECommonService.aapsLogger.debug(LTag.PUMPBTCOMM, "Services discovered mSendQueue clear start size:" + bLECommonService.mSendQueue.size());
                         bLECommonService.mSendQueue.clear();
@@ -146,14 +144,18 @@ public final class BLECommonService {
                 Intrinsics.checkNotNullParameter(gatt, "gatt");
                 Intrinsics.checkNotNullParameter(characteristic, "characteristic");
                 byte[] value = characteristic.getValue();
-                AAPSLogger aAPSLogger = this.this$0.aapsLogger;
+                AAPSLogger aAPSLogger = BLECommonService.this.aapsLogger;
                 LTag lTag = LTag.PUMPBTCOMM;
                 LenomedPacket.Companion companion = LenomedPacket.INSTANCE;
                 Intrinsics.checkNotNull(value);
                 aAPSLogger.debug(lTag, "(Response) Characteristic changed: " + companion.toHex(value));
-                this.this$0.responseBuffer.write(value);
-                byte[] byteArray = this.this$0.responseBuffer.toByteArray();
-                BLECommonService bLECommonService = this.this$0;
+                try {
+                    BLECommonService.this.responseBuffer.write(value);
+                } catch (java.io.IOException e) {
+                    BLECommonService.this.aapsLogger.error(LTag.PUMPBTCOMM, "Failed appending to response buffer", e);
+                }
+                byte[] byteArray = BLECommonService.this.responseBuffer.toByteArray();
+                BLECommonService bLECommonService = BLECommonService.this;
                 Intrinsics.checkNotNull(byteArray);
                 int iIndexOfSequence = bLECommonService.indexOfSequence(byteArray, BLECommonService.EBT_END_MARKER);
                 if (iIndexOfSequence != -1) {
@@ -164,31 +166,31 @@ public final class BLECommonService {
                         Intrinsics.checkNotNullExpressionValue(bArrCopyOf, "copyOf(...)");
                     }
                     if (bArrCopyOf.length == 0) {
-                        this.this$0.aapsLogger.debug(LTag.PUMPBTCOMM, "Empty packet before EBT, ignored");
+                        BLECommonService.this.aapsLogger.debug(LTag.PUMPBTCOMM, "Empty packet before EBT, ignored");
                     } else {
-                        this.this$0.aapsLogger.debug(LTag.PUMPBTCOMM, "Complete response packet received (" + bArrCopyOf.length + " bytes): " + LenomedPacket.INSTANCE.toHex(bArrCopyOf));
+                        BLECommonService.this.aapsLogger.debug(LTag.PUMPBTCOMM, "Complete response packet received (" + bArrCopyOf.length + " bytes): " + LenomedPacket.INSTANCE.toHex(bArrCopyOf));
                         if ((bArrCopyOf.length == 0) || ((b = bArrCopyOf[0]) != -73 && b != -78)) {
-                            AAPSLogger aAPSLogger2 = this.this$0.aapsLogger;
+                            AAPSLogger aAPSLogger2 = BLECommonService.this.aapsLogger;
                             LTag lTag2 = LTag.PUMPBTCOMM;
                             StringCompanionObject stringCompanionObject = StringCompanionObject.INSTANCE;
                             String str = String.format("%02X", Arrays.copyOf(new Object[]{Byte.valueOf(bArrCopyOf[0])}, 1));
                             Intrinsics.checkNotNullExpressionValue(str, "format(...)");
                             aAPSLogger2.debug(lTag2, "Command 0x" + str + " → normal response");
-                            this.this$0.processResponseMessage(bArrCopyOf);
+                            BLECommonService.this.processResponseMessage(bArrCopyOf);
                         } else {
-                            AAPSLogger aAPSLogger3 = this.this$0.aapsLogger;
+                            AAPSLogger aAPSLogger3 = BLECommonService.this.aapsLogger;
                             LTag lTag3 = LTag.PUMPBTCOMM;
                             StringCompanionObject stringCompanionObject2 = StringCompanionObject.INSTANCE;
                             String str2 = String.format("%02X", Arrays.copyOf(new Object[]{Byte.valueOf(bArrCopyOf[0])}, 1));
                             Intrinsics.checkNotNullExpressionValue(str2, "format(...)");
                             aAPSLogger3.debug(lTag3, "Command 0x" + str2 + " → treat as Setting Response");
-                            this.this$0.processSettingResponseMessage(bArrCopyOf);
+                            BLECommonService.this.processSettingResponseMessage(bArrCopyOf);
                         }
                     }
-                    this.this$0.responseBuffer.reset();
+                    BLECommonService.this.responseBuffer.reset();
                     int length = iIndexOfSequence + BLECommonService.EBT_END_MARKER.length;
                     if (length < byteArray.length) {
-                        this.this$0.responseBuffer.write(byteArray, length, byteArray.length - length);
+                        BLECommonService.this.responseBuffer.write(byteArray, length, byteArray.length - length);
                     }
                 }
             }
@@ -197,7 +199,7 @@ public final class BLECommonService {
             public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
                 Intrinsics.checkNotNullParameter(gatt, "gatt");
                 Intrinsics.checkNotNullParameter(characteristic, "characteristic");
-                AAPSLogger aAPSLogger = this.this$0.aapsLogger;
+                AAPSLogger aAPSLogger = BLECommonService.this.aapsLogger;
                 LTag lTag = LTag.PUMPBTCOMM;
                 LenomedPacket.Companion companion = LenomedPacket.INSTANCE;
                 byte[] value = characteristic.getValue();
@@ -208,7 +210,7 @@ public final class BLECommonService {
             @Override // android.bluetooth.BluetoothGattCallback
             public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
                 super.onMtuChanged(gatt, mtu, status);
-                this.this$0.aapsLogger.debug(LTag.PUMPBTCOMM, "MTU changed: " + mtu);
+                BLECommonService.this.aapsLogger.debug(LTag.PUMPBTCOMM, "MTU changed: " + mtu);
             }
         };
         this.mScanCallback = new ScanCallback() { // from class: app.aaps.pump.lenomed.service.BLECommonService$mScanCallback$1
@@ -221,7 +223,7 @@ public final class BLECommonService {
                 if (scanRecord == null || (name = device.getName()) == null) {
                     return;
                 }
-                if (StringsKt.startsWith$default(name, "Ai", false, 2, (Object) null) && name.length() == 11) {
+                if (name.startsWith("Ai") && name.length() == 11) {
                     String strSubstring = name.substring(2);
                     Intrinsics.checkNotNullExpressionValue(strSubstring, "substring(...)");
                     String str = strSubstring;
@@ -238,7 +240,7 @@ public final class BLECommonService {
                     for (int i2 = 0; i2 < size; i2++) {
                         byte[] bArrValueAt = manufacturerSpecificData.valueAt(i2);
                         if (bArrValueAt != null && bArrValueAt.length >= 4) {
-                            BLECommonService bLECommonService = this.this$0;
+                            BLECommonService bLECommonService = BLECommonService.this;
                             Intrinsics.checkNotNull(device);
                             bLECommonService.parseBroadcastPacket(device, bArrValueAt);
                             return;
@@ -249,7 +251,7 @@ public final class BLECommonService {
 
             @Override // android.bluetooth.le.ScanCallback
             public void onScanFailed(int errorCode) {
-                this.this$0.aapsLogger.error(LTag.PUMPBTCOMM, "Broadcast scan failed with error: " + errorCode);
+                BLECommonService.this.aapsLogger.error(LTag.PUMPBTCOMM, "Broadcast scan failed with error: " + errorCode);
             }
         };
     }
@@ -404,12 +406,7 @@ public final class BLECommonService {
     }
 
     private final synchronized void writeCharacteristicNoResponse(final BluetoothGattCharacteristic characteristic, final byte[] data) {
-        new Thread(new Runnable() { // from class: app.aaps.pump.lenomed.service.BLECommonService$$ExternalSyntheticLambda1
-            @Override // java.lang.Runnable
-            public final void run() {
-                BLECommonService.writeCharacteristicNoResponse$lambda$0(this.f$0, characteristic, data);
-            }
-        }).start();
+        new Thread(() -> BLECommonService.writeCharacteristicNoResponse$lambda$0(BLECommonService.this, characteristic, data)).start();
         SystemClock.sleep(WRITE_DELAY_MILLIS);
     }
 
@@ -546,7 +543,7 @@ public final class BLECommonService {
         this.aapsLogger.debug(LTag.PUMPBTCOMM, "sendMessage() After send, mSendQueue.size: " + this.mSendQueue.size());
         synchronized (message) {
             try {
-                ConcurrencyKt.waitMillis$default(message, waitMillis, 0, 2, null);
+                message.wait(waitMillis);
             } catch (InterruptedException e) {
                 this.aapsLogger.error(LTag.PUMPBTCOMM, "sendMessage InterruptedException: " + e.getMessage(), e);
             }
@@ -642,12 +639,7 @@ public final class BLECommonService {
     	at jadx.core.dex.visitors.typeinference.FixTypesVisitor.visit(FixTypesVisitor.java:94)
      */
     public final void parseBroadcastPacket(BluetoothDevice device, byte[] data) {
-        this.aapsLogger.debug(LTag.PUMPBTCOMM, "🚨 Broadcast raw data from " + device.getName() + " (" + data.length + " bytes): " + ArraysKt.joinToString$default(data, (CharSequence) StringUtils.SPACE, (CharSequence) null, (CharSequence) null, 0, (CharSequence) null, new Function1() { // from class: app.aaps.pump.lenomed.service.BLECommonService$$ExternalSyntheticLambda0
-            @Override // kotlin.jvm.functions.Function1
-            public final Object invoke(Object obj) {
-                return BLECommonService.parseBroadcastPacket$lambda$0(((Byte) obj).byteValue());
-            }
-        }, 30, (Object) null));
+        this.aapsLogger.debug(LTag.PUMPBTCOMM, "🚨 Broadcast raw data from " + device.getName() + " (" + data.length + " bytes): " + LenomedSupportKt.bytesToHexString(data, " "));
         StringBuilder sb = new StringBuilder("Byte index: ");
         int length = data.length;
         for (int i = 0; i < length; i++) {
@@ -665,13 +657,13 @@ public final class BLECommonService {
             this.aapsLogger.warn(LTag.PUMPBTCOMM, "Broadcast data too short, ignored");
             return;
         }
-        byte[] byteArray = CollectionsKt.toByteArray(ArraysKt.takeLast(data, 4));
+        byte[] byteArray = java.util.Arrays.copyOfRange(data, data.length - 4, data.length);
         int i2 = byteArray[0] & 255;
         double d = ((double) (((byteArray[2] & 255) * 256) + (byteArray[1] & 255))) / 100.0d;
         byte b = byteArray[3];
         boolean z = (b & 128) != 0;
         boolean z2 = (b & 64) != 0;
-        ?? r9 = (b & 32) != 0 ? 1 : 0;
+        boolean r9 = (b & 32) != 0;
         boolean z3 = (b & 16) != 0;
         int i3 = b & 15;
         this.aapsLogger.debug(LTag.PUMPBTCOMM, "🚨 Ai Pump Broadcast → " + device.getName() + " | Battery=" + i2 + "% | Insulin=" + d + " U | TempBasal=" + (z ? "ON" : "OFF") + " | Infusion=" + (z2 ? "OFF" : "ON") + " | Blocked=" + ((boolean) r9) + " | Error=" + z3 + " | ProtocolVer=" + i3);
@@ -682,7 +674,7 @@ public final class BLECommonService {
         this.lenomedPump.setSystemRemainBattery(i2);
         this.lenomedPump.setSystemRemainInsulin(d);
         this.lenomedPump.setInfusionEnabled(!z2);
-        this.lenomedPump.setBlockStatus(r9);
+        this.lenomedPump.setBlockStatus(r9 ? 1 : 0);
         this.lenomedPump.setBuildVersion(i3);
     }
 

@@ -144,4 +144,41 @@
     <string name="key_lenomed_pumpserial">pumpserial</string>
     <string name="key_pump_lenomed_address">key_pump_lenomedaddress</string>
     <string name="key_pump_lenomed_name">key_pump_lenomedname</string>
+
+    <!-- Status / progress strings the decompiled driver references. These lived in the
+         pump module's strings.xml of the build the driver came from; reproduced here so
+         the module owns its own resources. -->
+    <string name="gettingpumptime">Getting pump time</string>
+    <string name="gettingpumpsettings">Getting pump settings</string>
+    <string name="largetimedifftitle">Large time difference</string>
+    <string name="largetimediff">Time difference between phone and pump is too large</string>
+    <string name="pumpversion">Version</string>
+    <string name="approachingdailylimit">Approaching daily insulin limit</string>
+    <string name="settingtempbasal">Setting temp basal</string>
+    <string name="stoppingtempbasal">Stopping temp basal</string>
+    <string name="settingextendedbolus">Setting extended bolus</string>
+    <string name="stoppingextendedbolus">Stopping extended bolus</string>
+    <string name="updatingbasalrates">Updating basal rates</string>
+    <string name="startingbolus">Starting bolus</string>
+    <string name="bolus_delivered">Bolus delivered</string>
+    <string name="bolus_failed">Bolus failed</string>
+    <!-- The dev branch dropped these shared strings from core/ui; the driver UI still needs them. -->
+    <string name="reservoir_value">%1$.2f U (%2$d U)</string>
+    <string name="reservoir_1_value">%1$+.2f U</string>
+    <string name="pump_base_basal_rate">%1$.2f U/h</string>
+    <string name="save_success">Saved successfully</string>
+    <string name="pumperror">Pump error</string>
+
+    <!-- Layouts carried over verbatim from the 4.4.2.6 xindana build still point at these
+         keys. They came from pump/embecta and pump/diaconn, both of which upstream has
+         since renamed or dropped, so the module carries its own copies (English defaults
+         taken from the decoded APK's values/strings.xml). -->
+    <string name="embecta_bluetooth_status">Bluetooth Status</string>
+    <string name="embecta_daily_basal_total">Daily Basal Total</string>
+    <string name="embecta_daily_bolus_total">Daily Bolus Total</string>
+    <string name="pump_firmware_label">Firmware</string>
+    <string name="diaconn_no_device_available">No Device available</string>
+    <string name="diaconn_g8_user_options">USER OPTIONS</string>
+    <string name="reload">Reload</string>
+    <string name="stats">Stats</string>
 </resources>
