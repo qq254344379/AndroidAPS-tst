@@ -227,7 +227,7 @@ class RunningConfigurationPublisher(
      * inter-module dependency, so this master-local block is attached here. Only Active entries are
      * exposed; the client-control switch travels in syncedPrefs like every other cold key.
      */
-    private fun buildAuthorizedClientsRoster(): JsonObject {
+    private suspend fun buildAuthorizedClientsRoster(): JsonObject {
         val activeClients = authorizedRepository.current(dateUtil.now())
             .filter { it.state == ClientState.Active }
         return buildJsonObject {
