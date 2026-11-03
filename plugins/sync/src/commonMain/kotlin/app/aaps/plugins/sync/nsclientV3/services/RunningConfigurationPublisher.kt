@@ -51,8 +51,9 @@ import kotlin.concurrent.Volatile
  *    clients. Triggered by [RunningConfigurationKeys.observableKeys] changes, plugin switches
  *    ([EventConfigBuilderChange]) and authorized-client changes; debounced [COLD_DEBOUNCE_MS]. One that could not be
  *    published is tried again later (`publishColdOrRetry`).
- *  - Hot ([SettingsIdentifiers.STATE]): the active scene and the "time to eat" timer. Triggered by
- *    [RunningConfigurationKeys.hotKeys] (scene lifecycle, timer changes); debounced [HOT_DEBOUNCE_MS].
+ *  - Hot ([SettingsIdentifiers.STATE]): the active scene, the "time to eat" timer, plus the cold
+ *    block (pump / syncedPrefs / version / roster) — see [publishHot] for the backward-compat reason.
+ *    Triggered by [RunningConfigurationKeys.hotKeys] (scene lifecycle, timer changes); debounced [HOT_DEBOUNCE_MS].
  *
  * Document shape (both): `{ schemaVersion: 2, signed: "<{ signedAt, runningConfig } as text>", signature: <…> }`,
  * signed by [MasterSigningKey] and opened on a client by [MasterDocVerifier], upserted via `updateSettings`.
@@ -196,30 +197,44 @@ class RunningConfigurationPublisher(
             aapsLogger.debug(LTag.NSCLIENT, "Running configuration empty: the pump is not initialized yet")
             return false
         }
-        // Append the authorized-clients roster directly on the runningConfig doc — the
-        // canonical RunningConfiguration plugin (in :plugins:configuration) cannot reach
-        // AuthorizedClientsRepository without a new inter-module dependency, so we attach
-        // this master-local block here instead. Only Active entries are exposed.
-        val activeClients = authorizedRepository.current(dateUtil.now())
-            .filter { it.state == ClientState.Active }
-        // kotlinx JsonObject is immutable, so the doc is rebuilt instead of edited in place: the original
-        // keys in their original order, and authorizedClients appended last. The client-control switch
-        // travels in syncedPrefs like every other cold key; nothing here changes it. Hardened mode keeps
-        // the WebSocket on while the switch is on, so "on" always means the master can serve commands.
         val payload = buildJsonObject {
             base.forEach { (key, value) -> put(key, value) }
-            put("authorizedClients", buildJsonObject {
-                put("clientIds", JsonArray(activeClients.map { JsonPrimitive(it.clientId) }))
-                // Each client reads its own role to know which controls to show; the master enforces it anyway.
-                put("roles", buildJsonObject { activeClients.forEach { put(it.clientId, it.clientRole.name) } })
-            })
+            put("authorizedClients", buildAuthorizedClientsRoster())
         }
         return putSettings(SettingsIdentifiers.COLD, payload)
     }
 
-    // Hot doc: the active scene and the eat timer. Small, and sent on every change of either.
+    // Hot doc: the active scene and the eat timer — plus the cold block. 4.0.0-era clients read the
+    // master's closed-loop state (pump, the client-control switch, the roster) from the STATE doc's
+    // runningConfig and showed nothing while it stayed empty; newer clients read only
+    // activeScene/eatReminder and ignore the rest (kotlinx ignores unknown keys). The doc stays as
+    // small as before while the pump is not initialized yet: only the hot fields go out then.
     private suspend fun publishHot() {
-        putSettings(SettingsIdentifiers.STATE, runningConfiguration.hotConfiguration())
+        val payload = buildJsonObject {
+            runningConfiguration.hotConfiguration().forEach { (key, value) -> put(key, value) }
+            val cold = runningConfiguration.configuration()
+            if (cold.isNotEmpty()) {
+                cold.forEach { (key, value) -> put(key, value) }
+                put("authorizedClients", buildAuthorizedClientsRoster())
+            }
+        }
+        putSettings(SettingsIdentifiers.STATE, payload)
+    }
+
+    /**
+     * The Active roster block appended to both running-config docs. The canonical RunningConfiguration
+     * plugin (in :plugins:configuration) cannot reach AuthorizedClientsRepository without a new
+     * inter-module dependency, so this master-local block is attached here. Only Active entries are
+     * exposed; the client-control switch travels in syncedPrefs like every other cold key.
+     */
+    private fun buildAuthorizedClientsRoster(): JsonObject {
+        val activeClients = authorizedRepository.current(dateUtil.now())
+            .filter { it.state == ClientState.Active }
+        return buildJsonObject {
+            put("clientIds", JsonArray(activeClients.map { JsonPrimitive(it.clientId) }))
+            // Each client reads its own role to know which controls to show; the master enforces it anyway.
+            put("roles", buildJsonObject { activeClients.forEach { put(it.clientId, it.clientRole.name) } })
+        }
     }
 
     /** True when Nightscout took the doc. */
