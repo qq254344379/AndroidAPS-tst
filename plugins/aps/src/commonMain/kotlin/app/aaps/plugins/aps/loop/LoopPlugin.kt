@@ -408,6 +408,8 @@ class LoopPlugin(
 
     override suspend fun verifyZeroDelivery() = runningModeReconciler.verifyZeroDelivery()
 
+    override suspend fun heartbeatDefaultLoop() = runningModeReconciler.heartbeatDefaultLoop()
+
     /**
      * The body of [runningModePreCheck]. Call it only with [reconcileMutex] held.
      *

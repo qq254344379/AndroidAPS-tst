@@ -77,6 +77,14 @@ interface Loop {
     suspend fun verifyZeroDelivery()
 
     /**
+     * Periodic keep-alive for the default closed loop. The master's default mode is implicit - no
+     * RunningMode row is stored while the loop simply runs. This materializes (and renews) a short
+     * temporary CLOSED_LOOP record so followers and the overview chip can show the mode. No-op on
+     * devices that do not drive the pump and when an explicit mode is active.
+     */
+    suspend fun heartbeatDefaultLoop() {}
+
+    /**
      * Timestamp of last loop run triggered by new BG
      */
     var lastBgTriggeredRun: Long

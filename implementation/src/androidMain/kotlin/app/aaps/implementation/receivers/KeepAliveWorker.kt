@@ -161,6 +161,8 @@ class KeepAliveWorker(
         checkPump()
         // Retries a missing zero TBR while the pump is disconnected - nothing else does, as the loop is paused
         loop.verifyZeroDelivery()
+        // Keeps the implicit default closed loop visible to followers (Nightscout / client chip)
+        loop.heartbeatDefaultLoop()
         checkAPS()
         workerDbStatus()
         workerActiveStatus()

@@ -5,6 +5,10 @@ import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TB
 import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.data.time.T
+import app.aaps.core.data.ue.Action
+import app.aaps.core.data.ue.Sources
+import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
@@ -213,6 +217,70 @@ class RunningModeReconciler(
     }
 
     /**
+     * Keeps a temporary CLOSED_LOOP record alive while the loop runs in its default mode.
+     *
+     * The default mode (RM.DEFAULT_MODE == CLOSED_LOOP) is implicit: with no RunningMode row stored
+     * the master runs a closed loop but writes nothing, so followers and the overview chip read
+     * `getRunningModeActiveAtOrNull` and see no mode at all — on the client that is the missing
+     * "来自手机的消息" chip. This heartbeat materializes the implicit default as a short temporary
+     * CLOSED_LOOP row and renews it before it expires, so the mode reaches Nightscout and from there
+     * the client.
+     *
+     * Never overrides an explicit mode: a non-null active record (a suspension, a disconnect, a
+     * permanent mode the user chose) is left untouched. When the master really stops (loop plugin
+     * disabled, app killed) the heartbeat stops being renewed and the record expires within
+     * [HEARTBEAT_WINDOW_MS], so followers fall back to "unknown" instead of a stale closed loop.
+     *
+     * Called periodically by KeepAliveWorker like [verifyZeroDelivery]. Does nothing until [start]
+     * has run on the device that drives the pump, and nothing when no loop plugin is enabled.
+     */
+    suspend fun heartbeatDefaultLoop() {
+        if (observerJob == null) return
+        mutex.withLock {
+            val now = dateUtil.now()
+            val active = persistenceLayer.getRunningModeActiveAtOrNull(now)
+            if (active != null) {
+                // An explicit mode is active. Renew only our own heartbeat: KeepAlive jitter can
+                // delay the next call past the end of the record.
+                if (active.mode == RM.Mode.CLOSED_LOOP && active.duration > 0L &&
+                    now >= active.timestamp + active.duration - RENEW_BEFORE_END_MS
+                ) {
+                    aapsLogger.info(
+                        LTag.APS,
+                        "RunningModeReconciler: renewing heartbeat CLOSED_LOOP (id=${active.id}, remaining=${(active.timestamp + active.duration - now) / 60_000L}min)"
+                    )
+                    persistenceLayer.insertOrUpdateRunningMode(
+                        runningMode = active.copy(duration = HEARTBEAT_WINDOW_MS),
+                        action = Action.CLOSED_LOOP_MODE,
+                        source = Sources.Loop,
+                        listValues = listOf(ValueWithUnit.SimpleString("Default loop heartbeat renewal"))
+                    )
+                }
+                return
+            }
+            // No active record: the loop runs in its default mode. Materialize it for followers,
+            // but only when a loop plugin is actually enabled (virtual-pump / no-loop setups must
+            // not fake a closed loop).
+            if (activePlugin.getSpecificPluginsListByInterface(Loop::class).none { it.isEnabled() }) {
+                aapsLogger.debug(LTag.APS, "RunningModeReconciler: heartbeat skipped - no enabled loop plugin")
+                return
+            }
+            aapsLogger.info(LTag.APS, "RunningModeReconciler: materializing default closed loop as temporary CLOSED_LOOP")
+            persistenceLayer.insertOrUpdateRunningMode(
+                runningMode = RM(
+                    timestamp = now,
+                    mode = RM.Mode.CLOSED_LOOP,
+                    autoForced = false,
+                    duration = HEARTBEAT_WINDOW_MS
+                ),
+                action = Action.CLOSED_LOOP_MODE,
+                source = Sources.Loop,
+                listValues = listOf(ValueWithUnit.SimpleString("Default loop heartbeat"))
+            )
+        }
+    }
+
+    /**
      * Periodic check while a zero-delivery mode (DISCONNECTED_PUMP / SUPER_BOLUS) is active.
      *
      * Sends the zero TBR again when it is missing, or when it ends within [RENEW_BEFORE_END_MS] while
@@ -405,6 +473,13 @@ class RunningModeReconciler(
         // The checks come about every 5 minutes (KeepAlive), and can be late. Renewing a zero TBR
         // that ends within 15 minutes means the pump never gets back to basal between two checks.
         private val RENEW_BEFORE_END_MS = T.mins(15).msecs()
+
+        // The default closed loop is implicit - no RunningMode row is stored while the loop simply
+        // runs. The heartbeat materializes it as a temporary CLOSED_LOOP and renews it before it
+        // expires. 15 minutes: long enough to bridge a skipped KeepAlive (5-min interval with
+        // jitter), short enough that a master that really stopped loses the record within ~3
+        // intervals and followers fall back to "unknown" instead of a stale closed loop.
+        private val HEARTBEAT_WINDOW_MS = T.mins(15).msecs()
 
         // Two more checks try to send the zero TBR again before the alarm rings.
         private val ALARM_AFTER_MS = T.mins(10).msecs()
