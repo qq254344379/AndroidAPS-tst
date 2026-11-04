@@ -171,6 +171,11 @@ class RunningConfigurationPublisher(
      */
     private suspend fun CoroutineScope.publishColdOrRetry() {
         if (publishCold()) {
+            // The hot doc carries the cold block too (pump, syncedPrefs, roster). At startup the pump
+            // is not initialized yet, so the first publishHot() goes out with an empty runningConfig;
+            // once the cold config becomes available (pump initialized), republish the hot doc right
+            // away, or 4.0.0-era clients keep reading the empty startup hot doc and show no state.
+            publishHot()
             coldRetry?.cancel()
             coldRetry = null
             coldRetryDelayMs = COLD_RETRY_FIRST_MS
