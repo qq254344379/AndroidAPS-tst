@@ -1,7 +1,7 @@
 package app.aaps.core.data.model
 
-# -SMB build: BG-source gate lifted on purpose. Every source reports advanced-filtering support,
-# so SMB always / SMB after carbs stay available for any CGM, follower or manual entry.
+// -SMB build: BG-source gate lifted on purpose. Every source reports advanced-filtering support,
+// so SMB always / SMB after carbs stay available for any CGM, follower or manual entry.
 fun SourceSensor.advancedFilteringSupported(): Boolean = true
 
 /**
