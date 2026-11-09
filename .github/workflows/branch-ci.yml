@@ -222,6 +222,16 @@ jobs:
           mv app/build/outputs/apk/${{ env.VARIANT_FLAVOR }}/${{ env.VARIANT_TYPE }}/*.apk aaps-${{ env.VERSION }}${{ env.VERSION_SUFFIX }}.apk
           mv wear/build/outputs/apk/${{ env.VARIANT_FLAVOR }}/${{ env.VARIANT_TYPE }}/*.apk aaps-wear-${{ env.VERSION }}${{ env.VERSION_SUFFIX }}.apk
 
+      - name: Upload APK artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aaps-${{ env.VERSION }}${{ env.VERSION_SUFFIX }}-apk
+          path: |
+            aaps-*.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload APKs to Google Drive
         run: |
           set -e
