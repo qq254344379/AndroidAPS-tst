@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Reproduced from the 4.4.2.6 xindana build. Both styles were defined in core/ui
+         there; the dev branch has no equivalent, and the carried-over layouts still apply
+         them by name. Self-contained: the upstream backgroundTint referenced the shared
+         @color/ctrl_btn_bg_color_selector_grey, which no longer exists, and textSize was
+         declared in dp (a unit AAPT ignores for text), so both are corrected here. -->
+    <style name="GrayButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:gravity">center</item>
+        <item name="android:layout_gravity">center_vertical</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:layout_marginStart">@dimen/lenomed_gray_button_margin_horizontal</item>
+        <item name="android:layout_marginEnd">@dimen/lenomed_gray_button_margin_horizontal</item>
+        <item name="android:elevation">8.0dp</item>
+        <item name="android:backgroundTint">@color/lenomed_gray_button_bg</item>
+    </style>
+
+    <style name="ButtonSmallFontStyle" parent="@style/GrayButton">
+        <item name="android:textSize">11sp</item>
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="android:letterSpacing">0.0</item>
+    </style>
+</resources>

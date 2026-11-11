@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/infusion_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/lenomed_infusion_switch" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/bluetooth_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/lenomed_bluetooth_switch" />
+
+        <app.aaps.pump.lenomed.compat.NumberPickerCompat
+            android:id="@+id/maximum_bolus_rate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_maximum_bolus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Max Bolus" />
+
+        <app.aaps.pump.lenomed.compat.NumberPickerCompat
+            android:id="@+id/maximum_basal_rate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_maximum_basal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Max Basal" />
+
+        <app.aaps.pump.lenomed.compat.NumberPickerCompat
+            android:id="@+id/embecta_bolus_daily_total"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_bolus_daily_total"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Bolus Daily Total" />
+
+        <app.aaps.pump.lenomed.compat.NumberPickerCompat
+            android:id="@+id/embecta_basal_daily_total"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_basal_daily_total"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Basal Daily Total" />
+
+        <app.aaps.pump.lenomed.compat.NumberPickerCompat
+            android:id="@+id/embecta_fixed_exhaust"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_fixed_exhaust"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Fixed Exhaust" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_infusion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Infusion" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/save_bluetooth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Bluetooth" />
+
+    </LinearLayout>
+</ScrollView>

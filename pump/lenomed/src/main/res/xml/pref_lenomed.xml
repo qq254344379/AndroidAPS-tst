@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:validate="http://schemas.android.com/apk/res-auto" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory android:title="@string/lenomed_pump" app:initialExpandedChildrenCount="0">
+        <Preference android:title="@string/selectedpump" android:key="@string/key_lenomed_name" android:summary="">
+            <intent android:action="info.nightscout.androidaps.plugins.PumpLenomed.activities.LenomedBLEScanActivity" />
+        </Preference>
+    </PreferenceCategory>
+</androidx.preference.PreferenceScreen>

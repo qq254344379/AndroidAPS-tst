@@ -1,0 +1,925 @@
+package app.aaps.pump.lenomed.packet;
+
+import android.content.Context;
+import android.content.pm.PackageManager;
+import app.aaps.core.data.model.TE;
+import app.aaps.core.data.pump.defs.PumpDescription;
+import app.aaps.core.data.pump.defs.PumpType;
+import app.aaps.core.data.time.T;
+import app.aaps.core.interfaces.logging.AAPSLogger;
+import app.aaps.core.interfaces.logging.LTag;
+import app.aaps.core.interfaces.plugin.ActivePlugin;
+import app.aaps.core.interfaces.pump.DetailedBolusInfo;
+import app.aaps.core.interfaces.pump.DetailedBolusInfoStorage;
+import app.aaps.core.interfaces.pump.PumpSync;
+import app.aaps.core.interfaces.pump.TemporaryBasalStorage;
+import app.aaps.core.interfaces.pump.defs.PumpDescriptionExtensionKt;
+import app.aaps.core.interfaces.resources.ResourceHelper;
+import app.aaps.core.interfaces.rx.bus.RxBus;
+import app.aaps.core.interfaces.rx.events.EventOverviewBolusProgress;
+import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged;
+import app.aaps.core.interfaces.sharedPreferences.SP;
+import app.aaps.core.keys.StringNonKey;
+import app.aaps.core.keys.interfaces.Preferences;
+import app.aaps.pump.lenomed.compat.BleEncryption;
+import app.aaps.pump.lenomed.LenomedPump;
+import app.aaps.pump.lenomed.R;
+import app.aaps.pump.lenomed.api.ApiResponse;
+import app.aaps.pump.lenomed.api.LenomedApiService;
+import app.aaps.pump.lenomed.api.LenomedLogUploader;
+import app.aaps.pump.lenomed.api.PumpLogDto;
+import app.aaps.pump.lenomed.database.LenomedHistoryRecord;
+import app.aaps.pump.lenomed.database.LenomedHistoryRecordDao;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.UUID;
+import javax.inject.Inject;
+import kotlin.Metadata;
+import kotlin.Unit;
+import kotlin.collections.ArraysKt;
+import kotlin.jvm.functions.Function1;
+import kotlin.jvm.internal.Intrinsics;
+import kotlin.jvm.internal.StringCompanionObject;
+import kotlin.ranges.RangesKt;
+import kotlin.text.StringsKt;
+import org.apache.commons.lang3.StringUtils;
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+
+/* JADX INFO: compiled from: BigLogInquireResponsePacket.kt */
+/* JADX INFO: loaded from: classes4.dex */
+public final class BigLogInquireResponsePacket extends LenomedPacket {
+
+    @Inject
+    public ActivePlugin activePlugin;
+
+    @Inject
+    public Context context;
+
+    @Inject
+    public DetailedBolusInfoStorage detailedBolusInfoStorage;
+    private final String friendlyName;
+
+    @Inject
+    public LenomedHistoryRecordDao lenomedHistoryRecordDao;
+
+    @Inject
+    public LenomedLogUploader lenomedLogUploader;
+
+    @Inject
+    public LenomedPump lenomedPump;
+
+    @Inject
+    public Preferences preferences;
+    private PumpDescription pumpDesc;
+
+    @Inject
+    public PumpSync pumpSync;
+    private int result;
+
+    @Inject
+    public ResourceHelper rh;
+
+    @Inject
+    public RxBus rxBus;
+
+    @Inject
+    public SP sp;
+
+    @Inject
+    public TemporaryBasalStorage temporaryBasalStorage;
+
+    private final int parseBCD(int i) {
+        return (((i >> 4) & 15) * 10) + (i & 15);
+    }
+
+    /* JADX WARN: 'super' call moved to the top of the method (can break code semantics) */
+    public BigLogInquireResponsePacket() {
+        super();
+        this.pumpDesc = PumpDescriptionExtensionKt.fillFor(new PumpDescription(), PumpType.LENOMED);
+        setMsgType(BleEncryption.DANAI_PACKET__ENCRYPTION_START);
+        getAapsLogger().debug(LTag.PUMPCOMM, "BigLogInquireResponsePacket init");
+        this.friendlyName = "BIG_LOG_INQUIRE_RESPONSE";
+    }
+
+    public final RxBus getRxBus() {
+        RxBus rxBus = this.rxBus;
+        if (rxBus != null) {
+            return rxBus;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("rxBus");
+        return null;
+    }
+
+    public final void setRxBus(RxBus rxBus) {
+        Intrinsics.checkNotNullParameter(rxBus, "<set-?>");
+        this.rxBus = rxBus;
+    }
+
+    public final ResourceHelper getRh() {
+        ResourceHelper resourceHelper = this.rh;
+        if (resourceHelper != null) {
+            return resourceHelper;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("rh");
+        return null;
+    }
+
+    public final void setRh(ResourceHelper resourceHelper) {
+        Intrinsics.checkNotNullParameter(resourceHelper, "<set-?>");
+        this.rh = resourceHelper;
+    }
+
+    public final ActivePlugin getActivePlugin() {
+        ActivePlugin activePlugin = this.activePlugin;
+        if (activePlugin != null) {
+            return activePlugin;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("activePlugin");
+        return null;
+    }
+
+    public final void setActivePlugin(ActivePlugin activePlugin) {
+        Intrinsics.checkNotNullParameter(activePlugin, "<set-?>");
+        this.activePlugin = activePlugin;
+    }
+
+    public final LenomedPump getLenomedPump() {
+        LenomedPump lenomedPump = this.lenomedPump;
+        if (lenomedPump != null) {
+            return lenomedPump;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("lenomedPump");
+        return null;
+    }
+
+    public final void setLenomedPump(LenomedPump lenomedPump) {
+        Intrinsics.checkNotNullParameter(lenomedPump, "<set-?>");
+        this.lenomedPump = lenomedPump;
+    }
+
+    public final DetailedBolusInfoStorage getDetailedBolusInfoStorage() {
+        DetailedBolusInfoStorage detailedBolusInfoStorage = this.detailedBolusInfoStorage;
+        if (detailedBolusInfoStorage != null) {
+            return detailedBolusInfoStorage;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("detailedBolusInfoStorage");
+        return null;
+    }
+
+    public final void setDetailedBolusInfoStorage(DetailedBolusInfoStorage detailedBolusInfoStorage) {
+        Intrinsics.checkNotNullParameter(detailedBolusInfoStorage, "<set-?>");
+        this.detailedBolusInfoStorage = detailedBolusInfoStorage;
+    }
+
+    public final TemporaryBasalStorage getTemporaryBasalStorage() {
+        TemporaryBasalStorage temporaryBasalStorage = this.temporaryBasalStorage;
+        if (temporaryBasalStorage != null) {
+            return temporaryBasalStorage;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("temporaryBasalStorage");
+        return null;
+    }
+
+    public final void setTemporaryBasalStorage(TemporaryBasalStorage temporaryBasalStorage) {
+        Intrinsics.checkNotNullParameter(temporaryBasalStorage, "<set-?>");
+        this.temporaryBasalStorage = temporaryBasalStorage;
+    }
+
+    public final PumpSync getPumpSync() {
+        PumpSync pumpSync = this.pumpSync;
+        if (pumpSync != null) {
+            return pumpSync;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("pumpSync");
+        return null;
+    }
+
+    public final void setPumpSync(PumpSync pumpSync) {
+        Intrinsics.checkNotNullParameter(pumpSync, "<set-?>");
+        this.pumpSync = pumpSync;
+    }
+
+    public final SP getSp() {
+        SP sp = this.sp;
+        if (sp != null) {
+            return sp;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("sp");
+        return null;
+    }
+
+    public final void setSp(SP sp) {
+        Intrinsics.checkNotNullParameter(sp, "<set-?>");
+        this.sp = sp;
+    }
+
+    public final Preferences getPreferences() {
+        Preferences preferences = this.preferences;
+        if (preferences != null) {
+            return preferences;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("preferences");
+        return null;
+    }
+
+    public final void setPreferences(Preferences preferences) {
+        Intrinsics.checkNotNullParameter(preferences, "<set-?>");
+        this.preferences = preferences;
+    }
+
+    public final LenomedHistoryRecordDao getLenomedHistoryRecordDao() {
+        LenomedHistoryRecordDao lenomedHistoryRecordDao = this.lenomedHistoryRecordDao;
+        if (lenomedHistoryRecordDao != null) {
+            return lenomedHistoryRecordDao;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("lenomedHistoryRecordDao");
+        return null;
+    }
+
+    public final void setLenomedHistoryRecordDao(LenomedHistoryRecordDao lenomedHistoryRecordDao) {
+        Intrinsics.checkNotNullParameter(lenomedHistoryRecordDao, "<set-?>");
+        this.lenomedHistoryRecordDao = lenomedHistoryRecordDao;
+    }
+
+    public final LenomedLogUploader getLenomedLogUploader() {
+        LenomedLogUploader lenomedLogUploader = this.lenomedLogUploader;
+        if (lenomedLogUploader != null) {
+            return lenomedLogUploader;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("lenomedLogUploader");
+        return null;
+    }
+
+    public final void setLenomedLogUploader(LenomedLogUploader lenomedLogUploader) {
+        Intrinsics.checkNotNullParameter(lenomedLogUploader, "<set-?>");
+        this.lenomedLogUploader = lenomedLogUploader;
+    }
+
+    public final Context getContext() {
+        Context context = this.context;
+        if (context != null) {
+            return context;
+        }
+        Intrinsics.throwUninitializedPropertyAccessException("");
+        return null;
+    }
+
+    public final void setContext(Context context) {
+        Intrinsics.checkNotNullParameter(context, "<set-?>");
+        this.context = context;
+    }
+
+    public final int getResult() {
+        return this.result;
+    }
+
+    public final void setResult(int i) {
+        this.result = i;
+    }
+
+    private final String historyPumpSerial() {
+        String string = getLenomedPump().getSerialNo().trim();
+        String str = getPreferences().get(StringNonKey.ActivePumpType);
+        String string2 = getPreferences().get(StringNonKey.ActivePumpSerialNumber).trim();
+        String str2 = string;
+        if (str2.length() != 0) {
+            string2 = str2;
+        } else if (!Intrinsics.areEqual(str, PumpType.LENOMED.getDescription())) {
+            string2 = null;
+        }
+        String str3 = string2;
+        if (str3 == null) {
+            str3 = "";
+        }
+        if (str3.length() == 0) {
+            getAapsLogger().error(LTag.PUMPCOMM, "Skipping pump history: LENOMED serial is empty");
+            return str3;
+        }
+        if (str2.length() == 0) {
+            getAapsLogger().warn(LTag.PUMPCOMM, "Pump history using stored serial fallback: type=LENOMED serial=" + str3);
+        }
+        return str3;
+    }
+
+    /* JADX WARN: Can't wrap try/catch for region: R(14:153|154|(15:(31:773|156|157|777|158|(1:164)|165|765|174|(1:176)(1:178)|179|761|180|181|787|182|183|793|184|185|186|256|257|588|589|737|590|591|719|592|812)(1:172)|793|184|185|186|256|257|588|589|737|590|591|719|592|812)|173|765|174|(0)(0)|179|761|180|181|787|182|183) */
+    /* JADX WARN: Code restructure failed: missing block: B:189:0x0946, code lost:
+    
+        r0 = e;
+     */
+    /* JADX WARN: Code restructure failed: missing block: B:190:0x0947, code lost:
+    
+        r24 = r22;
+        r39 = r39;
+     */
+    /* JADX WARN: Code restructure failed: missing block: B:191:0x094b, code lost:
+    
+        r0 = e;
+     */
+    /* JADX WARN: Code restructure failed: missing block: B:192:0x094c, code lost:
+    
+        r10 = r18;
+        r24 = r22;
+        r39 = r39;
+     */
+    /* JADX WARN: Code restructure failed: missing block: B:193:0x0952, code lost:
+    
+        r0 = e;
+     */
+    /* JADX WARN: Code restructure failed: missing block: B:194:0x0953, code lost:
+    
+        r39 = r39;
+     */
+    /* JADX WARN: Failed to find 'out' block for switch in B:518:0x1324. Please report as an issue. */
+    /* JADX WARN: Multi-variable type inference failed */
+    /* JADX WARN: Removed duplicated region for block: B:143:0x0685  */
+    /* JADX WARN: Removed duplicated region for block: B:176:0x0807 A[Catch: Exception -> 0x07bb, TRY_ENTER, TRY_LEAVE, TryCatch #59 {Exception -> 0x07bb, blocks: (B:158:0x0724, B:161:0x0731, B:176:0x0807, B:165:0x0745), top: B:777:0x0724 }] */
+    /* JADX WARN: Removed duplicated region for block: B:178:0x080c  */
+    /* JADX WARN: Removed duplicated region for block: B:365:0x0e53  */
+    /* JADX WARN: Removed duplicated region for block: B:380:0x0ecc A[Catch: Exception -> 0x0f70, TryCatch #0 {Exception -> 0x0f70, blocks: (B:373:0x0e86, B:378:0x0eb7, B:380:0x0ecc, B:381:0x0ed2, B:383:0x0ede, B:387:0x0efe, B:382:0x0ed7, B:374:0x0e9e, B:396:0x0f4a), top: B:660:0x0e86 }] */
+    /* JADX WARN: Removed duplicated region for block: B:382:0x0ed7 A[Catch: Exception -> 0x0f70, TryCatch #0 {Exception -> 0x0f70, blocks: (B:373:0x0e86, B:378:0x0eb7, B:380:0x0ecc, B:381:0x0ed2, B:383:0x0ede, B:387:0x0efe, B:382:0x0ed7, B:374:0x0e9e, B:396:0x0f4a), top: B:660:0x0e86 }] */
+    /* JADX WARN: Removed duplicated region for block: B:385:0x0ef9  */
+    /* JADX WARN: Removed duplicated region for block: B:386:0x0efc  */
+    /* JADX WARN: Removed duplicated region for block: B:603:0x16f8 A[Catch: Exception -> 0x186e, TryCatch #6 {Exception -> 0x186e, blocks: (B:626:0x17e6, B:628:0x184d, B:630:0x1853, B:601:0x16b9, B:603:0x16f8, B:605:0x16fe, B:606:0x1701, B:608:0x1705, B:610:0x174e, B:612:0x1754, B:613:0x1757, B:616:0x175e, B:618:0x17a7, B:620:0x17ad, B:621:0x17b0, B:92:0x03d2), top: B:671:0x17e6, inners: #56 }] */
+    /* JADX WARN: Removed duplicated region for block: B:628:0x184d A[Catch: Exception -> 0x186e, TryCatch #6 {Exception -> 0x186e, blocks: (B:626:0x17e6, B:628:0x184d, B:630:0x1853, B:601:0x16b9, B:603:0x16f8, B:605:0x16fe, B:606:0x1701, B:608:0x1705, B:610:0x174e, B:612:0x1754, B:613:0x1757, B:616:0x175e, B:618:0x17a7, B:620:0x17ad, B:621:0x17b0, B:92:0x03d2), top: B:671:0x17e6, inners: #56 }] */
+    /* JADX WARN: Removed duplicated region for block: B:641:0x189c  */
+    /* JADX WARN: Removed duplicated region for block: B:829:? A[RETURN, SYNTHETIC] */
+    /* JADX WARN: Type inference failed for: r12v1, types: [java.lang.String] */
+    /* JADX WARN: Type inference failed for: r12v10 */
+    /* JADX WARN: Type inference failed for: r12v100 */
+    /* JADX WARN: Type inference failed for: r12v101 */
+    /* JADX WARN: Type inference failed for: r12v102 */
+    /* JADX WARN: Type inference failed for: r12v103 */
+    /* JADX WARN: Type inference failed for: r12v104, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v105 */
+    /* JADX WARN: Type inference failed for: r12v106 */
+    /* JADX WARN: Type inference failed for: r12v107 */
+    /* JADX WARN: Type inference failed for: r12v108 */
+    /* JADX WARN: Type inference failed for: r12v109 */
+    /* JADX WARN: Type inference failed for: r12v11 */
+    /* JADX WARN: Type inference failed for: r12v110 */
+    /* JADX WARN: Type inference failed for: r12v111 */
+    /* JADX WARN: Type inference failed for: r12v112 */
+    /* JADX WARN: Type inference failed for: r12v113 */
+    /* JADX WARN: Type inference failed for: r12v114 */
+    /* JADX WARN: Type inference failed for: r12v115 */
+    /* JADX WARN: Type inference failed for: r12v116 */
+    /* JADX WARN: Type inference failed for: r12v117 */
+    /* JADX WARN: Type inference failed for: r12v118 */
+    /* JADX WARN: Type inference failed for: r12v119 */
+    /* JADX WARN: Type inference failed for: r12v12, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v120 */
+    /* JADX WARN: Type inference failed for: r12v121 */
+    /* JADX WARN: Type inference failed for: r12v122 */
+    /* JADX WARN: Type inference failed for: r12v123 */
+    /* JADX WARN: Type inference failed for: r12v124 */
+    /* JADX WARN: Type inference failed for: r12v125 */
+    /* JADX WARN: Type inference failed for: r12v126 */
+    /* JADX WARN: Type inference failed for: r12v127 */
+    /* JADX WARN: Type inference failed for: r12v128 */
+    /* JADX WARN: Type inference failed for: r12v129 */
+    /* JADX WARN: Type inference failed for: r12v13 */
+    /* JADX WARN: Type inference failed for: r12v130 */
+    /* JADX WARN: Type inference failed for: r12v131 */
+    /* JADX WARN: Type inference failed for: r12v132 */
+    /* JADX WARN: Type inference failed for: r12v133 */
+    /* JADX WARN: Type inference failed for: r12v134 */
+    /* JADX WARN: Type inference failed for: r12v135 */
+    /* JADX WARN: Type inference failed for: r12v136 */
+    /* JADX WARN: Type inference failed for: r12v137 */
+    /* JADX WARN: Type inference failed for: r12v14 */
+    /* JADX WARN: Type inference failed for: r12v15 */
+    /* JADX WARN: Type inference failed for: r12v16 */
+    /* JADX WARN: Type inference failed for: r12v17 */
+    /* JADX WARN: Type inference failed for: r12v18 */
+    /* JADX WARN: Type inference failed for: r12v19 */
+    /* JADX WARN: Type inference failed for: r12v2 */
+    /* JADX WARN: Type inference failed for: r12v20 */
+    /* JADX WARN: Type inference failed for: r12v29 */
+    /* JADX WARN: Type inference failed for: r12v3, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v30, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v31 */
+    /* JADX WARN: Type inference failed for: r12v32, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v33 */
+    /* JADX WARN: Type inference failed for: r12v34 */
+    /* JADX WARN: Type inference failed for: r12v35 */
+    /* JADX WARN: Type inference failed for: r12v36 */
+    /* JADX WARN: Type inference failed for: r12v37, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v38, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v39 */
+    /* JADX WARN: Type inference failed for: r12v4 */
+    /* JADX WARN: Type inference failed for: r12v40 */
+    /* JADX WARN: Type inference failed for: r12v41 */
+    /* JADX WARN: Type inference failed for: r12v42 */
+    /* JADX WARN: Type inference failed for: r12v43 */
+    /* JADX WARN: Type inference failed for: r12v45 */
+    /* JADX WARN: Type inference failed for: r12v46 */
+    /* JADX WARN: Type inference failed for: r12v47 */
+    /* JADX WARN: Type inference failed for: r12v48 */
+    /* JADX WARN: Type inference failed for: r12v5, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v54 */
+    /* JADX WARN: Type inference failed for: r12v55 */
+    /* JADX WARN: Type inference failed for: r12v56 */
+    /* JADX WARN: Type inference failed for: r12v57 */
+    /* JADX WARN: Type inference failed for: r12v58 */
+    /* JADX WARN: Type inference failed for: r12v59 */
+    /* JADX WARN: Type inference failed for: r12v6 */
+    /* JADX WARN: Type inference failed for: r12v61 */
+    /* JADX WARN: Type inference failed for: r12v65 */
+    /* JADX WARN: Type inference failed for: r12v66 */
+    /* JADX WARN: Type inference failed for: r12v7 */
+    /* JADX WARN: Type inference failed for: r12v70 */
+    /* JADX WARN: Type inference failed for: r12v72 */
+    /* JADX WARN: Type inference failed for: r12v73 */
+    /* JADX WARN: Type inference failed for: r12v74 */
+    /* JADX WARN: Type inference failed for: r12v75 */
+    /* JADX WARN: Type inference failed for: r12v76 */
+    /* JADX WARN: Type inference failed for: r12v77 */
+    /* JADX WARN: Type inference failed for: r12v78 */
+    /* JADX WARN: Type inference failed for: r12v79 */
+    /* JADX WARN: Type inference failed for: r12v8 */
+    /* JADX WARN: Type inference failed for: r12v80 */
+    /* JADX WARN: Type inference failed for: r12v81 */
+    /* JADX WARN: Type inference failed for: r12v82 */
+    /* JADX WARN: Type inference failed for: r12v86 */
+    /* JADX WARN: Type inference failed for: r12v87 */
+    /* JADX WARN: Type inference failed for: r12v9, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v95 */
+    /* JADX WARN: Type inference failed for: r12v96 */
+    /* JADX WARN: Type inference failed for: r12v97 */
+    /* JADX WARN: Type inference failed for: r12v98, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r12v99, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r1v0, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r1v1, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r1v161 */
+    /* JADX WARN: Type inference failed for: r1v162 */
+    /* JADX WARN: Type inference failed for: r1v164 */
+    /* JADX WARN: Type inference failed for: r1v165 */
+    /* JADX WARN: Type inference failed for: r1v168, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r1v184 */
+    /* JADX WARN: Type inference failed for: r1v190 */
+    /* JADX WARN: Type inference failed for: r39v0 */
+    /* JADX WARN: Type inference failed for: r39v1 */
+    /* JADX WARN: Type inference failed for: r39v10 */
+    /* JADX WARN: Type inference failed for: r39v100 */
+    /* JADX WARN: Type inference failed for: r39v101 */
+    /* JADX WARN: Type inference failed for: r39v102 */
+    /* JADX WARN: Type inference failed for: r39v103 */
+    /* JADX WARN: Type inference failed for: r39v104 */
+    /* JADX WARN: Type inference failed for: r39v105 */
+    /* JADX WARN: Type inference failed for: r39v106 */
+    /* JADX WARN: Type inference failed for: r39v107 */
+    /* JADX WARN: Type inference failed for: r39v108 */
+    /* JADX WARN: Type inference failed for: r39v109 */
+    /* JADX WARN: Type inference failed for: r39v11 */
+    /* JADX WARN: Type inference failed for: r39v110 */
+    /* JADX WARN: Type inference failed for: r39v111 */
+    /* JADX WARN: Type inference failed for: r39v112 */
+    /* JADX WARN: Type inference failed for: r39v113 */
+    /* JADX WARN: Type inference failed for: r39v114 */
+    /* JADX WARN: Type inference failed for: r39v115 */
+    /* JADX WARN: Type inference failed for: r39v116 */
+    /* JADX WARN: Type inference failed for: r39v117 */
+    /* JADX WARN: Type inference failed for: r39v118 */
+    /* JADX WARN: Type inference failed for: r39v119 */
+    /* JADX WARN: Type inference failed for: r39v12 */
+    /* JADX WARN: Type inference failed for: r39v120 */
+    /* JADX WARN: Type inference failed for: r39v121 */
+    /* JADX WARN: Type inference failed for: r39v122 */
+    /* JADX WARN: Type inference failed for: r39v123 */
+    /* JADX WARN: Type inference failed for: r39v124 */
+    /* JADX WARN: Type inference failed for: r39v125 */
+    /* JADX WARN: Type inference failed for: r39v126 */
+    /* JADX WARN: Type inference failed for: r39v127 */
+    /* JADX WARN: Type inference failed for: r39v128 */
+    /* JADX WARN: Type inference failed for: r39v129 */
+    /* JADX WARN: Type inference failed for: r39v13 */
+    /* JADX WARN: Type inference failed for: r39v14 */
+    /* JADX WARN: Type inference failed for: r39v15 */
+    /* JADX WARN: Type inference failed for: r39v16 */
+    /* JADX WARN: Type inference failed for: r39v18 */
+    /* JADX WARN: Type inference failed for: r39v19 */
+    /* JADX WARN: Type inference failed for: r39v2 */
+    /* JADX WARN: Type inference failed for: r39v20 */
+    /* JADX WARN: Type inference failed for: r39v21 */
+    /* JADX WARN: Type inference failed for: r39v22 */
+    /* JADX WARN: Type inference failed for: r39v23 */
+    /* JADX WARN: Type inference failed for: r39v24 */
+    /* JADX WARN: Type inference failed for: r39v25 */
+    /* JADX WARN: Type inference failed for: r39v26 */
+    /* JADX WARN: Type inference failed for: r39v27 */
+    /* JADX WARN: Type inference failed for: r39v28 */
+    /* JADX WARN: Type inference failed for: r39v29 */
+    /* JADX WARN: Type inference failed for: r39v3 */
+    /* JADX WARN: Type inference failed for: r39v30 */
+    /* JADX WARN: Type inference failed for: r39v31 */
+    /* JADX WARN: Type inference failed for: r39v32 */
+    /* JADX WARN: Type inference failed for: r39v33 */
+    /* JADX WARN: Type inference failed for: r39v34 */
+    /* JADX WARN: Type inference failed for: r39v35 */
+    /* JADX WARN: Type inference failed for: r39v36 */
+    /* JADX WARN: Type inference failed for: r39v37 */
+    /* JADX WARN: Type inference failed for: r39v38 */
+    /* JADX WARN: Type inference failed for: r39v39 */
+    /* JADX WARN: Type inference failed for: r39v4 */
+    /* JADX WARN: Type inference failed for: r39v40 */
+    /* JADX WARN: Type inference failed for: r39v41 */
+    /* JADX WARN: Type inference failed for: r39v42 */
+    /* JADX WARN: Type inference failed for: r39v43 */
+    /* JADX WARN: Type inference failed for: r39v44, types: [java.lang.String] */
+    /* JADX WARN: Type inference failed for: r39v45 */
+    /* JADX WARN: Type inference failed for: r39v46 */
+    /* JADX WARN: Type inference failed for: r39v47 */
+    /* JADX WARN: Type inference failed for: r39v48 */
+    /* JADX WARN: Type inference failed for: r39v49 */
+    /* JADX WARN: Type inference failed for: r39v50 */
+    /* JADX WARN: Type inference failed for: r39v51 */
+    /* JADX WARN: Type inference failed for: r39v52 */
+    /* JADX WARN: Type inference failed for: r39v53 */
+    /* JADX WARN: Type inference failed for: r39v54 */
+    /* JADX WARN: Type inference failed for: r39v55 */
+    /* JADX WARN: Type inference failed for: r39v56 */
+    /* JADX WARN: Type inference failed for: r39v57 */
+    /* JADX WARN: Type inference failed for: r39v58 */
+    /* JADX WARN: Type inference failed for: r39v59 */
+    /* JADX WARN: Type inference failed for: r39v6 */
+    /* JADX WARN: Type inference failed for: r39v60 */
+    /* JADX WARN: Type inference failed for: r39v61 */
+    /* JADX WARN: Type inference failed for: r39v62 */
+    /* JADX WARN: Type inference failed for: r39v63 */
+    /* JADX WARN: Type inference failed for: r39v64 */
+    /* JADX WARN: Type inference failed for: r39v65 */
+    /* JADX WARN: Type inference failed for: r39v66 */
+    /* JADX WARN: Type inference failed for: r39v67 */
+    /* JADX WARN: Type inference failed for: r39v68 */
+    /* JADX WARN: Type inference failed for: r39v69 */
+    /* JADX WARN: Type inference failed for: r39v7 */
+    /* JADX WARN: Type inference failed for: r39v70 */
+    /* JADX WARN: Type inference failed for: r39v71 */
+    /* JADX WARN: Type inference failed for: r39v72 */
+    /* JADX WARN: Type inference failed for: r39v73 */
+    /* JADX WARN: Type inference failed for: r39v74 */
+    /* JADX WARN: Type inference failed for: r39v75 */
+    /* JADX WARN: Type inference failed for: r39v76 */
+    /* JADX WARN: Type inference failed for: r39v77 */
+    /* JADX WARN: Type inference failed for: r39v78 */
+    /* JADX WARN: Type inference failed for: r39v79 */
+    /* JADX WARN: Type inference failed for: r39v8 */
+    /* JADX WARN: Type inference failed for: r39v80 */
+    /* JADX WARN: Type inference failed for: r39v81 */
+    /* JADX WARN: Type inference failed for: r39v82 */
+    /* JADX WARN: Type inference failed for: r39v83 */
+    /* JADX WARN: Type inference failed for: r39v84 */
+    /* JADX WARN: Type inference failed for: r39v85 */
+    /* JADX WARN: Type inference failed for: r39v86 */
+    /* JADX WARN: Type inference failed for: r39v87 */
+    /* JADX WARN: Type inference failed for: r39v88 */
+    /* JADX WARN: Type inference failed for: r39v89 */
+    /* JADX WARN: Type inference failed for: r39v9 */
+    /* JADX WARN: Type inference failed for: r39v90 */
+    /* JADX WARN: Type inference failed for: r39v91 */
+    /* JADX WARN: Type inference failed for: r39v92 */
+    /* JADX WARN: Type inference failed for: r39v93 */
+    /* JADX WARN: Type inference failed for: r39v94 */
+    /* JADX WARN: Type inference failed for: r39v95 */
+    /* JADX WARN: Type inference failed for: r39v96 */
+    /* JADX WARN: Type inference failed for: r39v97 */
+    /* JADX WARN: Type inference failed for: r39v98 */
+    /* JADX WARN: Type inference failed for: r39v99 */
+    /* JADX WARN: Type inference failed for: r4v20 */
+    /* JADX WARN: Type inference failed for: r4v21 */
+    /* JADX WARN: Type inference failed for: r4v22 */
+    /* JADX WARN: Type inference failed for: r4v23 */
+    /* JADX WARN: Type inference failed for: r4v24 */
+    /* JADX WARN: Type inference failed for: r4v25, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    /* JADX WARN: Type inference failed for: r6v32 */
+    /* JADX WARN: Type inference failed for: r72v0, types: [app.aaps.pump.lenomed.packet.BigLogInquireResponsePacket] */
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    @Override // app.aaps.pump.lenomed.packet.LenomedPacket
+    /*
+        Code decompiled incorrectly, please refer to instructions dump.
+    */
+    public void handleMessage(byte[] data) {
+        // NOTE: This method body was lost during APK decompilation.
+        // JADX reported "Code decompiled incorrectly" and emitted unrecoverable
+        // register assignments ("?? rN;") for the local-variable mappings. The
+        // original packet-parsing logic must be reconstructed from the source APK's
+        // smali (BigLogInquireResponsePacket.smali) before this driver can actually
+        // parse pump history records. Stubbed only so the module compiles.
+        if (data == null) {
+            return;
+        }
+        getAapsLogger().debug(LTag.PUMPCOMM, "BigLogInquireResponsePacket.handleMessage: parsing not yet reconstructed from smali");
+    }
+
+    /* JADX INFO: Access modifiers changed from: private */
+    public static final CharSequence handleMessage$lambda$0(byte b) {
+        StringCompanionObject stringCompanionObject = StringCompanionObject.INSTANCE;
+        String str = String.format("%02X", Arrays.copyOf(new Object[]{Byte.valueOf(b)}, 1));
+        Intrinsics.checkNotNullExpressionValue(str, "format(...)");
+        return str;
+    }
+
+    /* JADX INFO: Access modifiers changed from: private */
+    public static final CharSequence handleMessage$lambda$1(byte b) {
+        StringCompanionObject stringCompanionObject = StringCompanionObject.INSTANCE;
+        String str = String.format("%02X", Arrays.copyOf(new Object[]{Byte.valueOf(b)}, 1));
+        Intrinsics.checkNotNullExpressionValue(str, "format(...)");
+        return str;
+    }
+
+    /* JADX INFO: Access modifiers changed from: private */
+    public static final CharSequence handleMessage$lambda$6(double d) {
+        return String.valueOf(d);
+    }
+
+    @Override // app.aaps.pump.lenomed.packet.LenomedPacket
+    public String getFriendlyName() {
+        return this.friendlyName;
+    }
+
+    private final String getReasonName(byte logKind, byte reason) {
+        if (logKind == 11 || logKind == 14 || logKind == 17 || logKind == 19) {
+            return failLog(reason);
+        }
+        if (logKind == 1) {
+            return resetLog(reason);
+        }
+        if (logKind == 41) {
+            return blockLog(reason);
+        }
+        return "";
+    }
+
+    private final String failLog(byte reason) {
+        if (reason == 0) {
+            return getRh().gs(R.string.lenomed_reasoncomplete);
+        }
+        if (reason == 1) {
+            return getRh().gs(R.string.lenomed_reasoninjectonblock);
+        }
+        if (reason == 2) {
+            return getRh().gs(R.string.lenomed_reasonbatteryshortage);
+        }
+        if (reason == 3) {
+            return getRh().gs(R.string.lenomed_reasoninsulinshortage);
+        }
+        if (reason == 4) {
+            return getRh().gs(R.string.lenomed_reasonuserstop);
+        }
+        if (reason == 5) {
+            return getRh().gs(R.string.lenomed_reasonsystemreset);
+        }
+        if (reason == 6) {
+            return getRh().gs(R.string.lenomed_reasonother);
+        }
+        if (reason == 7) {
+            return getRh().gs(R.string.lenomed_reasonemergencystop);
+        }
+        return "No Reason";
+    }
+
+    private final String resetLog(byte reason) {
+        if (reason == 1) {
+            return getRh().gs(R.string.lenomed_resetfactoryreset);
+        }
+        if (reason == 2) {
+            return getRh().gs(R.string.lenomed_resetemergencyoff);
+        }
+        if (reason == 3) {
+            return getRh().gs(R.string.lenomed_resetbatteryreplacement);
+        }
+        if (reason == 4) {
+            return getRh().gs(R.string.lenomed_resetaftercalibration);
+        }
+        if (reason == 5) {
+            return getRh().gs(R.string.lenomed_resetpreshipment);
+        }
+        if (reason == 9) {
+            return getRh().gs(R.string.lenomed_resetunexpected);
+        }
+        return "";
+    }
+
+    private final String blockLog(byte reason) {
+        switch (reason) {
+            case 1:
+                return getRh().gs(R.string.lenomed_blockbasal);
+            case 2:
+                return getRh().gs(R.string.lenomed_blockmealbolus);
+            case 3:
+                return getRh().gs(R.string.lenomed_blocknormalbolus);
+            case 4:
+                return getRh().gs(R.string.lenomed_blocksquarebolus);
+            case 5:
+                return getRh().gs(R.string.lenomed_blockdualbolus);
+            case 6:
+                return getRh().gs(R.string.lenomed_blockreplacetube);
+            case 7:
+                return getRh().gs(R.string.lenomed_blockreplaceneedle);
+            case 8:
+                return getRh().gs(R.string.lenomed_blockreplacesyringe);
+            default:
+                return "";
+        }
+    }
+}
